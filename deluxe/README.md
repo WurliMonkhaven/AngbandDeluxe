@@ -49,7 +49,9 @@ normal controls. Enter acknowledges its `-more-` messages. The engine's Help
 command documents gameplay controls.
 
 The side panels provide searchable items, inspection, selected-item actions,
-creatures, a minimap and a searchable command list. Messages can be searched.
+creatures, a minimap and a searchable command list. The magnifying glass beside
+Messages opens an inline search box. Inspection uses ticks and crosses for
+boolean properties, and action buttons are filtered by item type and location.
 Confirmation, quantity, text and ordinary item-choice prompts use native
 widgets. Save controls are at the top left; Settings at the top right opens a
 popup with UI scale choices from 75% to 150%. UI scale resizes text, controls and

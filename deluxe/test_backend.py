@@ -180,6 +180,10 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(initial["player"]["food"], food_status["duration"])
         self.assertGreater(len(initial["items"]), 0)
         self.assertIn("actual", initial["items"][0])
+        potion = next(i for i in initial["items"] if "Potion" in i["label"])
+        self.assertNotIn("core.wield", potion["actions"])
+        self.assertIn("core.use", potion["actions"])
+        self.assertIn("core.drop", potion["actions"])
         for _ in range(10):
             self.assertEqual(e.call("state.get")["result"], initial)
         stale = e.call("command.execute", {"revision": "0", "command": "core.hold"})

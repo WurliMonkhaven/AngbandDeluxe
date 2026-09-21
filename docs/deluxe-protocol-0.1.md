@@ -54,6 +54,9 @@ Item and monster IDs are **snapshot-scoped** and expire on the next revision.
 Inspecting a stale ID fails. Select current records before issuing an action.
 Item actions still apply the engine's item tester, accessibility constraints and
 inscription confirmations: exposing an item does not make it usable at a distance.
+Each item supplies an `actions` array of command IDs for the inspection buttons,
+filtered by item type and location using engine helpers. This is not a guarantee
+that an action will succeed; current conditions and confirmations still apply.
 
 `prompt.requested` carries `prompt_id`, `type`, `text`, `maximum`, `initial`
 and, for choices, `choices: [{id, label}]`. Types are confirmation (boolean),

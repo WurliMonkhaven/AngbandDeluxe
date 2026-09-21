@@ -163,6 +163,18 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
   item_handles[index] = (struct object *)o; item_handle_count = index + 1;
  }
  string(j, "id", id); string(j, "location", location);
+ {
+  cJSON *actions = cJSON_CreateArray();
+  bool carried = object_is_carried(player, o);
+  bool equipped = object_is_equipped(player->body, o);
+  if (item_is_available((struct object *)o)) {
+   if (!equipped && obj_can_wear(o)) cJSON_AddItemToArray(actions, cJSON_CreateString("core.wield"));
+   if (obj_is_useable(o) && (!obj_is_activatable(o) || equipped)) cJSON_AddItemToArray(actions, cJSON_CreateString("core.use"));
+   if (carried && (!equipped || obj_can_takeoff(o))) cJSON_AddItemToArray(actions, cJSON_CreateString("core.drop"));
+   cJSON_AddItemToArray(actions, cJSON_CreateString("core.inscribe"));
+  }
+  cJSON_AddItemToObject(j, "actions", actions);
+ }
  describe(o, false, name, sizeof(name)); string(j, "label", name);
  describe(o, true, name, sizeof(name)); string(a, "label", name);
  string(a, "kind", o->kind->name); json_bool(a, "cursed", cursed(o));

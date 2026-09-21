@@ -155,6 +155,23 @@ static void properties(const json &value) {
  if (!value.is_object()) return;
  for (auto it=value.begin(); it!=value.end(); ++it) {
   if (it.value().is_primitive()) {
+   if(it.value().is_boolean()) {
+    const bool checked=it.value().get<bool>();
+    ImGui::Text("%s:",display_label(it.key()).c_str()); ImGui::SameLine();
+    const auto p=ImGui::GetCursorScreenPos(); const float s=ImGui::GetFontSize();
+    const auto ink=ImGui::GetColorU32(ImGuiCol_Text); auto draw=ImGui::GetWindowDrawList();
+    const float stroke=std::max(1.f,s*.09f);
+    if(checked) {
+     draw->AddLine(ImVec2(p.x+s*.15f,p.y+s*.52f),ImVec2(p.x+s*.4f,p.y+s*.77f),ink,stroke);
+     draw->AddLine(ImVec2(p.x+s*.4f,p.y+s*.77f),ImVec2(p.x+s*.88f,p.y+s*.23f),ink,stroke);
+    } else {
+     draw->AddLine(ImVec2(p.x+s*.23f,p.y+s*.23f),ImVec2(p.x+s*.77f,p.y+s*.77f),ink,stroke);
+     draw->AddLine(ImVec2(p.x+s*.23f,p.y+s*.77f),ImVec2(p.x+s*.77f,p.y+s*.23f),ink,stroke);
+    }
+    ImGui::Dummy(ImVec2(s,s));
+    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",checked?"Yes":"No");
+    continue;
+   }
    const std::string v = it.value().is_boolean() ? (it.value().get<bool>()?"Yes":"No") :
     (it.value().is_string() ? it.value().get<std::string>() : it.value().dump());
    ImGui::TextWrapped("%s: %s",display_label(it.key()).c_str(),v.c_str());
@@ -168,6 +185,7 @@ struct UI {
  bool quit_dialog = false;
  bool grid_focus = false, focus_requested = false, window_active = true;
  bool return_from_prompt = false;
+ bool message_search_open = false;
  float display_scale = 1.f;
  ImGuiStyle base_style;
  char item_filter[128]{}, message_filter[128]{}, command_filter[128]{}, save_name[65] = "Adventurer";
@@ -317,10 +335,13 @@ struct UI {
    ImGui::SeparatorText("Inspection");
    properties(o["player_known"]);
    ImGui::BeginDisabled(!c.ready());
-   if(ImGui::Button("Wield")) execute("core.wield",selected); ImGui::SameLine();
-   if(ImGui::Button("Use")) execute("core.use",selected); ImGui::SameLine();
-   if(ImGui::Button("Drop")) execute("core.drop",selected); ImGui::SameLine();
-   if(ImGui::Button("Inscribe")) execute("core.inscribe",selected);
+   bool first=true;
+   for(const auto &action:o.value("actions",json::array())) {
+    const std::string id=action.get<std::string>();
+    const char *label=id=="core.wield"?"Wield":id=="core.use"?"Use":id=="core.drop"?"Drop":"Inscribe";
+    if(!first) ImGui::SameLine(); first=false;
+    if(ImGui::Button(label)) execute(id,selected);
+   }
    ImGui::EndDisabled();
   }
  }
@@ -434,8 +455,24 @@ struct UI {
      ImGui::GetColorU32(highlighted?ImGuiCol_SeparatorHovered:ImGuiCol_Separator),display_scale);
    }
    ImGui::BeginChild("Message history");
-   ImGui::SeparatorText("Messages");
-   ImGui::InputTextWithHint("##messages","Search messages",message_filter,sizeof(message_filter));
+   ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Messages"); ImGui::SameLine();
+   const float icon=ImGui::GetFrameHeight();
+   const auto icon_pos=ImGui::GetCursorScreenPos();
+   bool focus_search=false;
+   if(ImGui::InvisibleButton("Search messages",ImVec2(icon,icon),ImGuiButtonFlags_EnableNav)) {
+    message_search_open=!message_search_open; focus_search=message_search_open;
+    if(!message_search_open) message_filter[0]=0;
+   }
+   auto draw=ImGui::GetWindowDrawList();
+   const ImU32 ink=ImGui::GetColorU32(ImGui::IsItemHovered()?ImGuiCol_ButtonHovered:ImGuiCol_Text);
+   draw->AddCircle(ImVec2(icon_pos.x+icon*.42f,icon_pos.y+icon*.42f),icon*.22f,ink,0,std::max(1.f,icon*.06f));
+   draw->AddLine(ImVec2(icon_pos.x+icon*.58f,icon_pos.y+icon*.58f),ImVec2(icon_pos.x+icon*.8f,icon_pos.y+icon*.8f),ink,std::max(1.f,icon*.06f));
+   if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",message_search_open?"Close search":"Search messages");
+   if(message_search_open) {
+    ImGui::SameLine(); ImGui::SetNextItemWidth(std::max(1.f,ImGui::GetContentRegionAvail().x));
+    if(focus_search) ImGui::SetKeyboardFocusHere();
+    ImGui::InputTextWithHint("##messages","Search messages",message_filter,sizeof(message_filter));
+   }
    for(const auto &m:c.state.value("messages",json::array())) {
     auto text=m.value("text",""); if(matches(text,message_filter)) ImGui::TextWrapped("%s%s",text.c_str(),m.value("count",1)>1?(" (x"+std::to_string(m.value("count",1))+")").c_str():"");
    }
