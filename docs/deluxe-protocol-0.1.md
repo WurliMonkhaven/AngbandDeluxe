@@ -57,6 +57,12 @@ inscription confirmations: exposing an item does not make it usable at a distanc
 Each item supplies an `actions` array of command IDs for the inspection buttons,
 filtered by item type and location using engine helpers. This is not a guarantee
 that an action will succeed; current conditions and confirmations still apply.
+The `description` string contains the full player-facing inspection prose,
+including origin, effects and equipment calculations. It is generated with the
+engine's inspection formatter and preserves paragraph breaks. Incidental dice
+rolls inside that formatter are isolated by restoring RNG state before returning.
+Unknown items retain the engine's unknown-item description; actual properties
+remain available independently.
 
 `prompt.requested` carries `prompt_id`, `type`, `text`, `maximum`, `initial`
 and, for choices, `choices: [{id, label}]`. Types are confirmation (boolean),

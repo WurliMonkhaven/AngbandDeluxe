@@ -12,10 +12,12 @@
 #include "mon-util.h"
 #include "obj-desc.h"
 #include "obj-gear.h"
+#include "obj-info.h"
 #include "obj-knowledge.h"
 #include "obj-pile.h"
 #include "option.h"
 #include "obj-util.h"
+#include "obj-tval.h"
 #include "player.h"
 #include "player-timed.h"
 #include "ui-command.h"
@@ -139,6 +141,12 @@ static bool cursed(const struct object *o)
 /* object_desc marks kinds/egos as seen. Use local metadata copies for queries. */
 static void describe(const struct object *obj, bool actual, char *buf, size_t n)
 {
+ /* The engine's money-name path requires a player for its ignore check,
+  * even in spoiler mode. Omniscient labels have no ignore annotation. */
+ if (actual && tval_is_money(obj)) {
+  strnfmt(buf, n, "%d gold pieces worth of %s", obj->pval, obj->kind->name);
+  return;
+ }
  struct object copy = *obj, known;
  struct object_kind kind = *obj->kind;
  struct ego_item ego;
@@ -153,6 +161,52 @@ static void describe(const struct object *obj, bool actual, char *buf, size_t n)
  } else { my_strcpy(buf, "Unobserved item", n); return; }
  object_desc(buf, n, &copy, ODESC_PREFIX | ODESC_FULL |
   (actual ? ODESC_SPOIL : 0), actual ? NULL : player);
+}
+/* Use the same prose as classic inspection. Its hypothetical equipment/state
+ * swaps are restored synchronously, and calc_bonuses uses update=false. */
+static void inspection_description(cJSON *record, const struct object *obj)
+{
+ textblock *tb;
+ const wchar_t *wide;
+ size_t length, i, used = 0;
+ char *text;
+ uint32_t rng_state[RAND_DEG], rng_index = state_i, rng_value = Rand_value;
+ bool rng_quick = Rand_quick;
+#ifndef NDEBUG
+ struct player_state before = player->state;
+ struct object **slots = mem_alloc(player->body.count * sizeof(*slots));
+ for (i = 0; i < (size_t)player->body.count; ++i) slots[i] = player->body.slots[i].obj;
+#endif
+ if (!obj->known) {
+  string(record, "description", "You do not know what this is.");
+#ifndef NDEBUG
+  mem_free(slots);
+#endif
+  return;
+ }
+ /* effect_describe rolls dice to obtain their components. Those incidental
+  * rolls must not consume gameplay entropy when building a read-only view. */
+ memcpy(rng_state, STATE, sizeof(rng_state));
+ tb = object_info(obj, OINFO_NONE);
+ memcpy(STATE, rng_state, sizeof(rng_state));
+ state_i = rng_index; Rand_value = rng_value; Rand_quick = rng_quick;
+ wide = textblock_text(tb); length = wcslen(wide);
+ text = mem_alloc(length * 4 + 1);
+ for (i = 0; i < length; ++i) {
+  uint32_t code = (uint32_t)wide[i];
+  if (code >= 0xd800 && code <= 0xdbff && i + 1 < length &&
+      wide[i + 1] >= 0xdc00 && wide[i + 1] <= 0xdfff) {
+   code = 0x10000 + ((code - 0xd800) << 10) + wide[++i] - 0xdc00;
+  }
+  used += utf32_to_utf8(text + used, length * 4 + 1 - used, &code, 1, NULL);
+ }
+ text[used] = 0; string(record, "description", text);
+ mem_free(text); textblock_free(tb);
+#ifndef NDEBUG
+ assert(memcmp(&before, &player->state, sizeof(before)) == 0);
+ for (i = 0; i < (size_t)player->body.count; ++i) assert(slots[i] == player->body.slots[i].obj);
+ mem_free(slots);
+#endif
 }
 static cJSON *item_record(const struct object *o, const char *location, int index)
 {
@@ -192,6 +246,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  number(j, "quantity", o->number); number(j, "x", o->grid.x); number(j, "y", o->grid.y);
  number(j, "glyph", o->kind->d_char); number(j, "color", o->kind->d_attr);
  string(j, "inscription", quark_str(o->note));
+ inspection_description(j, o);
  if (object_is_carried(player, o)) {
   char label[2] = { gear_to_label(player, (struct object *)o), 0 };
   string(j, "selection_key", label);

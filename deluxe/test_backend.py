@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from collections import deque
 
 ARGS = None
 
@@ -184,6 +185,10 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn("core.wield", potion["actions"])
         self.assertIn("core.use", potion["actions"])
         self.assertIn("core.drop", potion["actions"])
+        self.assertIn("An inheritance from your family", potion["description"])
+        self.assertIn("When quaffed", potion["description"])
+        weapon = next(i for i in initial["items"] if i["location"] == "weapon")
+        self.assertIn("Combat info", weapon["description"])
         for _ in range(10):
             self.assertEqual(e.call("state.get")["result"], initial)
         stale = e.call("command.execute", {"revision": "0", "command": "core.hold"})
@@ -214,6 +219,57 @@ class BackendTests(unittest.TestCase):
             e.key("enter")
         self.assertEqual(e.state["player"]["name"], final["name"])
         self.assertEqual(e.state["player"]["hp"], final["hp"])
+
+    def test_stairs_and_dungeon_inspection(self):
+        e = self.engine
+        e.hello()
+        e.birth()
+        catalog = e.call("catalog.get")["result"]["features"]
+        floors = {f["id"] for f in catalog if f["name"] in
+                  ("open floor", "open door", "broken door", "up staircase", "down staircase")}
+        stairs = next(f["id"] for f in catalog if f["name"] == "down staircase")
+        # Navigate an ordinary new character through town using real movement.
+        for _ in range(150):
+            s = e.call("state.get")["result"]
+            terrain = s["map"]["actual"]
+            start = (s["player"]["x"], s["player"]["y"])
+            if terrain[start[1]][start[0]] == stairs:
+                break
+            frontier = deque([(start, [])])
+            seen = {start}
+            path = None
+            while frontier:
+                (x, y), keys = frontier.popleft()
+                if terrain[y][x] == stairs:
+                    path = keys
+                    break
+                for dx, dy, key in [(1,0,"6"),(-1,0,"4"),(0,1,"2"),(0,-1,"8"),
+                                    (1,1,"3"),(-1,1,"1"),(1,-1,"9"),(-1,-1,"7")]:
+                    pos = (x + dx, y + dy)
+                    if (pos not in seen and 0 <= pos[1] < len(terrain)
+                            and 0 <= pos[0] < len(terrain[0]) and terrain[pos[1]][pos[0]] in floors):
+                        seen.add(pos)
+                        frontier.append((pos, keys + [key]))
+            self.assertTrue(path, "No path to town stairs")
+            e.key(ord(path[0]))
+            while e.state["readiness"] != "ready":
+                e.key("enter")
+        else:
+            self.fail("Did not reach town stairs")
+        e.key(ord(">"))
+        while e.state["readiness"] != "ready":
+            e.key("enter")
+        dungeon = e.call("state.get")["result"]
+        self.assertEqual(dungeon["player"]["depth"], 1)
+        self.assertTrue(any(i["location"] == "Floor" for i in dungeon["items"]))
+        for item in dungeon["items"]:
+            self.assertEqual(e.call("inspect.get", {"handle": item["id"]})["result"], item)
+        self.assertEqual(e.call("state.get")["result"], dungeon)
+        # The return stairs also exercise the '<' codepoint and another level change.
+        e.key(ord("<"))
+        while e.state["readiness"] != "ready":
+            e.key("enter")
+        self.assertEqual(e.state["player"]["depth"], 0)
 
     def test_item_prompt_cancel_and_inscription(self):
         e = self.engine

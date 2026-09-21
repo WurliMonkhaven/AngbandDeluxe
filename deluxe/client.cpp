@@ -46,12 +46,43 @@ static ImU32 color(int index) {
 }
 struct Connection {
  SDL_Process *process = nullptr;
- std::string received, outgoing, diagnostic, error;
+ std::string received, outgoing, diagnostic, menu_error;
+ std::deque<json> messages;
+ json previous_messages = json::array();
  std::map<std::string,std::string> requests;
  unsigned long next = 0;
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
+ bool return_to_menu = false, restart_ready = false, close_confirmed = false;
  json state = json::object(), prompt = json::object(), pending_prompt = json::object(), commands = json::array(), saves = json::array(), catalog = json::object();
  ~Connection() { if (process) SDL_DestroyProcess(process); }
+ void notice(const std::string &text) {
+  messages.push_front({{"text","[SYSTEM] " + text},{"count",1},{"system",true}});
+  if(messages.size()>400) messages.pop_back();
+ }
+ void update_messages(const json &latest) {
+  size_t added=latest.size();
+  for(size_t i=0;i<latest.size();++i) {
+   size_t overlap=std::min(latest.size()-i,previous_messages.size());
+   if(!overlap) break;
+   bool same=true;
+   for(size_t j=0;j<overlap;++j)
+    if(latest[i+j].value("text","")!=previous_messages[j].value("text","") ||
+       latest[i+j].value("category",0)!=previous_messages[j].value("category",0)) { same=false; break; }
+   if(same) { added=i; break; }
+  }
+  // Angband coalesces consecutive repeats into the newest message.
+  if(added<latest.size()) for(auto &m:messages) if(!m.value("system",false)) {
+   m["count"]=latest[added].value("count",1); break;
+  }
+  for(size_t i=added;i>0;--i) messages.push_front(latest[i-1]);
+  while(messages.size()>400) messages.pop_back();
+  previous_messages=latest;
+ }
+ void save(bool leave=false, bool menu=false) {
+  if(!ready()) return;
+  close_requested=leave; return_to_menu=menu;
+  send(leave?"session.close":"session.save"); busy=true;
+ }
  std::string send(const std::string &method, json params = json::object()) {
   if (!connected) return "";
   auto id = "r" + std::to_string(++next);
@@ -69,7 +100,7 @@ struct Connection {
   SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_APP);
   SDL_SetBooleanProperty(properties, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
   process = SDL_CreateProcessWithProperties(properties); SDL_DestroyProperties(properties);
-  if (!process) { error = SDL_GetError(); return false; }
+  if (!process) { menu_error=SDL_GetError(); notice(menu_error); return false; }
   connected = true;
   send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",1048576}});
   return true;
@@ -77,7 +108,7 @@ struct Connection {
  void receive(const json &j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
-   if (name == "state.changed") { state = j.at("data"); busy = false; }
+   if (name == "state.changed") { state = j.at("data"); update_messages(state.value("messages",json::array())); busy = false; }
    if (name == "prompt.requested") { prompt = j.at("data"); busy = false; }
    return;
   }
@@ -85,7 +116,9 @@ struct Connection {
   if (it == requests.end()) return;
   auto method = it->second; requests.erase(it);
   if (j.contains("error")) {
-   error = j["error"].value("message","Request failed"); busy = false;
+   const auto error=j["error"].value("message","Request failed"); notice(error); busy = false;
+   if(!state.contains("terminal")) menu_error=error;
+   if(method=="session.close") { close_requested=false; return_to_menu=false; }
    if(method == "prompt.reply") { prompt = pending_prompt; pending_prompt = json::object(); }
    return;
   }
@@ -95,9 +128,9 @@ struct Connection {
   } else if (method == "saves.list") saves = result;
   else if (method == "commands.list") commands = result;
   else if (method == "catalog.get") catalog = result;
-  else if (method == "session.new" || method == "session.load") send("catalog.get");
-  else if (method == "session.save") { busy = false; error = "Game saved."; }
-  else if (method == "session.close") { closed = true; busy = false; }
+  else if (method == "session.new" || method == "session.load") { menu_error.clear(); send("catalog.get"); }
+  else if (method == "session.save") { busy = false; notice("Game saved."); }
+  else if (method == "session.close") { close_confirmed=true; closed = !return_to_menu; busy = false; }
   else if (method == "prompt.reply") pending_prompt = json::object();
  }
  void poll() {
@@ -113,12 +146,12 @@ struct Connection {
    read += n; received.append(buffer,n);
    size_t end;
    while ((end = received.find('\n')) != std::string::npos) {
-    if (end > 1048576) { error = "Backend frame too large"; connected = false; return; }
+    if (end > 1048576) { notice("Backend frame too large"); connected = false; return; }
     try { receive(json::parse(received.substr(0,end))); }
-    catch (const std::exception &e) { error = std::string("Invalid backend message: ") + e.what(); connected = false; return; }
+    catch (const std::exception &e) { notice(std::string("Invalid backend message: ") + e.what()); connected = false; return; }
     received.erase(0,end+1);
    }
-   if (received.size() > 1048576) { error = "Backend frame too large"; connected = false; return; }
+   if (received.size() > 1048576) { notice("Backend frame too large"); connected = false; return; }
   }
   if (!outgoing.empty()) {
    n = SDL_WriteIO(SDL_GetProcessInput(process),outgoing.data(),outgoing.size());
@@ -127,7 +160,8 @@ struct Connection {
   int exit_code;
   if (SDL_WaitProcess(process,false,&exit_code)) {
    connected = false; busy = false;
-   if (!closed) error = "Backend stopped (" + std::to_string(exit_code) + "). " + diagnostic;
+   if(close_confirmed && return_to_menu && exit_code==0) restart_ready=true;
+   else if (!closed) { notice("Backend stopped (" + std::to_string(exit_code) + "). " + diagnostic); if(!state.contains("terminal")) menu_error="Backend stopped. Restart Deluxe to try again."; }
   }
  }
  bool ready() const { return connected && !busy && prompt.empty() && state.value("readiness","") == "ready"; }
@@ -196,7 +230,7 @@ struct UI {
   try { std::ifstream in(settings_path); if (!in) return; json j; in >> j;
    scale=std::clamp(j.value("scale",1.f),0.75f,1.5f);
    game_fraction=std::clamp(j.value("game_fraction",.72f),.2f,.9f);
-  } catch (...) { c.error = "Settings could not be read; using defaults."; }
+  } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
  void save_settings() {
   std::ofstream out(settings_path); out << json{{"scale",scale},{"game_fraction",game_fraction}}.dump(2);
@@ -204,7 +238,7 @@ struct UI {
  void focus_game() { focus_requested=true; keys.clear(); }
  void execute(const std::string &id,const std::string &item="") { c.command(id,item); focus_game(); }
  bool owns_keyboard() const {
-  return grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
+  return c.state.contains("terminal") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
    && !quit_dialog && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId);
  }
  void prepare_frame(SDL_Window *window) {
@@ -222,16 +256,32 @@ struct UI {
  }
  void launcher() {
   ImGui::TextUnformatted("ANGBAND DELUXE");
-  ImGui::TextWrapped("Create a character or continue an existing game. Character creation uses Angband's original controls.");
-  ImGui::InputText("New save name",save_name,sizeof(save_name));
   ImGui::BeginDisabled(!c.negotiated || c.busy);
-  if (ImGui::Button("New character")) { c.send("session.new",{{"save",save_name}}); c.busy=true; focus_game(); }
+  if (ImGui::Button("New character")) { c.menu_error.clear(); ImGui::OpenPopup("New character"); }
   ImGui::SeparatorText("Saved characters");
   for (const auto &s:c.saves) {
    std::string id=s.value("id","");
-   if (ImGui::Selectable((id+" — "+s.value("description","")).c_str())) { c.send("session.load",{{"save",id}}); c.busy=true; focus_game(); }
+   if (ImGui::Selectable((id+" — "+s.value("description","")).c_str())) { c.menu_error.clear(); c.send("session.load",{{"save",id}}); c.busy=true; focus_game(); }
   }
   ImGui::EndDisabled();
+  if(!c.menu_error.empty()) ImGui::TextWrapped("[SYSTEM] %s",c.menu_error.c_str());
+  if(ImGui::BeginPopupModal("New character",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+   ImGui::TextUnformatted("Save name");
+   if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+   const bool entered=ImGui::InputText("##save-name",save_name,sizeof(save_name),ImGuiInputTextFlags_EnterReturnsTrue);
+   const std::string name=save_name;
+   const bool valid=!name.empty() && name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")==std::string::npos;
+   bool exists=false; for(const auto &s:c.saves) if(s.value("id","")==name) exists=true;
+   if(!valid) ImGui::TextUnformatted("Use letters, numbers, hyphens or underscores.");
+   else if(exists) ImGui::TextUnformatted("That save name is already in use.");
+   ImGui::BeginDisabled(!valid||exists||!c.negotiated||c.busy);
+   if(ImGui::Button("Create") || (entered&&valid&&!exists&&c.negotiated&&!c.busy)) {
+    c.menu_error.clear(); c.send("session.new",{{"save",name}}); c.busy=true; focus_game(); ImGui::CloseCurrentPopup();
+   }
+   ImGui::EndDisabled(); ImGui::SameLine();
+   if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+   ImGui::EndPopup();
+  }
  }
  void grid(float height) {
   if (!c.state.contains("terminal")) { launcher(); return; }
@@ -325,7 +375,12 @@ struct UI {
     auto id=o.value("id",""); ImGui::PushID(id.c_str());
     ImGui::TableNextRow(); ImGui::TableNextColumn();
     if(ImGui::Selectable(label.c_str(),selected==id,ImGuiSelectableFlags_SpanAllColumns)) selected=id;
-    if(ImGui::IsItemHovered()) { ImGui::BeginTooltip(); ImGui::TextUnformatted(label.c_str()); ImGui::Text("Inscription: %s",o.value("inscription","").c_str()); ImGui::EndTooltip(); }
+    if(ImGui::IsItemHovered()) {
+     ImGui::BeginTooltip(); ImGui::TextUnformatted(label.c_str());
+     const auto inscription=o.value("inscription","");
+     if(!inscription.empty()) ImGui::Text("Inscription: %s",inscription.c_str());
+     ImGui::EndTooltip();
+    }
     ImGui::TableNextColumn(); ImGui::TextUnformatted(display_label(o.value("location","")).c_str());
     ImGui::TableNextColumn(); ImGui::Text("%d",o.value("quantity",0)); ImGui::PopID();
    }
@@ -343,6 +398,8 @@ struct UI {
     if(ImGui::Button(label)) execute(id,selected);
    }
    ImGui::EndDisabled();
+   const auto description=o.value("description","");
+   if(!description.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",description.c_str()); }
   }
  }
  void creatures() {
@@ -392,7 +449,7 @@ struct UI {
     if(fresh) ImGui::SetKeyboardFocusHere();
     const bool submitted=ImGui::InputText("##answer",prompt_text,sizeof(prompt_text),ImGuiInputTextFlags_EnterReturnsTrue);
     if(ImGui::Button("OK") || submitted) {
-     if(type=="quantity") { try { c.answer(std::stoi(prompt_text)); answered=true; } catch(...) { c.error="Enter a number."; } }
+     if(type=="quantity") { try { c.answer(std::stoi(prompt_text)); answered=true; } catch(...) { c.notice("Enter a number."); } }
      else { c.answer(std::string(prompt_text)); answered=true; }
     }
    }
@@ -405,9 +462,20 @@ struct UI {
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(vp->WorkPos); ImGui::SetNextWindowSize(vp->WorkSize);
   ImGui::Begin("Angband Deluxe",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
-  if(ImGui::Button("Save")) { if(c.ready()) { c.send("session.save"); c.busy=true; } }
-  ImGui::SameLine(); if(ImGui::Button("Save & exit")) quit_dialog=true;
-  ImGui::SameLine();
+  const bool in_game=c.state.contains("terminal");
+  if(in_game) {
+   if(ImGui::Button("Save and...")) ImGui::OpenPopup("Save menu");
+   if(ImGui::BeginPopup("Save menu")) {
+    ImGui::BeginDisabled(!c.ready());
+    if(ImGui::MenuItem("Save and continue")) { c.save(); focus_game(); }
+    if(ImGui::MenuItem("Save and return to main menu")) c.save(true,true);
+    if(ImGui::MenuItem("Save and quit")) c.save(true);
+    ImGui::EndDisabled();
+    if(!c.ready()) ImGui::TextUnformatted("Return to normal play to save.");
+    ImGui::EndPopup();
+   }
+   ImGui::SameLine();
+  }
   const float settings_width=ImGui::CalcTextSize("Settings").x+2*ImGui::GetStyle().FramePadding.x;
   ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowSize().x-ImGui::GetStyle().WindowPadding.x-settings_width));
   if(ImGui::Button("Settings")) ImGui::OpenPopup("Settings popup");
@@ -426,8 +494,8 @@ struct UI {
    }
    ImGui::EndPopup();
   }
-  if(!c.error.empty()) { ImGui::TextWrapped("%s",c.error.c_str()); ImGui::SameLine(); if(ImGui::SmallButton("Dismiss")) c.error.clear(); }
-  if(ImGui::BeginTable("layout",2,ImGuiTableFlags_Resizable|ImGuiTableFlags_BordersInnerV)) {
+  if(!in_game) launcher();
+  if(in_game && ImGui::BeginTable("layout",2,ImGuiTableFlags_Resizable|ImGuiTableFlags_BordersInnerV)) {
    ImGui::TableSetupColumn("Game",ImGuiTableColumnFlags_WidthStretch,0.69f);
    ImGui::TableSetupColumn("Panels",ImGuiTableColumnFlags_WidthStretch,0.31f);
    ImGui::TableNextRow(); ImGui::TableNextColumn();
@@ -473,7 +541,7 @@ struct UI {
     if(focus_search) ImGui::SetKeyboardFocusHere();
     ImGui::InputTextWithHint("##messages","Search messages",message_filter,sizeof(message_filter));
    }
-   for(const auto &m:c.state.value("messages",json::array())) {
+   for(const auto &m:c.messages) {
     auto text=m.value("text",""); if(matches(text,message_filter)) ImGui::TextWrapped("%s%s",text.c_str(),m.value("count",1)>1?(" (x"+std::to_string(m.value("count",1))+")").c_str():"");
    }
    ImGui::EndChild();
@@ -504,7 +572,7 @@ struct UI {
   if(ImGui::BeginPopupModal("Close game",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
    ImGui::TextWrapped(c.ready()?"Save this character and close Deluxe?":"Return to normal play to save. You can finish the current menu first.");
    ImGui::BeginDisabled(!c.ready());
-   if(ImGui::Button("Save and close")) { c.send("session.close"); c.busy=true; ImGui::CloseCurrentPopup(); }
+   if(ImGui::Button("Save and quit")) { c.save(true); ImGui::CloseCurrentPopup(); }
    ImGui::EndDisabled(); ImGui::SameLine();
    if(ImGui::Button("Continue playing")) { ImGui::CloseCurrentPopup(); focus_game(); }
    if(!c.state.contains("player") || !c.connected) if(ImGui::Button("Close")) { c.closed=true; if(c.process) SDL_KillProcess(c.process,true); }
@@ -560,13 +628,27 @@ int main(int argc,char **argv) {
  connection.start(backend,data,user);
  SDL_StartTextInput(window);
  while(!connection.closed) {
-  connection.poll(); ui.prepare_frame(window); SDL_Event e;
+  connection.poll();
+  if(connection.restart_ready) {
+   // session.close has acknowledged a successful save and the child has exited.
+   SDL_DestroyProcess(connection.process); connection.process=nullptr;
+   connection=Connection{};
+   ui.grid_focus=ui.focus_requested=ui.return_from_prompt=false;
+   ui.selected.clear(); ui.last_prompt.clear(); ui.keys.clear();
+   ui.item_filter[0]=ui.command_filter[0]=ui.message_filter[0]=0;
+   ui.message_search_open=false;
+   connection.start(backend,data,user);
+  }
+  ui.prepare_frame(window); SDL_Event e;
   while(SDL_PollEvent(&e)) {
    if(e.type==SDL_EVENT_WINDOW_FOCUS_LOST) { ui.window_active=false; ui.keys.clear(); }
    if(e.type==SDL_EVENT_WINDOW_FOCUS_GAINED) ui.window_active=true;
    if(e.type==SDL_EVENT_MOUSE_BUTTON_DOWN) { ui.grid_focus=false; ui.keys.clear(); }
    ImGui_ImplSDL3_ProcessEvent(&e);
-   if(e.type==SDL_EVENT_QUIT) ui.quit_dialog=true;
+   if(e.type==SDL_EVENT_QUIT) {
+    if(!connection.state.contains("terminal")) { connection.closed=true; if(connection.process) SDL_KillProcess(connection.process,true); }
+    else ui.quit_dialog=true;
+   }
    if(e.type==SDL_EVENT_KEY_DOWN && ui.owns_keyboard()) {
     switch(e.key.key) {
      case SDLK_RETURN: ui.keys.push_back("enter"); break;
@@ -585,6 +667,9 @@ int main(int argc,char **argv) {
    }
   }
   ImGui_ImplSDLGPU3_NewFrame(); ImGui_ImplSDL3_NewFrame(); ImGui::NewFrame(); ui.draw(); ImGui::Render();
+  // ImGui may stop text input when one of its textboxes loses focus. The
+  // game also needs SDL's layout-aware text events (including shifted keys).
+  if(ui.owns_keyboard() && !SDL_TextInputActive(window)) SDL_StartTextInput(window);
   auto cmd=SDL_AcquireGPUCommandBuffer(gpu); SDL_GPUTexture *surface=nullptr;
   if(!cmd) break;
   if(!SDL_WaitAndAcquireGPUSwapchainTexture(cmd,window,&surface,nullptr,nullptr)) { SDL_CancelGPUCommandBuffer(cmd); break; }

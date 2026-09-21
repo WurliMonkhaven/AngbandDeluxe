@@ -42,7 +42,9 @@ Use a separate user directory when testing an existing save.
 
 ## Using this build
 
-Create a new save name or choose a saved character. The game takes keyboard focus
+Choose New character to enter a save name, or choose a saved character. The main
+menu shows only character choices and Settings; game panels appear after starting.
+The game takes keyboard focus
 automatically when starting/loading and after commands or prompts. Its thin blue
 border indicates focus; click it to return from another panel. Character creation and remaining classic menus use Angband's
 normal controls. Enter acknowledges its `-more-` messages. The engine's Help
@@ -52,8 +54,13 @@ The side panels provide searchable items, inspection, selected-item actions,
 creatures, a minimap and a searchable command list. The magnifying glass beside
 Messages opens an inline search box. Inspection uses ticks and crosses for
 boolean properties, and action buttons are filtered by item type and location.
+Full engine inspection prose appears beneath those buttons, including origin,
+use effects and equipment calculations, and scrolls with the Items panel.
 Confirmation, quantity, text and ordinary item-choice prompts use native
-widgets. Save controls are at the top left; Settings at the top right opens a
+widgets. The top-left Save and... menu offers Save and continue, Save and return
+to main menu, and Save and quit. Returning to the menu starts a fresh backend only
+after the save succeeds. System notices appear in Messages with a [SYSTEM] prefix.
+Settings at the top right opens a
 popup with UI scale choices from 75% to 150%. UI scale resizes text, controls and
 spacing together. Character information stays fixed while tab contents scroll.
 HP, SP and food bars are red, blue and green respectively.
@@ -87,10 +94,11 @@ restriction. Reading these values does not identify objects or spend turns.
 
 ## Validation recorded on Windows
 
-The native Debug build passed all 934 existing Angband unit tests and four
+The native Debug build passed all 934 existing Angband unit tests and five
 real-engine integration tests: protocol validation; gameplay/save/reload;
 item prompt validation, cancellation and inscription; and same-save keyboard/API
-wait-action parity with repeated inspection queries. Debug capture asserts RNG
+wait-action parity with repeated inspection queries; and descending into the
+dungeon, inspecting its items and returning upstairs. Debug capture asserts RNG
 purity. Manual desktop checks exercised character creation, load, item selection,
 native inscription prompts, cancellation, saving and closing.
 
