@@ -42,20 +42,31 @@ Use a separate user directory when testing an existing save.
 
 ## Using this build
 
-Create a new save name or choose a saved character. Click the game area to give
-it keyboard focus. Character creation and remaining classic menus use Angband's
+Create a new save name or choose a saved character. The game takes keyboard focus
+automatically when starting/loading and after commands or prompts. Its thin blue
+border indicates focus; click it to return from another panel. Character creation and remaining classic menus use Angband's
 normal controls. Enter acknowledges its `-more-` messages. The engine's Help
 command documents gameplay controls.
 
 The side panels provide searchable items, inspection, selected-item actions,
 creatures, a minimap and a searchable command list. Messages can be searched.
 Confirmation, quantity, text and ordinary item-choice prompts use native
-widgets. The top bar controls text size, contrast and saving. UI settings persist.
+widgets. Save controls are at the top left; Settings at the top right opens a
+popup with UI scale choices from 75% to 150%. UI scale resizes text, controls and
+spacing together. Character information stays fixed while tab contents scroll.
+HP, SP and food bars are red, blue and green respectively.
+UI settings persist.
 
-“Show actual engine properties” and “Actual map” are presentation choices.
-The backend always provides actual state, including hidden information, alongside
-the available player-known state. There is no backend disclosure restriction.
-Reading these values does not identify objects or spend turns.
+The complete game screen always fits inside its view without scrollbars, using
+the largest text that fits. Drag the horizontal divider above Messages to adjust
+the game/message heights; the split persists between launches. Double-click the
+divider to reset it. Message history scrolls separately. The character panel shows
+food as a bar with its percentage and raw nutrition value.
+
+The panels use player-facing descriptions, visible creatures and the known map.
+The backend still provides actual state, including hidden information, alongside
+player-known state for future presentation features. There is no backend disclosure
+restriction. Reading these values does not identify objects or spend turns.
 
 ## Current limits and next milestones
 

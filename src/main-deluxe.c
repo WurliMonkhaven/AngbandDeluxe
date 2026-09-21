@@ -216,6 +216,7 @@ static cJSON *capture(void)
   string(p, "name", player->full_name); string(p, "race", player->race->name);
   string(p, "class", player->class->name); number(p, "hp", player->chp); number(p, "max_hp", player->mhp);
   number(p, "sp", player->csp); number(p, "max_sp", player->msp); number(p, "level", player->lev);
+  number(p, "food", player->timed[TMD_FOOD]); number(p, "food_max", PY_FOOD_MAX);
   number(p, "depth", player->depth); number(p, "gold", player->au);
   number(p, "speed", player->state.speed - 110); number(p, "armour", player->known_state.ac + player->known_state.to_a);
   number(p, "x", player->grid.x); number(p, "y", player->grid.y);

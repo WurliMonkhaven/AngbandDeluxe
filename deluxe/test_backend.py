@@ -173,6 +173,11 @@ class BackendTests(unittest.TestCase):
         e.birth()
         initial = e.call("state.get")["result"]
         self.assertIn("player", initial)
+        self.assertGreater(initial["player"]["food_max"], 0)
+        self.assertGreater(initial["player"]["food"], 0)
+        self.assertLessEqual(initial["player"]["food"], initial["player"]["food_max"])
+        food_status = next(s for s in initial["player"]["statuses"] if s["label"] == "FOOD")
+        self.assertEqual(initial["player"]["food"], food_status["duration"])
         self.assertGreater(len(initial["items"]), 0)
         self.assertIn("actual", initial["items"][0])
         for _ in range(10):

@@ -146,132 +146,190 @@ struct Connection {
  }
 };
 
+static std::string display_label(std::string label) {
+ std::replace(label.begin(),label.end(),'_',' ');
+ if(!label.empty()) label[0]=char(std::toupper(static_cast<unsigned char>(label[0])));
+ return label;
+}
 static void properties(const json &value) {
  if (!value.is_object()) return;
  for (auto it=value.begin(); it!=value.end(); ++it) {
   if (it.value().is_primitive()) {
-   const auto v = it.value().is_string() ? it.value().get<std::string>() : it.value().dump();
-   ImGui::TextWrapped("%s: %s",it.key().c_str(),v.c_str());
+   const std::string v = it.value().is_boolean() ? (it.value().get<bool>()?"Yes":"No") :
+    (it.value().is_string() ? it.value().get<std::string>() : it.value().dump());
+   ImGui::TextWrapped("%s: %s",display_label(it.key()).c_str(),v.c_str());
   }
  }
 }
 struct UI {
  Connection &c;
- float scale = 1.0f, glyph_size = 17;
- bool show_actual = false, high_contrast = false, quit_dialog = false;
- bool grid_focus = false, palette_focus = false;
+ float scale = 1.0f, game_fraction = .72f;
+ float split_drag_y = 0.f, split_drag_fraction = .72f;
+ bool quit_dialog = false;
+ bool grid_focus = false, focus_requested = false, window_active = true;
+ bool return_from_prompt = false;
+ float display_scale = 1.f;
+ ImGuiStyle base_style;
  char item_filter[128]{}, message_filter[128]{}, command_filter[128]{}, save_name[65] = "Adventurer";
  char prompt_text[4096]{};
  std::string last_prompt, selected, settings_path;
  std::vector<json> keys;
  void load_settings() {
   try { std::ifstream in(settings_path); if (!in) return; json j; in >> j;
-   scale=std::clamp(j.value("scale",1.f),0.75f,2.5f); glyph_size=std::clamp(j.value("glyph_size",17.f),10.f,32.f);
-   high_contrast=j.value("high_contrast",false);
+   scale=std::clamp(j.value("scale",1.f),0.75f,1.5f);
+   game_fraction=std::clamp(j.value("game_fraction",.72f),.2f,.9f);
   } catch (...) { c.error = "Settings could not be read; using defaults."; }
  }
  void save_settings() {
-  std::ofstream out(settings_path); out << json{{"scale",scale},{"glyph_size",glyph_size},{"high_contrast",high_contrast}}.dump(2);
+  std::ofstream out(settings_path); out << json{{"scale",scale},{"game_fraction",game_fraction}}.dump(2);
+ }
+ void focus_game() { focus_requested=true; keys.clear(); }
+ void execute(const std::string &id,const std::string &item="") { c.command(id,item); focus_game(); }
+ bool owns_keyboard() const {
+  return grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
+   && !quit_dialog && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId);
+ }
+ void prepare_frame(SDL_Window *window) {
+  display_scale=SDL_GetWindowDisplayScale(window);
+  if(display_scale<=0) display_scale=1.f;
+  // Rebuild from the unscaled style; repeated changes must not accumulate rounding.
+  ImGui::GetStyle()=base_style;
+  ImGui::GetStyle().ScaleAllSizes(display_scale*scale);
+  ImGui::GetStyle().FontScaleDpi=display_scale;
+  ImGui::GetStyle().FontScaleMain=scale;
+  if(owns_keyboard()) ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+  else ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  if(!c.prompt.empty()) return_from_prompt=true;
+  else if(return_from_prompt && c.pending_prompt.empty()) { return_from_prompt=false; focus_game(); }
  }
  void launcher() {
   ImGui::TextUnformatted("ANGBAND DELUXE");
   ImGui::TextWrapped("Create a character or continue an existing game. Character creation uses Angband's original controls.");
   ImGui::InputText("New save name",save_name,sizeof(save_name));
   ImGui::BeginDisabled(!c.negotiated || c.busy);
-  if (ImGui::Button("New character")) { c.send("session.new",{{"save",save_name}}); c.busy=true; }
+  if (ImGui::Button("New character")) { c.send("session.new",{{"save",save_name}}); c.busy=true; focus_game(); }
   ImGui::SeparatorText("Saved characters");
   for (const auto &s:c.saves) {
    std::string id=s.value("id","");
-   if (ImGui::Selectable((id+" — "+s.value("description","")).c_str())) { c.send("session.load",{{"save",id}}); c.busy=true; }
+   if (ImGui::Selectable((id+" — "+s.value("description","")).c_str())) { c.send("session.load",{{"save",id}}); c.busy=true; focus_game(); }
   }
   ImGui::EndDisabled();
  }
- void grid() {
+ void grid(float height) {
   if (!c.state.contains("terminal")) { launcher(); return; }
-  ImGui::TextUnformatted(c.busy ? "Processing…" : c.state.value("phase","").c_str());
-  ImGui::SameLine(); ImGui::TextDisabled("Click here for keyboard play. Arrow keys move; ? opens help.");
-  auto origin = ImGui::GetCursorScreenPos();
-  float cw=glyph_size*0.60f, ch=glyph_size*1.12f;
+  ImGui::PushStyleColor(ImGuiCol_Border,owns_keyboard()?ImVec4(.35f,.58f,.78f,1):ImVec4(.16f,.19f,.23f,1));
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize,display_scale);
+  ImGui::BeginChild("Dungeon",ImVec2(0,height),ImGuiChildFlags_Borders,
+   ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::SetScrollX(0); ImGui::SetScrollY(0);
+  if(focus_requested && c.prompt.empty() && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId)) {
+   ImGui::SetWindowFocus(); grid_focus=true; focus_requested=false;
+  }
+  if(ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) grid_focus=true;
   const auto &rows=c.state["terminal"];
-  ImVec2 size(cw*100,ch*float(rows.size()));
-  ImGui::InvisibleButton("Dungeon keyboard surface",size);
+  size_t columns=1;
+  for(const auto &row:rows) columns=std::max(columns,row.size());
+  const auto start=ImGui::GetCursorScreenPos();
+  const auto available=ImGui::GetContentRegionAvail();
+  const ImVec2 viewport(std::max(1.f,available.x),std::max(1.f,available.y));
+  // Use the largest glyphs that keep every terminal row and column visible.
+  const float pixels=std::min(
+   std::max(.01f,viewport.x-2)/(float(columns)*.60f),
+   std::max(.01f,viewport.y-2)/(float(std::max(size_t(1),rows.size()))*1.12f));
+  const float cw=pixels*.60f, ch=pixels*1.12f;
+  const ImVec2 size(cw*float(columns),ch*float(rows.size()));
+  const ImVec2 origin(start.x+(viewport.x-size.x)*.5f,start.y+(viewport.y-size.y)*.5f);
+  ImGui::InvisibleButton("Dungeon keyboard surface",viewport,ImGuiButtonFlags_EnableNav);
   if (ImGui::IsItemClicked()) grid_focus = true;
-  if (ImGui::IsMouseClicked(0) && !ImGui::IsItemHovered()) grid_focus=false;
+  if(ImGui::IsItemFocused()) grid_focus=true;
   auto draw=ImGui::GetWindowDrawList();
-  draw->AddRectFilled(origin,ImVec2(origin.x+size.x,origin.y+size.y),IM_COL32(12,15,20,255));
+  draw->AddRectFilled(start,ImVec2(start.x+viewport.x,start.y+viewport.y),IM_COL32(12,15,20,255));
   for (size_t y=0;y<rows.size();++y) for(size_t x=0;x<rows[y].size();++x) {
    unsigned glyph=rows[y][x][0].get<unsigned>(); int col=rows[y][x][1].get<int>();
-   if (glyph && glyph!=' ') draw->AddText(ImGui::GetFont(),glyph_size,
-    ImVec2(origin.x+float(x)*cw,origin.y+float(y)*ch),high_contrast?IM_COL32(245,245,245,255):color(col),utf8(glyph).c_str());
+   if (glyph && glyph!=' ') draw->AddText(ImGui::GetFont(),pixels,
+    ImVec2(origin.x+float(x)*cw,origin.y+float(y)*ch),color(col),utf8(glyph).c_str());
   }
-  if (grid_focus && c.prompt.empty() && !ImGui::GetIO().WantTextInput && !keys.empty()) {
-   c.key(keys.front());
-  }
+  if(!ImGui::IsWindowFocused()) grid_focus=false;
+  ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
  void character() {
   if (!c.state.contains("player")) return;
   const auto &p=c.state["player"];
   ImGui::Text("%s",p.value("name","").c_str());
-  ImGui::Text("%s %s · Level %d",p.value("race","").c_str(),p.value("class","").c_str(),p.value("level",0));
-  auto bar=[&](const char *name,const char *cur,const char *max) {
+  ImGui::TextWrapped("%s %s · Level %d",p.value("race","").c_str(),p.value("class","").c_str(),p.value("level",0));
+  auto bar=[&](const char *name,const char *cur,const char *max,ImVec4 fill) {
    char b[80]; int v=p.value(cur,0),m=p.value(max,0); SDL_snprintf(b,sizeof(b),"%s %d / %d",name,v,m);
+   ImGui::PushStyleColor(ImGuiCol_PlotHistogram,fill);
+   ImGui::PushStyleColor(ImGuiCol_FrameBg,ImVec4(fill.x*.3f,fill.y*.3f,fill.z*.3f,1));
    ImGui::ProgressBar(m?float(v)/m:0,ImVec2(-1,0),b);
+   ImGui::PopStyleColor(2);
   };
-  bar("HP","hp","max_hp"); bar("SP","sp","max_sp");
-  ImGui::Text("Depth %d · Gold %d",p.value("depth",0),p.value("gold",0));
-  ImGui::Text("Armour %d · Speed %+d",p.value("armour",0),p.value("speed",0));
+  bar("HP","hp","max_hp",ImVec4(.68f,.16f,.20f,1));
+  bar("SP","sp","max_sp",ImVec4(.16f,.36f,.72f,1));
+  const int food=p.value("food",0), food_max=p.value("food_max",0);
+  const float food_fraction=food_max>0?float(food)/float(food_max):0.f;
+  char food_label[80];
+  SDL_snprintf(food_label,sizeof(food_label),"Food %.1f%% (%d)",100.f*food_fraction,food);
+  ImGui::PushStyleColor(ImGuiCol_PlotHistogram,ImVec4(.16f,.48f,.27f,1));
+  ImGui::PushStyleColor(ImGuiCol_FrameBg,ImVec4(.05f,.14f,.08f,1));
+  ImGui::ProgressBar(std::clamp(food_fraction,0.f,1.f),ImVec2(-1,0),food_label);
+  ImGui::PopStyleColor(2);
+  ImGui::TextWrapped("Depth %d · Gold %d",p.value("depth",0),p.value("gold",0));
+  ImGui::TextWrapped("Armour %d · Speed %+d",p.value("armour",0),p.value("speed",0));
   static const char *stats[]={"STR","INT","WIS","DEX","CON"};
   if(p.contains("stats")) for(size_t i=0;i<p["stats"].size();++i) {
    int v=p["stats"][i];
-   if(v>18) ImGui::Text("%s 18/%02d",i<std::size(stats)?stats[i]:"Stat",v-18);
-   else ImGui::Text("%s %d",i<std::size(stats)?stats[i]:"Stat",v);
-   if (i+1<p["stats"].size()) ImGui::SameLine();
+   char label[40];
+   if(v>18) SDL_snprintf(label,sizeof(label),"%s 18/%02d",i<std::size(stats)?stats[i]:"Stat",v-18);
+   else SDL_snprintf(label,sizeof(label),"%s %d",i<std::size(stats)?stats[i]:"Stat",v);
+   const float right=ImGui::GetCursorScreenPos().x+ImGui::GetContentRegionAvail().x;
+   if(i && ImGui::GetItemRectMax().x+ImGui::CalcTextSize(label).x+ImGui::GetStyle().ItemSpacing.x<right) ImGui::SameLine();
+   ImGui::TextUnformatted(label);
   }
-  for(const auto &s:p.value("statuses",json::array())) ImGui::Text("%s (%d)",s.value("label","").c_str(),s.value("duration",0));
+  for(const auto &s:p.value("statuses",json::array())) {
+   if(s.value("label","")=="FOOD") continue;
+   ImGui::Text("%s (%d)",s.value("label","").c_str(),s.value("duration",0));
+  }
  }
  void items() {
   ImGui::InputTextWithHint("##items","Search items",item_filter,sizeof(item_filter));
-  ImGui::Checkbox("Show actual engine properties",&show_actual);
   auto values=c.state.value("items",json::array());
   std::stable_sort(values.begin(),values.end(),[](const json &a,const json &b){return a.value("location","")<b.value("location","");});
-  if(ImGui::BeginTable("items",3,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,220*scale))) {
+  if(ImGui::BeginTable("items",3,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,ImGui::GetTextLineHeightWithSpacing()*10))) {
    ImGui::TableSetupColumn("Item",ImGuiTableColumnFlags_WidthStretch); ImGui::TableSetupColumn("Location"); ImGui::TableSetupColumn("Qty"); ImGui::TableHeadersRow();
    for(const auto &o:values) {
-    if(o.value("location","")=="Floor" && !show_actual) {
+    if(o.value("location","")=="Floor") {
      auto p=c.state.value("player",json::object());
      if(o.value("x",-1)!=p.value("x",-2)||o.value("y",-1)!=p.value("y",-2)) continue;
     }
-    std::string label=show_actual?o["actual"].value("label",""):o.value("label","");
+    std::string label=o.value("label","");
     if(!matches(label,item_filter)) continue;
     auto id=o.value("id",""); ImGui::PushID(id.c_str());
     ImGui::TableNextRow(); ImGui::TableNextColumn();
     if(ImGui::Selectable(label.c_str(),selected==id,ImGuiSelectableFlags_SpanAllColumns)) selected=id;
     if(ImGui::IsItemHovered()) { ImGui::BeginTooltip(); ImGui::TextUnformatted(label.c_str()); ImGui::Text("Inscription: %s",o.value("inscription","").c_str()); ImGui::EndTooltip(); }
-    ImGui::TableNextColumn(); ImGui::TextUnformatted(o.value("location","").c_str());
+    ImGui::TableNextColumn(); ImGui::TextUnformatted(display_label(o.value("location","")).c_str());
     ImGui::TableNextColumn(); ImGui::Text("%d",o.value("quantity",0)); ImGui::PopID();
    }
    ImGui::EndTable();
   }
   for(const auto &o:values) if(o.value("id","")==selected) {
    ImGui::SeparatorText("Inspection");
-   properties(show_actual?o["actual"]:o["player_known"]);
-   ImGui::TextWrapped("Actions use Angband's normal checks and confirmations.");
+   properties(o["player_known"]);
    ImGui::BeginDisabled(!c.ready());
-   if(ImGui::Button("Wield")) c.command("core.wield",selected); ImGui::SameLine();
-   if(ImGui::Button("Use")) c.command("core.use",selected); ImGui::SameLine();
-   if(ImGui::Button("Drop")) c.command("core.drop",selected); ImGui::SameLine();
-   if(ImGui::Button("Inscribe")) c.command("core.inscribe",selected);
+   if(ImGui::Button("Wield")) execute("core.wield",selected); ImGui::SameLine();
+   if(ImGui::Button("Use")) execute("core.use",selected); ImGui::SameLine();
+   if(ImGui::Button("Drop")) execute("core.drop",selected); ImGui::SameLine();
+   if(ImGui::Button("Inscribe")) execute("core.inscribe",selected);
    ImGui::EndDisabled();
   }
  }
  void creatures() {
-  ImGui::Checkbox("Show actual engine properties",&show_actual);
   for(const auto &m:c.state.value("monsters",json::array())) {
-   if(!show_actual && !m.value("visible",false)) continue;
+   if(!m.value("visible",false)) continue;
    ImGui::PushID(m.value("id","").c_str());
    if(ImGui::TreeNode(m.value("name","").c_str())) {
     ImGui::Text("Position %d, %d",m.value("x",0),m.value("y",0));
-    if(show_actual) ImGui::Text("HP %d / %d",m.value("hp",0),m.value("max_hp",0));
     ImGui::TextUnformatted(m.value("asleep",false)?"Asleep":"Awake"); ImGui::TreePop();
    }
    ImGui::PopID();
@@ -279,8 +337,7 @@ struct UI {
  }
  void minimap() {
   if(!c.state.contains("map") || !c.catalog.contains("features")) return;
-  ImGui::Checkbox("Actual map",&show_actual);
-  const auto &map=c.state["map"][show_actual?"actual":"known"];
+  const auto &map=c.state["map"]["known"];
   if(map.empty()) return;
   auto origin=ImGui::GetCursorScreenPos(); float cell=std::max(1.f,ImGui::GetContentRegionAvail().x/float(map[0].size()));
   auto draw=ImGui::GetWindowDrawList();
@@ -318,44 +375,89 @@ struct UI {
      else { c.answer(std::string(prompt_text)); answered=true; }
     }
    }
-   ImGui::SameLine(); if(ImGui::Button("Cancel")) { c.answer(nullptr); answered=true; }
+   if(type!="choice") ImGui::SameLine();
+   if(!answered && (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))) { c.answer(nullptr); answered=true; }
    if(answered) ImGui::CloseCurrentPopup(); ImGui::EndPopup();
   }
  }
  void draw() {
-  ImGui::GetStyle().FontScaleMain=scale;
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(vp->WorkPos); ImGui::SetNextWindowSize(vp->WorkSize);
   ImGui::Begin("Angband Deluxe",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
   if(ImGui::Button("Save")) { if(c.ready()) { c.send("session.save"); c.busy=true; } }
   ImGui::SameLine(); if(ImGui::Button("Save & exit")) quit_dialog=true;
-  ImGui::SameLine(); ImGui::SetNextItemWidth(110); if(ImGui::SliderFloat("UI scale",&scale,.75f,2.5f,"%.2f")) save_settings();
-  ImGui::SameLine(); ImGui::SetNextItemWidth(100); if(ImGui::SliderFloat("Glyph size",&glyph_size,10,30,"%.0f")) save_settings();
-  ImGui::SameLine(); if(ImGui::Checkbox("High contrast",&high_contrast)) save_settings();
+  ImGui::SameLine();
+  const float settings_width=ImGui::CalcTextSize("Settings").x+2*ImGui::GetStyle().FramePadding.x;
+  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowSize().x-ImGui::GetStyle().WindowPadding.x-settings_width));
+  if(ImGui::Button("Settings")) ImGui::OpenPopup("Settings popup");
+  const auto settings_corner=ImGui::GetItemRectMax();
+  ImGui::SetNextWindowPos(ImVec2(settings_corner.x,settings_corner.y+ImGui::GetStyle().ItemSpacing.y),ImGuiCond_Always,ImVec2(1,0));
+  if(ImGui::BeginPopup("Settings popup")) {
+   ImGui::TextUnformatted("Settings"); ImGui::Separator();
+   ImGui::SetNextItemWidth(ImGui::GetFontSize()*6);
+   char zoom[16]; SDL_snprintf(zoom,sizeof(zoom),"%.0f%%",scale*100);
+   if(ImGui::BeginCombo("UI scale",zoom)) {
+    for(float value:{.75f,1.f,1.25f,1.5f}) {
+     char label[16]; SDL_snprintf(label,sizeof(label),"%.0f%%",value*100);
+     if(ImGui::Selectable(label,scale==value)) { scale=value; save_settings(); }
+    }
+    ImGui::EndCombo();
+   }
+   ImGui::EndPopup();
+  }
   if(!c.error.empty()) { ImGui::TextWrapped("%s",c.error.c_str()); ImGui::SameLine(); if(ImGui::SmallButton("Dismiss")) c.error.clear(); }
   if(ImGui::BeginTable("layout",2,ImGuiTableFlags_Resizable|ImGuiTableFlags_BordersInnerV)) {
    ImGui::TableSetupColumn("Game",ImGuiTableColumnFlags_WidthStretch,0.69f);
    ImGui::TableSetupColumn("Panels",ImGuiTableColumnFlags_WidthStretch,0.31f);
    ImGui::TableNextRow(); ImGui::TableNextColumn();
-   ImGui::BeginChild("Game",ImVec2(0,0),ImGuiChildFlags_None,ImGuiWindowFlags_HorizontalScrollbar);
-   grid(); ImGui::SeparatorText("Messages");
+   ImGui::BeginChild("Game",ImVec2(0,0),ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
+   ImGui::SetScrollX(0); ImGui::SetScrollY(0);
+   const float divider_height=8.f*display_scale*scale;
+   const float usable_height=std::max(1.f,ImGui::GetContentRegionAvail().y-divider_height-2*ImGui::GetStyle().ItemSpacing.y);
+   const float min_fraction=std::max(.2f,std::min(.4f,4*ImGui::GetTextLineHeight()/usable_height));
+   const float max_fraction=std::min(.9f,1-std::min(.4f,3*ImGui::GetTextLineHeight()/usable_height));
+   const float fraction=std::clamp(game_fraction,min_fraction,max_fraction);
+   grid(std::max(1.f,usable_height*fraction));
+   if(c.state.contains("terminal")) {
+    const auto divider=ImGui::GetCursorScreenPos();
+    const float width=std::max(1.f,ImGui::GetContentRegionAvail().x);
+    ImGui::InvisibleButton("Resize message panel",ImVec2(width,divider_height));
+    if(ImGui::IsItemActivated()) { split_drag_y=ImGui::GetIO().MousePos.y; split_drag_fraction=fraction; }
+    if(ImGui::IsItemActive()) game_fraction=std::clamp(split_drag_fraction+(ImGui::GetIO().MousePos.y-split_drag_y)/usable_height,min_fraction,max_fraction);
+    if(ImGui::IsItemDeactivated()) save_settings();
+    if(ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) { game_fraction=.72f; save_settings(); }
+    const bool highlighted=ImGui::IsItemHovered()||ImGui::IsItemActive();
+    if(highlighted) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+    if(ImGui::IsItemHovered()) ImGui::SetTooltip("Drag to resize messages. Double-click to reset.");
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(divider.x,divider.y+divider_height*.5f),
+     ImVec2(divider.x+width,divider.y+divider_height*.5f),
+     ImGui::GetColorU32(highlighted?ImGuiCol_SeparatorHovered:ImGuiCol_Separator),display_scale);
+   }
+   ImGui::BeginChild("Message history");
+   ImGui::SeparatorText("Messages");
    ImGui::InputTextWithHint("##messages","Search messages",message_filter,sizeof(message_filter));
    for(const auto &m:c.state.value("messages",json::array())) {
     auto text=m.value("text",""); if(matches(text,message_filter)) ImGui::TextWrapped("%s%s",text.c_str(),m.value("count",1)>1?(" (x"+std::to_string(m.value("count",1))+")").c_str():"");
    }
+   ImGui::EndChild();
    ImGui::EndChild(); ImGui::TableNextColumn();
-   ImGui::BeginChild("Panels"); character();
+   ImGui::BeginChild("Panels",ImVec2(0,0),ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
+   ImGui::SetScrollX(0); ImGui::SetScrollY(0);
+   character();
+   ImGui::Dummy(ImVec2(0,ImGui::GetTextLineHeight()*.45f));
+   ImGui::Separator();
    if(ImGui::BeginTabBar("panels")) {
-    if(ImGui::BeginTabItem("Items")) { items(); ImGui::EndTabItem(); }
-    if(ImGui::BeginTabItem("Creatures")) { creatures(); ImGui::EndTabItem(); }
-    if(ImGui::BeginTabItem("Map")) { minimap(); ImGui::EndTabItem(); }
+    if(ImGui::BeginTabItem("Items")) { ImGui::BeginChild("Item content"); items(); ImGui::EndChild(); ImGui::EndTabItem(); }
+    if(ImGui::BeginTabItem("Creatures")) { ImGui::BeginChild("Creature content"); creatures(); ImGui::EndChild(); ImGui::EndTabItem(); }
+    if(ImGui::BeginTabItem("Map")) { ImGui::BeginChild("Map content"); minimap(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(ImGui::BeginTabItem("Commands")) {
+     ImGui::BeginChild("Command content");
      ImGui::InputTextWithHint("##commands","Search commands",command_filter,sizeof(command_filter));
      ImGui::BeginDisabled(!c.ready());
      for(const auto &cmd:c.commands) {
-      auto label=cmd.value("label",""); if(matches(label,command_filter) && ImGui::Selectable(label.c_str())) { c.command(cmd.value("id","")); grid_focus=true; }
+      auto label=cmd.value("label",""); if(matches(label,command_filter) && ImGui::Selectable(label.c_str())) execute(cmd.value("id",""));
      }
-     ImGui::EndDisabled(); ImGui::EndTabItem();
+     ImGui::EndDisabled(); ImGui::EndChild(); ImGui::EndTabItem();
     }
     ImGui::EndTabBar();
    }
@@ -367,11 +469,13 @@ struct UI {
    ImGui::BeginDisabled(!c.ready());
    if(ImGui::Button("Save and close")) { c.send("session.close"); c.busy=true; ImGui::CloseCurrentPopup(); }
    ImGui::EndDisabled(); ImGui::SameLine();
-   if(ImGui::Button("Continue playing")) ImGui::CloseCurrentPopup();
+   if(ImGui::Button("Continue playing")) { ImGui::CloseCurrentPopup(); focus_game(); }
    if(!c.state.contains("player") || !c.connected) if(ImGui::Button("Close")) { c.closed=true; if(c.process) SDL_KillProcess(c.process,true); }
    ImGui::EndPopup();
   }
-  prompts(); ImGui::End(); keys.clear();
+  prompts(); ImGui::End();
+  if(owns_keyboard() && !ImGui::GetIO().WantTextInput && !keys.empty()) c.key(keys.front());
+  keys.clear();
  }
 };
 
@@ -392,13 +496,12 @@ int main(int argc,char **argv) {
  auto &io=ImGui::GetIO(); io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad;
  io.Fonts->AddFontFromFileTTF(DELUXE_FONT_FILE,18.f);
  ImGui::StyleColorsDark(); ImGui::GetStyle().WindowRounding=5;
- ImGui::GetStyle().ScaleAllSizes(dpi);
- ImGui::GetStyle().FontScaleDpi=dpi;
  ImGui::GetStyle().FontSizeBase=18.f;
  ImGui_ImplSDL3_InitForSDLGPU(window);
  ImGui_ImplSDLGPU3_InitInfo info{}; info.Device=gpu; info.ColorTargetFormat=SDL_GetGPUSwapchainTextureFormat(gpu,window); info.MSAASamples=SDL_GPU_SAMPLECOUNT_1;
  ImGui_ImplSDLGPU3_Init(&info);
  Connection connection; UI ui{connection};
+ ui.base_style=ImGui::GetStyle();
  const char *base=SDL_GetBasePath();
  char *pref=SDL_GetPrefPath("AngbandDeluxe","AngbandDeluxe");
  std::string user=pref?pref:"deluxe-user"; SDL_free(pref);
@@ -420,11 +523,14 @@ int main(int argc,char **argv) {
  connection.start(backend,data,user);
  SDL_StartTextInput(window);
  while(!connection.closed) {
-  connection.poll(); SDL_Event e;
+  connection.poll(); ui.prepare_frame(window); SDL_Event e;
   while(SDL_PollEvent(&e)) {
+   if(e.type==SDL_EVENT_WINDOW_FOCUS_LOST) { ui.window_active=false; ui.keys.clear(); }
+   if(e.type==SDL_EVENT_WINDOW_FOCUS_GAINED) ui.window_active=true;
+   if(e.type==SDL_EVENT_MOUSE_BUTTON_DOWN) { ui.grid_focus=false; ui.keys.clear(); }
    ImGui_ImplSDL3_ProcessEvent(&e);
    if(e.type==SDL_EVENT_QUIT) ui.quit_dialog=true;
-   if(e.type==SDL_EVENT_KEY_DOWN) {
+   if(e.type==SDL_EVENT_KEY_DOWN && ui.owns_keyboard()) {
     switch(e.key.key) {
      case SDLK_RETURN: ui.keys.push_back("enter"); break;
      case SDLK_ESCAPE: ui.keys.push_back("escape"); break;
@@ -437,7 +543,7 @@ int main(int argc,char **argv) {
      default: if((e.key.mod&SDL_KMOD_CTRL) && e.key.key>='a' && e.key.key<='z') ui.keys.push_back(int(e.key.key-'a'+1));
     }
    }
-   if(e.type==SDL_EVENT_TEXT_INPUT && !(SDL_GetModState()&SDL_KMOD_CTRL)) {
+   if(e.type==SDL_EVENT_TEXT_INPUT && ui.owns_keyboard() && !(SDL_GetModState()&SDL_KMOD_CTRL)) {
     const char *p=e.text.text; while(*p) ui.keys.push_back(SDL_StepUTF8(&p,nullptr));
    }
   }
