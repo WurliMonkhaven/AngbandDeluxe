@@ -1,4 +1,6 @@
 *.app
+/build-deluxe*/
+/deluxe-user/
 *.elf
 *.exe
 *.gcda

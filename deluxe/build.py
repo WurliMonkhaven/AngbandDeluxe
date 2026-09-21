@@ -1,0 +1,48 @@
+"""Configure/build the native applications; Python is only a build helper."""
+import argparse
+import os
+from pathlib import Path
+import shutil
+import subprocess
+
+root = Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser()
+parser.add_argument("--configure", action="store_true")
+parser.add_argument("--config", default="Debug")
+parser.add_argument("--target", nargs="+", default=["OurExecutable", "angband-deluxe"])
+parser.add_argument("--ninja", action="store_true")
+args = parser.parse_args()
+cmake = shutil.which("cmake")
+if not cmake and os.name == "nt":
+    candidates = list(Path("C:/Program Files/Microsoft Visual Studio").glob(
+        "*/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"))
+    if candidates:
+        cmake = str(sorted(candidates)[-1])
+if not cmake:
+    raise SystemExit("Install CMake and a native C/C++ compiler first.")
+# Some Windows hosts supply both Path and PATH; MSBuild rejects that environment.
+env = {(k.upper() if os.name == "nt" else k): v for k, v in os.environ.items()}
+if os.name == "nt" and "PATH" in env:
+    env["Path"] = env.pop("PATH")
+build = root / ("build-deluxe-native" if args.ninja else "build-deluxe")
+extra = []
+if args.ninja and os.name == "nt":
+    vs = Path(cmake).parents[7]
+    vcvars = vs / "VC/Auxiliary/Build/vcvars64.bat"
+    configured = subprocess.check_output(
+        f'cmd.exe /d /s /c ""{vcvars}" >nul && set"',
+        env=env, text=True)
+    env = {k.upper(): v for line in configured.splitlines() if "=" in line
+           for k, v in [line.split("=", 1)]}
+    ninja = vs / "Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe"
+    extra = ["-G", "Ninja", f"-DCMAKE_MAKE_PROGRAM={ninja}", f"-DCMAKE_BUILD_TYPE={args.config}"]
+    for dep in ("cjson", "sdl3", "imgui", "json"):
+        source = root / "build-deluxe/_deps" / f"{dep}-src"
+        if source.exists():
+            extra.append(f"-DFETCHCONTENT_SOURCE_DIR_{dep.upper()}={source}")
+if args.configure or not (build / "CMakeCache.txt").exists():
+    subprocess.run([cmake, "-S", str(root), "-B", str(build),
+        "-DSUPPORT_DELUXE_FRONTEND=ON", "-DBUILD_DELUXE_CLIENT=ON",
+        "-DSUPPORT_BORG=OFF", "-DSUPPORT_SPOIL_FRONTEND=OFF", *extra], env=env, check=True)
+subprocess.run([cmake, "--build", str(build), "--config", args.config,
+                "--target", *args.target, "--parallel", "8"], env=env, check=True)

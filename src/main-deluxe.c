@@ -1,0 +1,563 @@
+/* Angband Deluxe local semantic adapter. GPLv2, as for the engine.
+ * All engine access runs on its main thread at input boundaries. */
+#include "angband.h"
+#include "cJSON.h"
+#include "cave.h"
+#include "cmd-core.h"
+#include "game-input.h"
+#include "game-world.h"
+#include "init.h"
+#include "message.h"
+#include "monster.h"
+#include "mon-util.h"
+#include "obj-desc.h"
+#include "obj-gear.h"
+#include "obj-knowledge.h"
+#include "obj-pile.h"
+#include "option.h"
+#include "obj-util.h"
+#include "player.h"
+#include "player-timed.h"
+#include "ui-command.h"
+#include "ui-display.h"
+#include "ui-game.h"
+#include "ui-init.h"
+#include "ui-input.h"
+#include "ui-object.h"
+#include "ui-keymap.h"
+#include "ui-term.h"
+#include "z-quark.h"
+#include <locale.h>
+#ifdef WINDOWS
+#include <windows.h>
+#else
+#include <sys/select.h>
+#include <unistd.h>
+#endif
+
+#define FRAME_LIMIT (1024 * 1024)
+#define SCREEN_W 100
+#define SCREEN_H 34
+static term terminal;
+static bool connected = true, negotiated, initialized, ready, closing;
+static unsigned long revision, sequence, context_id;
+static char revision_text[32], context_text[32];
+static const char *phase = "launcher";
+static char action[80];
+static cJSON *snapshot, *reply_value, *active_prompt;
+static cJSON *next_choices;
+static struct object *item_handles[8192], *pending_item;
+static size_t item_handle_count;
+static bool (*original_get_item)(struct object **, const char *, const char *, cmd_code, item_tester, int);
+static char *seen_ids[32768];
+static size_t seen_count;
+static int launch_mode = -1;
+
+struct command_entry { const char *id, *label; char key; };
+static const struct command_entry commands[] = {
+ {"core.walk", "Walk", ';'}, {"core.run", "Run", '.'},
+ {"core.hold", "Wait / stay", ','}, {"core.rest", "Rest", 'R'},
+ {"core.up", "Ascend stairs", '<'}, {"core.down", "Descend stairs", '>'},
+ {"core.pickup", "Pick up", 'g'}, {"core.wield", "Wield / wear", 'w'},
+ {"core.takeoff", "Take off", 't'}, {"core.drop", "Drop", 'd'},
+ {"core.use", "Use item", 'U'}, {"core.quaff", "Drink potion", 'q'},
+ {"core.read", "Read scroll", 'r'}, {"core.eat", "Eat", 'E'},
+ {"core.cast", "Cast spell", 'm'}, {"core.study", "Study spell", 'G'},
+ {"core.fire", "Fire ammunition", 'f'}, {"core.throw", "Throw", 'v'},
+ {"core.open", "Open", 'o'}, {"core.close", "Close door", 'c'},
+ {"core.disarm", "Disarm", 'D'}, {"core.tunnel", "Tunnel", 'T'},
+ {"core.inscribe", "Inscribe", '{'}, {"core.ignore", "Ignore", 'k'},
+ {"core.look", "Look", 'l'}, {"core.target", "Target", '*'},
+ {"core.knowledge", "Knowledge", '~'}, {"core.character", "Character", 'C'},
+ {"core.inventory", "Inventory", 'i'}, {"core.equipment", "Equipment", 'e'},
+ {"core.options", "Engine options", '='}, {"core.help", "Help", '?'}
+};
+
+static const char *str(cJSON *j, const char *key)
+{
+ cJSON *v = cJSON_GetObjectItemCaseSensitive(j, key);
+ return cJSON_IsString(v) ? v->valuestring : "";
+}
+static int num(cJSON *j, const char *key, int fallback)
+{
+ cJSON *v = cJSON_GetObjectItemCaseSensitive(j, key);
+ return cJSON_IsNumber(v) ? v->valueint : fallback;
+}
+static void string(cJSON *j, const char *key, const char *value)
+{ cJSON_AddStringToObject(j, key, value ? value : ""); }
+static void number(cJSON *j, const char *key, int value)
+{ cJSON_AddNumberToObject(j, key, value); }
+static void json_bool(cJSON *j, const char *key, bool value)
+{ cJSON_AddBoolToObject(j, key, value); }
+static void counter(cJSON *j, const char *key, unsigned long value)
+{ char b[32]; strnfmt(b, sizeof(b), "%lu", value); string(j, key, b); }
+static void send_json(cJSON *j)
+{
+ char *s = cJSON_PrintUnformatted(j);
+ if (!s || strlen(s) >= FRAME_LIMIT) { fprintf(stderr, "Deluxe frame exceeds limit\n"); exit(2); }
+ if (puts(s) < 0 || fflush(stdout)) exit(2);
+ cJSON_free(s); cJSON_Delete(j);
+}
+static void response(const char *id, cJSON *result)
+{
+ cJSON *r = cJSON_CreateObject();
+ string(r, "kind", "response"); string(r, "id", id);
+ cJSON_AddItemToObject(r, "result", result); send_json(r);
+}
+static void error(const char *id, const char *code, const char *message)
+{
+ cJSON *r = cJSON_CreateObject(), *e = cJSON_CreateObject();
+ string(r, "kind", "response"); string(r, "id", id);
+ string(e, "code", code); string(e, "message", message);
+ cJSON_AddItemToObject(r, "error", e); send_json(r);
+}
+static void event(const char *name, cJSON *data)
+{
+ cJSON *r = cJSON_CreateObject();
+ string(r, "kind", "event"); counter(r, "seq", ++sequence);
+ string(r, "session_id", "session-1"); string(r, "event", name);
+ cJSON_AddItemToObject(r, "data", data); send_json(r);
+}
+static cJSON *command_list(void)
+{
+ size_t i; cJSON *a = cJSON_CreateArray();
+ for (i = 0; i < N_ELEMENTS(commands); ++i) {
+  cJSON *j = cJSON_CreateObject();
+  string(j, "id", commands[i].id); string(j, "label", commands[i].label);
+  number(j, "key", commands[i].key); cJSON_AddItemToArray(a, j);
+ }
+ return a;
+}
+static cJSON *ints(const int *values, int count)
+{ return cJSON_CreateIntArray(values, count); }
+static bool cursed(const struct object *o)
+{
+ int i; if (!o || !o->curses) return false;
+ for (i = 1; i < z_info->curse_max; ++i) if (o->curses[i].power) return true;
+ return false;
+}
+/* object_desc marks kinds/egos as seen. Use local metadata copies for queries. */
+static void describe(const struct object *obj, bool actual, char *buf, size_t n)
+{
+ struct object copy = *obj, known;
+ struct object_kind kind = *obj->kind;
+ struct ego_item ego;
+ copy.kind = &kind;
+ if (obj->ego) { ego = *obj->ego; copy.ego = &ego; }
+ if (actual) { known = copy; copy.known = &known; }
+ else if (obj->known) {
+  known = *obj->known;
+  if (known.kind == obj->kind) known.kind = &kind;
+  if (known.ego == obj->ego && obj->ego) known.ego = &ego;
+  copy.known = &known;
+ } else { my_strcpy(buf, "Unobserved item", n); return; }
+ object_desc(buf, n, &copy, ODESC_PREFIX | ODESC_FULL |
+  (actual ? ODESC_SPOIL : 0), actual ? NULL : player);
+}
+static cJSON *item_record(const struct object *o, const char *location, int index)
+{
+ char name[512], id[80]; int i;
+ cJSON *j = cJSON_CreateObject(), *a = cJSON_CreateObject(), *k = cJSON_CreateObject();
+ strnfmt(id, sizeof(id), "item-%lu-%d", revision, index);
+ if (index > 0 && index < (int)N_ELEMENTS(item_handles)) {
+  item_handles[index] = (struct object *)o; item_handle_count = index + 1;
+ }
+ string(j, "id", id); string(j, "location", location);
+ describe(o, false, name, sizeof(name)); string(j, "label", name);
+ describe(o, true, name, sizeof(name)); string(a, "label", name);
+ string(a, "kind", o->kind->name); json_bool(a, "cursed", cursed(o));
+ json_bool(a, "artifact", o->artifact != NULL); json_bool(a, "ego", o->ego != NULL);
+ number(a, "to_hit", o->to_h); number(a, "to_damage", o->to_d);
+ number(a, "armour", o->ac); number(a, "to_armour", o->to_a);
+ number(a, "dice", o->dd); number(a, "sides", o->ds);
+ number(a, "weight", o->weight); number(a, "timeout", o->timeout);
+ cJSON_AddItemToObject(a, "modifiers", cJSON_CreateArray());
+ for (i = 0; i < OBJ_MOD_MAX; ++i)
+  cJSON_AddItemToArray(cJSON_GetObjectItem(a, "modifiers"), cJSON_CreateNumber(o->modifiers[i]));
+ json_bool(k, "cursed", cursed(o->known));
+ json_bool(k, "identified", o->known && object_fully_known(o));
+ cJSON_AddItemToObject(j, "actual", a); cJSON_AddItemToObject(j, "player_known", k);
+ number(j, "quantity", o->number); number(j, "x", o->grid.x); number(j, "y", o->grid.y);
+ number(j, "glyph", o->kind->d_char); number(j, "color", o->kind->d_attr);
+ string(j, "inscription", quark_str(o->note));
+ if (object_is_carried(player, o)) {
+  char label[2] = { gear_to_label(player, (struct object *)o), 0 };
+  string(j, "selection_key", label);
+ }
+ return j;
+}
+static cJSON *capture(void)
+{
+#ifndef NDEBUG
+ uint32_t rng_state[RAND_DEG], rng_index = state_i, rng_value = Rand_value;
+ bool rng_quick = Rand_quick;
+ memcpy(rng_state, STATE, sizeof(rng_state));
+#endif
+ cJSON *s = cJSON_CreateObject(), *screen = cJSON_CreateArray();
+ cJSON *items = cJSON_CreateArray(), *monsters = cJSON_CreateArray();
+ cJSON *messages = cJSON_CreateArray(); int y, x, i, index = 0;
+ string(s, "session_id", "session-1"); string(s, "revision", revision_text);
+ string(s, "phase", phase); string(s, "context", context_text);
+ string(s, "readiness", ready ? "ready" : "awaiting_prompt");
+ number(s, "turn", (int)turn);
+ for (y = 0; y < terminal.hgt; ++y) {
+  cJSON *row = cJSON_CreateArray();
+  for (x = 0; x < terminal.wid; ++x) {
+   int cell[2] = { (int)terminal.scr->c[y][x], terminal.scr->a[y][x] };
+   cJSON_AddItemToArray(row, ints(cell, 2));
+  }
+  cJSON_AddItemToArray(screen, row);
+ }
+ cJSON_AddItemToObject(s, "terminal", screen);
+ if (character_generated && player && cave) {
+  struct object *o; cJSON *p = cJSON_CreateObject(), *slots = cJSON_CreateArray();
+  cJSON *map = cJSON_CreateObject(), *terrain = cJSON_CreateArray(), *known = cJSON_CreateArray();
+  cJSON *visible = cJSON_CreateArray();
+  string(p, "name", player->full_name); string(p, "race", player->race->name);
+  string(p, "class", player->class->name); number(p, "hp", player->chp); number(p, "max_hp", player->mhp);
+  number(p, "sp", player->csp); number(p, "max_sp", player->msp); number(p, "level", player->lev);
+  number(p, "depth", player->depth); number(p, "gold", player->au);
+  number(p, "speed", player->state.speed - 110); number(p, "armour", player->known_state.ac + player->known_state.to_a);
+  number(p, "x", player->grid.x); number(p, "y", player->grid.y);
+  cJSON_AddItemToObject(p, "stats", ints(player->known_state.stat_use, STAT_MAX));
+  cJSON_AddItemToObject(p, "actual_stats", ints(player->state.stat_use, STAT_MAX));
+  { cJSON *statuses = cJSON_CreateArray();
+   for (i = 0; i < TMD_MAX; ++i) if (player->timed[i]) {
+    cJSON *t = cJSON_CreateObject(); string(t, "label", timed_effects[i].name);
+    number(t, "duration", player->timed[i]); cJSON_AddItemToArray(statuses, t);
+   }
+   cJSON_AddItemToObject(p, "statuses", statuses);
+  }
+  cJSON_AddItemToObject(s, "player", p);
+  for (o = player->gear; o; o = o->next) {
+   int slot = object_slot(player->body, o);
+   const char *place = slot >= 0 && slot < player->body.count ? player->body.slots[slot].name :
+    (object_is_in_quiver(player, o) ? "Quiver" : "Pack");
+   cJSON_AddItemToArray(items, item_record(o, place, ++index));
+  }
+  for (i = 0; i < player->body.count; ++i) {
+   cJSON *slot = cJSON_CreateObject(); string(slot, "label", player->body.slots[i].name);
+   json_bool(slot, "occupied", player->body.slots[i].obj != NULL); cJSON_AddItemToArray(slots, slot);
+  }
+  cJSON_AddItemToObject(s, "slots", slots);
+  for (y = 0; y < cave->height; ++y) {
+   cJSON *r = cJSON_CreateArray(), *k = cJSON_CreateArray(); char seen[512];
+   for (x = 0; x < cave->width; ++x) {
+    struct loc g = loc(x, y);
+    cJSON_AddItemToArray(r, cJSON_CreateNumber(square(cave, g)->feat));
+    cJSON_AddItemToArray(k, cJSON_CreateNumber(player->cave ? square(player->cave, g)->feat : 0));
+    seen[x] = square_isseen(cave, g) ? '1' : '0';
+    for (o = square_object(cave, g); o; o = o->next)
+     cJSON_AddItemToArray(items, item_record(o, "Floor", ++index));
+   }
+   seen[cave->width] = 0; cJSON_AddItemToArray(terrain, r); cJSON_AddItemToArray(known, k);
+   cJSON_AddItemToArray(visible, cJSON_CreateString(seen));
+  }
+  cJSON_AddItemToObject(map, "actual", terrain); cJSON_AddItemToObject(map, "known", known);
+  cJSON_AddItemToObject(map, "visible", visible); cJSON_AddItemToObject(s, "map", map);
+  for (i = 1; i < cave->mon_max; ++i) {
+   struct monster *m = cave_monster(cave, i); cJSON *j; char id[80];
+   if (!m || !m->race) continue;
+   j = cJSON_CreateObject(); strnfmt(id, sizeof(id), "monster-%lu-%d", revision, i);
+   string(j, "id", id); string(j, "name", m->race->name);
+   number(j, "x", m->grid.x); number(j, "y", m->grid.y);
+   number(j, "hp", m->hp); number(j, "max_hp", m->maxhp);
+   number(j, "glyph", m->race->d_char); number(j, "color", m->race->d_attr);
+   json_bool(j, "visible", monster_is_visible(m)); json_bool(j, "asleep", m->m_timed[MON_TMD_SLEEP] > 0);
+   cJSON_AddItemToArray(monsters, j);
+  }
+ }
+ for (i = 0; i < messages_num() && i < 200; ++i) {
+  cJSON *m = cJSON_CreateObject(); string(m, "text", message_str(i));
+  number(m, "count", message_count(i)); number(m, "category", message_type(i));
+  cJSON_AddItemToArray(messages, m);
+ }
+ cJSON_AddItemToObject(s, "items", items); cJSON_AddItemToObject(s, "monsters", monsters);
+ cJSON_AddItemToObject(s, "messages", messages);
+#ifndef NDEBUG
+ assert(state_i == rng_index && Rand_value == rng_value && Rand_quick == rng_quick);
+ assert(memcmp(rng_state, STATE, sizeof(rng_state)) == 0);
+#endif
+ return s;
+}
+static void publish(void)
+{
+ ++revision; ++context_id;
+ item_handle_count = 0;
+ strnfmt(revision_text, sizeof(revision_text), "%lu", revision);
+ strnfmt(context_text, sizeof(context_text), "%lu", context_id);
+ cJSON_Delete(snapshot); snapshot = capture();
+ event("state.changed", cJSON_Duplicate(snapshot, true));
+}
+static bool input_available(void)
+{
+#ifdef WINDOWS
+ DWORD n = 0; HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+ return PeekNamedPipe(h, NULL, 0, NULL, &n, NULL) && n > 0;
+#else
+ fd_set fds; struct timeval t = {0, 0};
+ FD_ZERO(&fds); FD_SET(0, &fds); return select(1, &fds, NULL, NULL, &t) > 0;
+#endif
+}
+static void complete(void)
+{
+ pending_item = NULL;
+ if (action[0]) {
+  cJSON *j = cJSON_CreateObject(); string(j, "action_id", action);
+  string(j, "outcome", "resolved"); string(j, "revision", revision_text);
+  event("action.completed", j); action[0] = 0;
+ }
+}
+static void pump(void);
+static cJSON *prompt(const char *type, const char *text, int maximum, const char *initial)
+{
+ cJSON *p = cJSON_CreateObject(), *v;
+ ready = false; publish();
+ string(p, "prompt_id", context_text); string(p, "type", type); string(p, "text", text);
+ number(p, "maximum", maximum); string(p, "initial", initial);
+ if (next_choices) { cJSON_AddItemToObject(p, "choices", next_choices); next_choices = NULL; }
+ active_prompt = p; event("prompt.requested", cJSON_Duplicate(p, true));
+ while (!reply_value && connected) pump();
+ v = reply_value; reply_value = NULL; active_prompt = NULL; cJSON_Delete(p);
+ return v;
+}
+static bool check_hook(const char *text)
+{ cJSON *v = prompt("confirmation", text, 0, ""); bool b = cJSON_IsTrue(v); cJSON_Delete(v); return b; }
+static bool string_hook(const char *text, char *buf, size_t len)
+{
+ cJSON *v = prompt("text", text, (int)len - 1, buf); bool ok = cJSON_IsString(v);
+ if (ok) my_strcpy(buf, v->valuestring, len); cJSON_Delete(v); return ok;
+}
+static int quantity_hook(const char *text, int max)
+{ cJSON *v = prompt("quantity", text, max, "1"); int n = cJSON_IsNumber(v) ? v->valueint : 0; cJSON_Delete(v); return n; }
+
+static bool item_hook(struct object **choice, const char *text, const char *reject,
+ cmd_code cmd, item_tester tester, int mode)
+{
+ size_t cap = z_info->pack_size + z_info->quiver_size + z_info->floor_size + player->body.count;
+ struct object **objects; int count, i, chosen = -1; cJSON *v;
+ int keymode = OPT(player, rogue_like_commands) ? KEYMAP_MODE_ROGUE : KEYMAP_MODE_ORIG;
+ if (!reject) return original_get_item(choice, text, reject, cmd, tester, mode);
+ objects = mem_zalloc(cap * sizeof(*objects));
+ count = scan_items(objects, cap, player, mode, tester);
+ if (!count) { if (reject) msg("%s", reject); mem_free(objects); pending_item = NULL; return false; }
+ if (pending_item) {
+  for (i = 0; i < count; ++i) if (objects[i] == pending_item) chosen = i;
+  pending_item = NULL;
+ }
+ if (chosen < 0) {
+  next_choices = cJSON_CreateArray();
+  for (i = 0; i < count; ++i) {
+   char label[512], id[32]; cJSON *j = cJSON_CreateObject();
+   describe(objects[i], false, label, sizeof(label)); strnfmt(id, sizeof(id), "%d", i);
+   string(j, "id", id); string(j, "label", label); cJSON_AddItemToArray(next_choices, j);
+  }
+  v = prompt("choice", text, count, "");
+  if (cJSON_IsString(v)) chosen = atoi(v->valuestring);
+  cJSON_Delete(v);
+ }
+ if (chosen >= 0 && chosen < count && get_item_allow(objects[chosen], cmd_lookup_key(cmd,keymode), cmd, (mode & IS_HARMLESS) != 0)) {
+  *choice = objects[chosen]; mem_free(objects); return true;
+ }
+ mem_free(objects); return false;
+}
+
+static void pump(void)
+{
+ static char line[FRAME_LIMIT + 2]; cJSON *r, *p; const char *id, *method; size_t n, i;
+ if (!fgets(line, sizeof(line), stdin)) {
+  connected = false;
+  if (character_generated && player && !player->is_dead) {
+   terms_disconnecting = 1; save_game_checked();
+  }
+  exit(0);
+ }
+ n = strlen(line);
+ if (n >= FRAME_LIMIT || !strchr(line, '\n')) { fprintf(stderr, "Invalid frame size\n"); exit(2); }
+ { const char *end = NULL;
+  r = cJSON_ParseWithOpts(line, &end, true);
+ }
+ if (!r) { error("", "invalid_request", "Expected one JSON object."); return; }
+ id = str(r, "id"); method = str(r, "method"); p = cJSON_GetObjectItem(r, "params");
+ if (!*id || strlen(id) > 64 || !streq(str(r, "kind"), "request") || !cJSON_IsObject(p)) {
+  error(id, "invalid_request", "Request needs kind, id, method and params."); goto done;
+ }
+ for (i = 0; i < seen_count; ++i) if (streq(id, seen_ids[i])) {
+  error(id, "duplicate_id", "A request ID cannot execute twice."); goto done;
+ }
+ if (seen_count == N_ELEMENTS(seen_ids)) { error(id, "busy", "Connection request limit reached."); goto done; }
+ seen_ids[seen_count++] = string_make(id);
+ if (streq(method, "hello")) {
+  bool match = false; cJSON *v, *out;
+  cJSON_ArrayForEach(v, cJSON_GetObjectItem(p, "protocols"))
+   if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
+  if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
+  negotiated = true;
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"terminal.fallback\":1},\"max_frame_bytes\":1048576}");
+  response(id, out); goto done;
+ }
+ if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
+ if (streq(method, "commands.list")) response(id, command_list());
+ else if (streq(method, "state.get")) response(id, snapshot ? cJSON_Duplicate(snapshot, true) : cJSON_CreateObject());
+ else if (streq(method, "catalog.get")) {
+  cJSON *out = cJSON_CreateObject(), *features = cJSON_CreateArray();
+  if (initialized) for (i = 0; i < FEAT_MAX; ++i) {
+   cJSON *f = cJSON_CreateObject(); number(f, "id", (int)i); string(f, "name", f_info[i].name);
+   number(f, "glyph", f_info[i].d_char); number(f, "color", f_info[i].d_attr); cJSON_AddItemToArray(features, f);
+  }
+  cJSON_AddItemToObject(out, "features", features); response(id, out);
+ } else if (streq(method, "session.new") || streq(method, "session.load")) {
+  const char *name = str(p, "save");
+  if (launch_mode >= 0) { error(id, "wrong_phase", "Start another backend process for another game."); goto done; }
+  if (!*name || strlen(name) > 64 || strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(name)) {
+   error(id, "invalid_argument", "Save name must use letters, numbers, hyphens or underscores."); goto done;
+  }
+  savefile_set_name(name, false, false);
+  if ((streq(method, "session.new") && file_exists(savefile)) ||
+      (streq(method, "session.load") && !file_exists(savefile))) {
+   error(id, "invalid_argument", "Save already exists for New, or is missing for Load."); goto done;
+  }
+  launch_mode = streq(method, "session.new") ? GAME_NEW : GAME_LOAD;
+  response(id, cJSON_CreateObject());
+ } else if (streq(method, "saves.list")) {
+  savefile_getter g = NULL; cJSON *out = cJSON_CreateArray();
+  while (got_savefile(&g)) {
+   const struct savefile_details *d = get_savefile_details(g); cJSON *j = cJSON_CreateObject();
+   string(j, "id", d->fnam); string(j, "description", d->desc); cJSON_AddItemToArray(out, j);
+  }
+  cleanup_savefile_getter(g); response(id, out);
+ } else if (!streq(str(p, "session_id"), "session-1")) error(id, "wrong_session", "Stale session.");
+ else if (streq(method, "inspect.get")) {
+  cJSON *v, *found = NULL;
+  cJSON_ArrayForEach(v, cJSON_GetObjectItem(snapshot, "items")) if (streq(str(v, "id"), str(p, "handle"))) found = v;
+  cJSON_ArrayForEach(v, cJSON_GetObjectItem(snapshot, "monsters")) if (streq(str(v, "id"), str(p, "handle"))) found = v;
+  if (found) response(id, cJSON_Duplicate(found, true)); else error(id, "stale_handle", "Select from the current snapshot.");
+ } else if (streq(method, "prompt.reply")) {
+  cJSON *v = cJSON_GetObjectItem(p, "value"); const char *type = str(active_prompt, "type");
+  cJSON *option; bool valid_choice = false;
+  if (cJSON_IsString(v) && streq(type, "choice"))
+   cJSON_ArrayForEach(option, cJSON_GetObjectItem(active_prompt, "choices"))
+    if (streq(str(option, "id"), v->valuestring)) valid_choice = true;
+  if (!active_prompt || !streq(str(p, "prompt_id"), str(active_prompt, "prompt_id"))) error(id, "stale_handle", "Prompt is no longer active.");
+  else if (!v || !(valid_choice || cJSON_IsNull(v) || (streq(type, "confirmation") && cJSON_IsBool(v)) ||
+   (streq(type, "text") && cJSON_IsString(v) && strlen(v->valuestring) <= (size_t)num(active_prompt, "maximum", 0)) ||
+   (streq(type, "quantity") && cJSON_IsNumber(v) && v->valuedouble == v->valueint && v->valueint >= 0 && v->valueint <= num(active_prompt, "maximum", 0))))
+   error(id, "invalid_argument", "Invalid prompt value.");
+  else { reply_value = cJSON_Duplicate(v, true); response(id, cJSON_CreateObject()); }
+ } else if (streq(method, "terminal.input")) {
+  int key = num(p, "key", -1);
+  const char *name = str(p, "key");
+  if (streq(name, "enter")) key = KC_ENTER;
+  else if (streq(name, "escape")) key = ESCAPE;
+  else if (streq(name, "backspace")) key = KC_BACKSPACE;
+  else if (streq(name, "tab")) key = KC_TAB;
+  else if (streq(name, "up")) key = ARROW_UP;
+  else if (streq(name, "down")) key = ARROW_DOWN;
+  else if (streq(name, "left")) key = ARROW_LEFT;
+  else if (streq(name, "right")) key = ARROW_RIGHT;
+  if (active_prompt || !streq(str(p, "context"), context_text)) error(id, "stale_revision", "Input context changed.");
+  else if (key < 1 || key > 0x10ffff) error(id, "invalid_argument", "Invalid key.");
+  else { Term_keypress(key, 0); response(id, cJSON_CreateObject()); }
+ } else if (streq(method, "command.execute")) {
+  if (!ready || active_prompt) error(id, "busy", "Finish the current prompt first.");
+  else if (!streq(str(p, "revision"), revision_text)) error(id, "stale_revision", "State changed; choose again.");
+  else {
+   for (i = 0; i < N_ELEMENTS(commands); ++i) if (streq(str(p, "command"), commands[i].id)) break;
+   if (i == N_ELEMENTS(commands)) error(id, "invalid_argument", "Unknown command.");
+   else {
+    cJSON *out = cJSON_CreateObject();
+    const char *item = str(p, "item");
+    pending_item = NULL;
+    if (*item) {
+     cJSON *record; int ix = 0;
+     cJSON_ArrayForEach(record, cJSON_GetObjectItem(snapshot, "items")) {
+      ++ix;
+      if (streq(str(record, "id"), item) && ix < (int)item_handle_count) pending_item = item_handles[ix];
+     }
+     if (!pending_item) { cJSON_Delete(out); error(id, "stale_handle", "Select a current item."); goto done; }
+    }
+    my_strcpy(action, id, sizeof(action)); string(out, "action_id", action);
+    /* Route through ordinary text UI prerequisites, inscription checks and queue. */
+    {
+     int key = commands[i].key;
+     cmd_code code = cmd_lookup(key, KEYMAP_MODE_ORIG);
+     if (code != CMD_NULL) key = cmd_lookup_key(code, OPT(player, rogue_like_commands) ? KEYMAP_MODE_ROGUE : KEYMAP_MODE_ORIG);
+     else if (key == 'l' && OPT(player, rogue_like_commands)) key = 'x';
+     /* The engine's explicit bypass preserves semantic commands under user keymaps. */
+     Term_keypress('\\', 0); Term_keypress(key, 0);
+    }
+    response(id, out);
+   }
+  }
+ } else if (streq(method, "session.save") || streq(method, "session.close")) {
+  if (!ready || active_prompt || !character_generated) error(id, "busy", "Return to normal play before saving.");
+  else if (!save_game_checked()) error(id, "io_error", "The engine could not save. Your game remains open.");
+  else { response(id, cJSON_CreateObject()); if (streq(method, "session.close")) { closing = true; exit(0); } }
+ } else error(id, "unsupported_capability", "Operation is not implemented in protocol 0.1.");
+done:
+ cJSON_Delete(r);
+}
+
+static errr xtra(int n, int v)
+{
+ if (n == TERM_XTRA_EVENT) {
+  if (!v) { if (input_available()) pump(); return 0; }
+  publish(); if (ready) complete();
+  while (terminal.key_head == terminal.key_tail && connected) pump();
+  ready = false;
+ }
+ return 0;
+}
+static errr text_hook(int x, int y, int n, int a, const wchar_t *s) { return 0; }
+static errr wipe_hook(int x, int y, int n) { return 0; }
+static errr cursor_hook(int x, int y) { return 0; }
+static errr get_command(cmd_context context)
+{
+ if (context != CTX_GAME) return textui_get_cmd(context);
+ phase = "playing"; ready = true;
+ return textui_get_cmd(context);
+}
+static void lifecycle(game_event_type type, game_event_data *data, void *user)
+{
+ if (type == EVENT_ENTER_BIRTH) phase = "birth";
+ else if (type == EVENT_ENTER_STORE) phase = "store";
+ else if (type == EVENT_LEAVE_STORE) phase = "playing";
+ else if (type == EVENT_ENTER_DEATH) phase = "dead";
+}
+static void log_hook(const char *message) { fprintf(stderr, "%s\n", message); }
+
+int main(int argc, char **argv)
+{
+ const char *data = "lib", *user = "deluxe-user"; int i;
+#ifdef WINDOWS
+ setlocale(LC_ALL, ".UTF8");
+#else
+ setlocale(LC_ALL, "");
+#endif
+ setvbuf(stdin, NULL, _IONBF, 0);
+ for (i = 1; i + 1 < argc; i += 2) {
+  if (streq(argv[i], "--data-dir")) data = argv[i + 1];
+  else if (streq(argv[i], "--user-dir")) user = argv[i + 1];
+  else { fprintf(stderr, "Unknown option\n"); return 2; }
+ }
+ plog_aux = log_hook; ANGBAND_SYS = "deluxe";
+ init_file_paths(data, data, user); create_needed_dirs();
+ term_init(&terminal, SCREEN_W, SCREEN_H, 256);
+ terminal.xtra_hook = xtra; terminal.text_hook = text_hook;
+ terminal.wipe_hook = wipe_hook; terminal.curs_hook = cursor_hook;
+ terminal.never_bored = true; terminal.never_frosh = true;
+ Term_activate(&terminal); angband_term[0] = &terminal;
+ while (launch_mode < 0) pump();
+ init_display(); init_angband(); textui_init(); initialized = true;
+ get_check_hook = check_hook; get_string_hook = string_hook; get_quantity_hook = quantity_hook;
+ original_get_item = get_item_hook; get_item_hook = item_hook;
+ cmd_get_hook = get_command;
+ event_add_handler(EVENT_ENTER_BIRTH, lifecycle, NULL);
+ event_add_handler(EVENT_ENTER_STORE, lifecycle, NULL);
+ event_add_handler(EVENT_LEAVE_STORE, lifecycle, NULL);
+ event_add_handler(EVENT_ENTER_DEATH, lifecycle, NULL);
+ play_game((enum game_mode_type)launch_mode);
+ phase = "finished"; ready = false; publish(); complete();
+ textui_cleanup(); cleanup_angband();
+ return 0;
+}
