@@ -67,6 +67,8 @@ static int look_click_mods;
 static char action[80];
 static cJSON *snapshot, *reply_value, *active_prompt;
 static cJSON *next_choices;
+static struct object **item_choice_objects;
+static int item_choice_count;
 static struct object *item_handles[8192], *pending_item;
 static size_t item_handle_count;
 static bool (*original_get_item)(struct object **, const char *, const char *, cmd_code, item_tester, int);
@@ -263,7 +265,13 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
   bool equipped = object_is_equipped(player->body, o);
   if (item_is_available((struct object *)o)) {
    if (!equipped && obj_can_wear(o)) cJSON_AddItemToArray(actions, cJSON_CreateString("core.wield"));
-   if (obj_is_useable(o) && (!obj_is_activatable(o) || equipped)) cJSON_AddItemToArray(actions, cJSON_CreateString("core.use"));
+   if (obj_is_useable(o) && (!obj_is_activatable(o) || equipped)) {
+    const char *use=tval_is_potion(o)?"core.quaff":tval_is_scroll(o)?"core.read":tval_is_edible(o)?"core.eat":"core.use";
+    cJSON_AddItemToArray(actions,cJSON_CreateString(use));
+   }
+   if(equipped && obj_can_takeoff(o)) cJSON_AddItemToArray(actions,cJSON_CreateString("core.takeoff"));
+   if(obj_can_fire(o)) cJSON_AddItemToArray(actions,cJSON_CreateString("core.fire"));
+   if(obj_can_throw(o)) cJSON_AddItemToArray(actions,cJSON_CreateString("core.throw"));
    if (carried && (!equipped || obj_can_takeoff(o))) cJSON_AddItemToArray(actions, cJSON_CreateString("core.drop"));
    cJSON_AddItemToArray(actions, cJSON_CreateString("core.inscribe"));
   }
@@ -452,6 +460,18 @@ static cJSON *prompt(const char *type, const char *text, int maximum, const char
  ready = false; publish();
  string(p, "prompt_id", context_text); string(p, "type", type); string(p, "text", text);
  number(p, "maximum", maximum); string(p, "initial", initial);
+ if(item_choice_objects) {
+  int i, mapped=0; cJSON *records=cJSON_GetObjectItem(snapshot,"items");
+  for(i=0;i<item_choice_count;++i) {
+   size_t index;
+   cJSON *entry=cJSON_GetArrayItem(next_choices,i);
+   for(index=1;index<item_handle_count;++index) if(item_handles[index]==item_choice_objects[i]) {
+    cJSON *record=cJSON_GetArrayItem(records,(int)index-1);
+    string(entry,"item_id",str(record,"id")); ++mapped; break;
+   }
+  }
+  if(mapped==item_choice_count) string(p,"selection_kind","item");
+ }
  if (next_choices) { cJSON_AddItemToObject(p, "choices", next_choices); next_choices = NULL; }
  active_prompt = p; event("prompt.requested", cJSON_Duplicate(p, true));
  while (!reply_value && connected) pump();
@@ -488,8 +508,13 @@ static bool item_hook(struct object **choice, const char *text, const char *reje
    char label[512], id[32]; cJSON *j = cJSON_CreateObject();
    describe(objects[i], false, label, sizeof(label)); strnfmt(id, sizeof(id), "%d", i);
    string(j, "id", id); string(j, "label", label); cJSON_AddItemToArray(next_choices, j);
+   if(object_is_carried(player,objects[i])) {
+    char shortcut[2]={gear_to_label(player,objects[i]),0}; string(j,"shortcut",shortcut);
+   }
   }
+  item_choice_objects=objects; item_choice_count=count;
   v = prompt("choice", text, count, "");
+  item_choice_objects=NULL; item_choice_count=0;
   if (cJSON_IsString(v)) chosen = atoi(v->valuestring);
   cJSON_Delete(v);
  }
@@ -530,7 +555,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -729,6 +754,10 @@ static void pump(void)
     response(id, out);
    }
   }
+ } else if (streq(method, "debug.quit")) {
+  /* Deliberately bypass close_game(), which saves a living character.
+   * Loading opens the save read-only; leave that existing file untouched. */
+  response(id,cJSON_CreateObject()); closing=true; exit(0);
  } else if (streq(method, "debug.damage")) {
   cJSON *amount = cJSON_GetObjectItem(p, "amount");
   if (!ready || active_prompt || !character_generated || player->is_dead || !streq(phase, "playing"))

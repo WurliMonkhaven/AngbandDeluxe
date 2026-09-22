@@ -435,3 +435,17 @@ Movement-direction prompts (including T) keep the native dungeon clickable
 and feed clicks into the original engine direction handler. Context-menu Tunnel
 continues until the hole is made or normal engine interruption/futility stops
 it; exhaustion of a repeat batch alone does not abandon the requested dig.
+
+### Native item selection
+
+The ordinary Items tab remains a unified inventory/equipment view. Starting
+Quaff, Read, Use, Fire, Throw or another item command opens a native selector
+containing only eligible items, with location, quantity and full inspection
+text. Double-click, arrows/Enter and unique engine letter shortcuts select;
+Cancel/Escape returns without performing the action. Original engine quantity
+and inscription confirmations follow normally. Item-first actions use the
+same commands and eligibility rules. Dungeon presentation remains visible.
+
+Dev tools includes Quit without saving. It closes the backend and Deluxe
+without writing the current session, preserving the most recent existing save.
+Loading a regular save is read-only. Unsaved progress is intentionally discarded.

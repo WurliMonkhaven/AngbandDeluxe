@@ -547,6 +547,31 @@ class BackendTests(unittest.TestCase):
         e.key("up")
         self.assertEqual(e.state["cursor"], cursor)
 
+    def test_quit_without_saving(self):
+        e=self.engine
+        e.hello(); e.birth()
+        saved_hp=e.state['player']['hp']
+        self.assertIn('result',e.call('session.close'))
+        e.process.wait(timeout=10); e.stop()
+        save=Path(self.temp.name)/'save'/'ProtocolTest'
+        original=save.read_bytes()
+        self.engine=e=Engine(self.temp.name)
+        e.hello()
+        self.assertIn('result',e.call('session.load',{'save':'ProtocolTest'}))
+        e.next_state(None)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertEqual(save.read_bytes(),original,'Loading must preserve the save')
+        old=e.state['revision']
+        e.call('debug.damage',{'amount':1}); e.next_state(old)
+        self.assertEqual(e.state['player']['hp'],saved_hp-1)
+        self.assertIn('result',e.call('debug.quit'))
+        self.assertEqual(e.process.wait(timeout=10),0); e.stop()
+        self.assertEqual(save.read_bytes(),original,'Quit without saving must preserve the last save exactly')
+        self.engine=e=Engine(self.temp.name)
+        e.hello(); e.call('session.load',{'save':'ProtocolTest'}); e.next_state(None)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertEqual(e.state['player']['hp'],saved_hp)
+
     def test_debug_damage(self):
         e = self.engine
         e.hello()
@@ -585,7 +610,7 @@ class BackendTests(unittest.TestCase):
         self.assertIn("actual", initial["items"][0])
         potion = next(i for i in initial["items"] if "Potion" in i["label"])
         self.assertNotIn("core.wield", potion["actions"])
-        self.assertIn("core.use", potion["actions"])
+        self.assertIn("core.quaff", potion["actions"])
         self.assertIn("core.drop", potion["actions"])
         self.assertIn("An inheritance from your family", potion["description"])
         self.assertIn("When quaffed", potion["description"])
@@ -727,6 +752,40 @@ class BackendTests(unittest.TestCase):
         self.assertGreater(e.state['turn'],turn)
         self.assertLessEqual(max(abs(e.state['player']['x']-wall['x']),abs(e.state['player']['y']-wall['y'])),1)
         self.assertNotEqual(e.state['map']['actual'][wall['y']][wall['x']],original_feature,e.screen())
+
+    def test_native_item_selection(self):
+        e=self.engine
+        e.hello(); e.birth()
+        before=e.state
+        self.assertIn('result',e.call('command.execute',{'revision':before['revision'],'command':'core.quaff'}))
+        e.wait_prompt()
+        self.assertEqual(e.prompt['selection_kind'],'item')
+        self.assertTrue(e.state['item_selection'])
+        self.assertIn('dungeon',e.state)
+        items={o['id']:o for o in e.state['items']}
+        self.assertTrue(e.prompt['choices'])
+        for option in e.prompt['choices']:
+            self.assertIn(option['item_id'],items)
+            self.assertIn('core.quaff',items[option['item_id']]['actions'])
+        self.assertGreater(len(items),len(e.prompt['choices']))
+        self.assertEqual(e.call('prompt.reply',{'prompt_id':e.prompt['prompt_id'],'value':'not-an-option'})['error']['code'],'invalid_argument')
+        choice=e.prompt['choices'][0]
+        kind=items[choice['item_id']]['actual']['kind']
+        amount=sum(o['quantity'] for o in e.state['items'] if o['location']=='Pack' and o['actual']['kind']==kind)
+        old=e.state['revision']; prompt=e.prompt; e.prompt=None
+        self.assertIn('result',e.call('prompt.reply',{'prompt_id':prompt['prompt_id'],'value':choice['id']}))
+        e.next_state(old)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertEqual(sum(o['quantity'] for o in e.state['items'] if o['location']=='Pack' and o['actual']['kind']==kind),amount-1)
+        self.assertGreater(e.state['turn'],before['turn'])
+        turn=e.state['turn']
+        self.assertIn('result',e.call('command.execute',{'revision':e.state['revision'],'command':'core.read'}))
+        e.wait_prompt()
+        self.assertEqual(e.prompt['selection_kind'],'item')
+        old=e.state['revision']; prompt=e.prompt; e.prompt=None
+        e.call('prompt.reply',{'prompt_id':prompt['prompt_id'],'value':None})
+        e.next_state(old)
+        self.assertEqual(e.state['turn'],turn)
 
     def test_item_prompt_cancel_and_inscription(self):
         e = self.engine

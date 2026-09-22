@@ -59,6 +59,9 @@ int main(int argc,char **argv) {
   view_state["direction_prompt"]=true;
   check(dungeon_view(view_state),"Movement direction prompts must retain the clickable dungeon");
   view_state["direction_prompt"]=false;
+  view_state["item_selection"]=true;
+  check(dungeon_view(view_state),"Item selection must retain the dungeon behind the native selector");
+  view_state["item_selection"]=false;
   int tile_x=-1,tile_y=-1;
   check(grid_cell_at(15,25,10,20,4,3,tile_x,tile_y) && tile_x==1 && tile_y==1,"Tile hit test must use fitted cell dimensions");
   check(!grid_cell_at(-1,5,10,20,4,3,tile_x,tile_y),"Letterbox must not select a tile");
@@ -89,6 +92,14 @@ int main(int argc,char **argv) {
   check(!pickup.key("up"),"Travel must not leak queued movement");
   check(pickup.key("escape") && !pickup.pickup_travel,"Escape must interrupt busy pickup travel");
   check(!pickup.key("escape"),"Only one interruption should be sent before acknowledgement");
+  Connection discard; discard.connected=true; discard.capabilities={{"debug.quit",1}};
+  discard.quit_without_saving();
+  check(discard.busy && discard.close_requested && !discard.closed,"Quit must wait for backend acknowledgement");
+  check(discard.requests.at("r1")=="debug.quit","Quit without saving must use the non-saving request");
+  discard.receive({{"kind","response"},{"id","r1"},{"result",json::object()}});
+  check(discard.closed && discard.close_confirmed && !discard.return_to_menu,"Acknowledged quit must close the app");
+  discard.process_stopped(0);
+  check(discard.messages.empty() && !discard.restart_ready,"Deliberate quit must not show a backend error or restart");
   HealthGlitch health;
   json health_state={{"phase","playing"},{"player",{{"hp",30},{"hp_warning",30},{"death_pending",false}}}};
   check(health.update(health_state,1)==0,"HP at warning threshold should not glitch");

@@ -121,6 +121,11 @@ struct Connection {
   close_requested=leave; return_to_menu=menu;
   send(leave?"session.close":"session.save"); busy=true;
  }
+ void quit_without_saving() {
+  if(!connected || busy || capabilities.value("debug.quit",0)<1) return;
+  close_requested=true; return_to_menu=false;
+  send("debug.quit"); busy=true;
+ }
  std::string send(const std::string &method, json params = json::object()) {
   if (!connected) return "";
   auto id = "r" + std::to_string(++next);
@@ -158,7 +163,7 @@ struct Connection {
   if (j.contains("error")) {
    const auto error=j["error"].value("message","Request failed"); notice(error); busy = false; pickup_travel=false;
    if(!state.contains("terminal")) menu_error=error;
-   if(method=="session.close") { close_requested=false; return_to_menu=false; }
+   if(method=="session.close" || method=="debug.quit") { close_requested=false; return_to_menu=false; }
    if(method == "prompt.reply") { prompt = pending_prompt; pending_prompt = json::object(); }
    return;
   }
@@ -172,7 +177,7 @@ struct Connection {
   else if (method == "catalog.get") catalog = result;
   else if (method == "session.new" || method == "session.load") { menu_error.clear(); send("catalog.get"); }
   else if (method == "session.save") { busy = false; notice("Game saved."); }
-  else if (method == "session.close") { close_confirmed=true; closed = !return_to_menu; busy = false; }
+  else if (method == "session.close" || method == "debug.quit") { close_confirmed=true; closed = !return_to_menu; busy = false; }
   else if (method == "prompt.reply") pending_prompt = json::object();
  }
  void flush_input() {
@@ -293,7 +298,7 @@ struct UI {
  ImGuiStyle base_style;
  char item_filter[128]{}, message_filter[128]{}, command_filter[128]{}, save_name[65] = "Adventurer";
  char prompt_text[4096]{};
- std::string last_prompt, selected, settings_path;
+ std::string last_prompt, selected, settings_path, prompt_item;
  std::string managed_save;
  char renamed_save[65]{};
  std::vector<json> keys;
@@ -835,8 +840,8 @@ struct UI {
    bool first=true;
    for(const auto &action:o.value("actions",json::array())) {
     const std::string id=action.get<std::string>();
-    const char *label=id=="core.wield"?"Wield":id=="core.use"?"Use":id=="core.drop"?"Drop":"Inscribe";
-    if(!first) ImGui::SameLine(); first=false;
+    const char *label=id=="core.wield"?"Wield / wear":id=="core.use"?"Use":id=="core.quaff"?"Quaff":id=="core.read"?"Read":id=="core.eat"?"Eat":id=="core.fire"?"Fire":id=="core.throw"?"Throw":id=="core.takeoff"?"Take off":id=="core.drop"?"Drop":"Inscribe";
+    if(!first && ImGui::GetContentRegionAvail().x>ImGui::CalcTextSize(label).x+ImGui::GetStyle().FramePadding.x*2+ImGui::GetStyle().ItemSpacing.x) ImGui::SameLine(); first=false;
     if(ImGui::Button(label)) execute(id,selected);
    }
    ImGui::EndDisabled();
@@ -872,18 +877,91 @@ struct UI {
   }
   ImGui::Dummy(ImVec2(cell*map[0].size(),cell*map.size()));
  }
+ bool item_selection_prompt(bool fresh) {
+  std::vector<const json*> rows;
+  if(c.state.contains("items")) for(const auto &item:c.state["items"]) {
+   if(item.value("location","")=="Floor") {
+    const auto &player=c.state["player"];
+    if(item.value("x",-1)!=player.value("x",-2) || item.value("y",-1)!=player.value("y",-2)) continue;
+   }
+   rows.push_back(&item);
+  }
+  auto option_for=[&](const std::string &id)->const json* {
+   for(const auto &option:c.prompt["choices"]) if(option.value("item_id","")==id) return &option;
+   return nullptr;
+  };
+  rows.erase(std::remove_if(rows.begin(),rows.end(),[&](const json *item){ return !option_for(item->value("id","")); }),rows.end());
+  if(fresh) {
+   prompt_item.clear();
+   for(const auto *item:rows) if(option_for(item->value("id",""))) { prompt_item=item->value("id",""); break; }
+  }
+  int selected_row=0;
+  for(size_t i=0;i<rows.size();++i) if(rows[i]->value("id","")==prompt_item) selected_row=int(i);
+  if(!rows.empty()) {
+   if(ImGui::IsKeyPressed(ImGuiKey_UpArrow)) selected_row=std::max(0,selected_row-1);
+   if(ImGui::IsKeyPressed(ImGuiKey_DownArrow)) selected_row=std::min(int(rows.size())-1,selected_row+1);
+   prompt_item=rows[selected_row]->value("id","");
+  }
+  std::string answer;
+  ImGui::TextDisabled("Double-click an item or press Enter to choose it.");
+  const float height=std::min(ImGui::GetTextLineHeightWithSpacing()*float(std::clamp(int(rows.size())+1,3,16)),ImGui::GetMainViewport()->WorkSize.y*.48f);
+  if(ImGui::BeginTable("Item choices",4,ImGuiTableFlags_RowBg|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollY,ImVec2(0,height))) {
+   ImGui::TableSetupColumn("Key",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFontSize()*2);
+   ImGui::TableSetupColumn("Item",ImGuiTableColumnFlags_WidthStretch);
+   ImGui::TableSetupColumn("Location"); ImGui::TableSetupColumn("Qty"); ImGui::TableSetupScrollFreeze(0,1); ImGui::TableHeadersRow();
+   for(const auto *item:rows) {
+    const auto id=item->value("id",""); const auto *option=option_for(id);
+    ImGui::PushID(id.c_str()); ImGui::TableNextRow(); ImGui::TableNextColumn();
+    if(!option) ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextUnformatted(option?option->value("shortcut","").c_str():""); ImGui::TableNextColumn();
+    if(ImGui::Selectable(item->value("label","").c_str(),prompt_item==id,ImGuiSelectableFlags_SpanAllColumns|ImGuiSelectableFlags_AllowDoubleClick)) {
+     prompt_item=id;
+     if(option && ImGui::IsMouseDoubleClicked(0)) answer=option->value("id","");
+    }
+    if(prompt_item==id && (fresh || ImGui::IsKeyPressed(ImGuiKey_UpArrow) || ImGui::IsKeyPressed(ImGuiKey_DownArrow))) ImGui::SetScrollHereY();
+    ImGui::TableNextColumn(); ImGui::TextUnformatted(display_label(item->value("location","")).c_str());
+    ImGui::TableNextColumn(); ImGui::Text("%d",item->value("quantity",0));
+    if(!option) ImGui::PopStyleColor(); ImGui::PopID();
+   }
+   ImGui::EndTable();
+  }
+  // Inventory/equipment can reuse a letter. Only unambiguous shortcuts select;
+  // arrows and Enter always work across the complete unified list.
+  for(const auto &option:c.prompt["choices"]) {
+   const auto key=option.value("shortcut",""); int matches=0;
+   if(key.size()!=1 || key[0]<'a' || key[0]>'z') continue;
+   for(const auto &other:c.prompt["choices"]) if(other.value("shortcut","")==key) ++matches;
+   if(matches==1 && ImGui::IsKeyPressed(ImGuiKey(ImGuiKey_A+key[0]-'a'))) answer=option.value("id","");
+  }
+  ImGui::BeginChild("Choice inspection",ImVec2(0,ImGui::GetTextLineHeightWithSpacing()*5));
+  for(const auto *item:rows) if(item->value("id","")==prompt_item) {
+   ImGui::TextWrapped("%s",item->value("description","").c_str());
+   if(!option_for(prompt_item)) ImGui::TextDisabled("Not available for this action.");
+  }
+  ImGui::EndChild();
+  const auto *chosen=option_for(prompt_item);
+  ImGui::BeginDisabled(!chosen);
+  if(ImGui::Button("Choose") || (chosen && ImGui::IsKeyPressed(ImGuiKey_Enter))) answer=chosen->value("id","");
+  ImGui::EndDisabled(); ImGui::SameLine();
+  if(!answer.empty()) { c.answer(answer); return true; }
+  return false;
+ }
  void prompts() {
   if(c.prompt.empty()) return;
   auto id=c.prompt.value("prompt_id","");
   const bool fresh=id!=last_prompt;
+  const bool item_selection=c.prompt.value("selection_kind","")=="item";
   if(fresh) { last_prompt=id; SDL_strlcpy(prompt_text,c.prompt.value("initial","").c_str(),sizeof(prompt_text)); }
   if(!ImGui::IsPopupOpen("Angband asks")) ImGui::OpenPopup("Angband asks");
+  if(item_selection) ImGui::SetNextWindowSize(ImVec2(std::min(ImGui::GetMainViewport()->WorkSize.x-24,ImGui::GetFontSize()*48),0),ImGuiCond_Always);
   if(ImGui::BeginPopupModal("Angband asks",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
    ImGui::TextWrapped("%s",c.prompt.value("text","").c_str());
    auto type=c.prompt.value("type",""); bool answered=false;
    if(type=="confirmation") {
     if(ImGui::Button("Yes")) { c.answer(true); answered=true; } ImGui::SameLine();
     if(ImGui::Button("No")) { c.answer(false); answered=true; }
+   } else if(type=="choice" && item_selection) {
+    answered=item_selection_prompt(fresh);
    } else if(type=="choice") {
     for (const auto &option:c.prompt.value("choices",json::array())) {
      if(ImGui::Selectable(option.value("label","").c_str())) { c.answer(option.at("id")); answered=true; break; }
@@ -931,6 +1009,8 @@ struct UI {
   bool open_damage=false;
   if(ImGui::BeginPopup("Developer tools")) {
    if(ImGui::MenuItem("Inflict damage on player",nullptr,false,c.ready() && c.state.value("phase","")=="playing")) open_damage=true;
+   ImGui::Separator();
+   if(ImGui::MenuItem("Quit without saving",nullptr,false,c.connected && !c.busy && c.capabilities.value("debug.quit",0)>0)) c.quit_without_saving();
    ImGui::EndPopup();
   }
   if(open_damage) { damage_amount=1; ImGui::OpenPopup("Inflict damage on player"); }

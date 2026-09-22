@@ -237,3 +237,19 @@ used by tunnelling, opening and similar commands. It retains `dungeon`.
 confirmation. `aiming` continues to mean the separate ranged direction prompt.
 Context-menu Tunnel continues with another engine repeat batch when the prior
 batch expires. Success, impossible digging and ordinary disturbance end it.
+
+### Native item choices (`prompts.items: 1`)
+
+Item prompts retain `type: choice` and add `selection_kind: item`. Each eligible
+choice has an `item_id` referencing the immediately preceding snapshot, plus an
+optional engine inventory/equipment `shortcut`. Reply with the choice `id`, not
+the item handle. Eligibility, inscriptions, quantities and confirmations remain
+engine-owned. If a choice cannot be linked, the generic choice UI remains valid.
+`item_selection: true` lets the native dungeon remain visible behind the prompt.
+Item action lists expose specific Quaff/Read/Eat actions instead of generic Use
+for consumables, plus eligible Take off, Fire and Throw actions.
+
+`debug.quit` (capability `debug.quit: 1`) acknowledges then exits successfully
+without calling the engine save/close-game path. Unlike `session.close`, it
+preserves existing save bytes and discards current unsaved state. The client
+closes only after the acknowledgement, without a backend-stopped error.
