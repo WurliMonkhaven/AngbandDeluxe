@@ -23,6 +23,8 @@ connection limit. This limit and duplicate policy are development limitations.
 | `hello` | Offer protocol 0.1; receive selected protocol, engine and capability metadata. |
 | `commands.list` | Return supported command IDs and labels. |
 | `saves.list` | Return available save IDs and descriptions. |
+| `saves.rename` | Main menu only. `save`: existing save ID; `name`: unused new ID using the same naming rules as New. Renames the file without changing character data. |
+| `saves.delete` | Main menu only. `save`: existing save ID. Permanently removes that save file; the client confirms first. |
 | `session.new`, `session.load` | `save`: 1–64 ASCII letters, digits, underscores or hyphens. New refuses overwrite; Load requires an existing save. |
 | `catalog.get` | Terrain definitions; available after engine initialization. |
 | `state.get` | Return the latest cached snapshot without advancing the simulation. |

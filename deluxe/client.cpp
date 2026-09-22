@@ -125,7 +125,8 @@ struct Connection {
   const auto &result = j.at("result");
   if (method == "hello") {
    negotiated = true; send("saves.list"); send("commands.list");
-  } else if (method == "saves.list") saves = result;
+  } else if (method == "saves.list") { saves = result; busy=false; }
+  else if (method == "saves.rename" || method == "saves.delete") { menu_error.clear(); send("saves.list"); }
   else if (method == "commands.list") commands = result;
   else if (method == "catalog.get") catalog = result;
   else if (method == "session.new" || method == "session.load") { menu_error.clear(); send("catalog.get"); }
@@ -228,6 +229,8 @@ struct UI {
  char item_filter[128]{}, message_filter[128]{}, command_filter[128]{}, save_name[65] = "Adventurer";
  char prompt_text[4096]{};
  std::string last_prompt, selected, settings_path;
+ std::string managed_save;
+ char renamed_save[65]{};
  std::vector<json> keys;
  void load_settings() {
   try { std::ifstream in(settings_path); if (!in) return; json j; in >> j;
@@ -258,15 +261,60 @@ struct UI {
   else if(return_from_prompt && c.pending_prompt.empty()) { return_from_prompt=false; focus_game(); }
  }
  void launcher() {
-  ImGui::TextUnformatted("ANGBAND DELUXE");
+  const float heading_right=ImGui::GetCursorPosX()+ImGui::GetContentRegionAvail().x;
+  ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Characters");
+  ImGui::SameLine();
+  const float new_character_width=ImGui::CalcTextSize("New character").x+2*ImGui::GetStyle().FramePadding.x;
+  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),heading_right-new_character_width));
   ImGui::BeginDisabled(!c.negotiated || c.busy);
   if (ImGui::Button("New character")) { c.menu_error.clear(); ImGui::OpenPopup("New character"); }
-  ImGui::SeparatorText("Saved characters");
-  for (const auto &s:c.saves) {
+  ImGui::Separator();
+  bool rename_clicked=false, delete_clicked=false;
+  if(ImGui::BeginTable("Saved characters",3,ImGuiTableFlags_SizingStretchProp)) {
+   ImGui::TableSetupColumn("Character",ImGuiTableColumnFlags_WidthStretch);
+   ImGui::TableSetupColumn("Rename",ImGuiTableColumnFlags_WidthFixed);
+   ImGui::TableSetupColumn("Delete",ImGuiTableColumnFlags_WidthFixed);
+   for (const auto &s:c.saves) {
    std::string id=s.value("id","");
+   ImGui::PushID(id.c_str()); ImGui::TableNextRow(); ImGui::TableNextColumn();
    if (ImGui::Selectable((id+" — "+s.value("description","")).c_str())) { c.menu_error.clear(); c.send("session.load",{{"save",id}}); c.busy=true; focus_game(); }
+   ImGui::TableNextColumn();
+   if(ImGui::Button("Rename")) { managed_save=id; SDL_strlcpy(renamed_save,id.c_str(),sizeof(renamed_save)); rename_clicked=true; c.menu_error.clear(); }
+   ImGui::TableNextColumn();
+   if(ImGui::Button("Delete")) { managed_save=id; delete_clicked=true; c.menu_error.clear(); }
+   ImGui::PopID();
+   }
+   ImGui::EndTable();
   }
   ImGui::EndDisabled();
+  if(rename_clicked) ImGui::OpenPopup("Rename save");
+  if(delete_clicked) ImGui::OpenPopup("Delete save");
+  if(ImGui::BeginPopupModal("Rename save",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+   ImGui::Text("Rename %s",managed_save.c_str());
+   if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+   const bool entered=ImGui::InputText("Save name",renamed_save,sizeof(renamed_save),ImGuiInputTextFlags_EnterReturnsTrue);
+   const std::string name=renamed_save;
+   const bool valid=!name.empty() && name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")==std::string::npos;
+   bool exists=false; for(const auto &s:c.saves) if(s.value("id","")==name) exists=true;
+   if(!valid) ImGui::TextUnformatted("Use letters, numbers, hyphens or underscores.");
+   else if(exists && name!=managed_save) ImGui::TextUnformatted("That save name is already in use.");
+   ImGui::BeginDisabled(!valid||exists||c.busy||!c.connected);
+   if(ImGui::Button("Rename") || (entered&&valid&&!exists&&!c.busy&&c.connected)) {
+    c.send("saves.rename",{{"save",managed_save},{"name",name}}); c.busy=true; ImGui::CloseCurrentPopup();
+   }
+   ImGui::EndDisabled(); ImGui::SameLine();
+   if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+   ImGui::EndPopup();
+  }
+  if(ImGui::BeginPopupModal("Delete save",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+   ImGui::Text("Permanently delete %s?",managed_save.c_str());
+   ImGui::TextUnformatted("This cannot be undone.");
+   ImGui::BeginDisabled(c.busy||!c.connected);
+   if(ImGui::Button("Delete save")) { c.send("saves.delete",{{"save",managed_save}}); c.busy=true; ImGui::CloseCurrentPopup(); }
+   ImGui::EndDisabled(); ImGui::SameLine();
+   if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+   ImGui::EndPopup();
+  }
   if(!c.menu_error.empty()) ImGui::TextWrapped("[SYSTEM] %s",c.menu_error.c_str());
   if(ImGui::BeginPopupModal("New character",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
    ImGui::TextUnformatted("Save name");
@@ -514,7 +562,10 @@ struct UI {
    ImGui::EndPopup();
   }
   if(!in_game) launcher();
-  if(in_game && ImGui::BeginTable("layout",2,ImGuiTableFlags_Resizable|ImGuiTableFlags_BordersInnerV)) {
+  const auto phase=c.state.value("phase","launcher");
+  const bool creating_character=in_game && (phase=="birth" || phase=="launcher");
+  if(creating_character) grid(std::max(1.f,ImGui::GetContentRegionAvail().y));
+  if(in_game && !creating_character && ImGui::BeginTable("layout",2,ImGuiTableFlags_Resizable|ImGuiTableFlags_BordersInnerV)) {
    ImGui::TableSetupColumn("Game",ImGuiTableColumnFlags_WidthStretch,0.69f);
    ImGui::TableSetupColumn("Panels",ImGuiTableColumnFlags_WidthStretch,0.31f);
    ImGui::TableNextRow(); ImGui::TableNextColumn();

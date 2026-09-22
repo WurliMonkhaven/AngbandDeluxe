@@ -168,6 +168,53 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(e.call("session.load", {"save": "missing"})["error"]["code"], "invalid_argument")
         self.assertEqual(e.call("anything")["error"]["code"], "unsupported_capability")
 
+    def test_save_rename_delete(self):
+        e = self.engine
+        e.hello()
+        e.birth()
+        e.call("session.close")
+        e.process.wait(timeout=10)
+        e.stop()
+        self.engine = e = Engine(self.temp.name)
+        e.hello()
+        save_dir = Path(self.temp.name) / "save"
+        original = save_dir / "ProtocolTest"
+        data = original.read_bytes()
+        occupied = save_dir / "Occupied"
+        occupied.write_bytes(data)
+        for method, params in [
+            ("saves.rename", {"save": "../ProtocolTest", "name": "Renamed"}),
+            ("saves.rename", {"save": "ProtocolTest", "name": "../escape"}),
+            ("saves.rename", {"save": "ProtocolTest", "name": "Occupied"}),
+            ("saves.rename", {"save": "Missing", "name": "Renamed"}),
+            ("saves.delete", {"save": "../ProtocolTest"}),
+            ("saves.delete", {"save": "Missing"}),
+        ]:
+            self.assertEqual(e.call(method, params)["error"]["code"], "invalid_argument")
+        self.assertEqual(original.read_bytes(), data)
+        self.assertEqual(occupied.read_bytes(), data)
+        self.assertIn("result", e.call("saves.rename", {"save": "ProtocolTest", "name": "Renamed"}))
+        self.assertFalse(original.exists())
+        self.assertEqual((save_dir / "Renamed").read_bytes(), data)
+        saves = e.call("saves.list")["result"]
+        self.assertIn("Renamed", [s["id"] for s in saves])
+        self.assertNotIn("ProtocolTest", [s["id"] for s in saves])
+        e.call("session.load", {"save": "Renamed"})
+        e.next_state(None)
+        while e.state["readiness"] != "ready":
+            e.key("enter")
+        self.assertEqual(e.call("saves.delete", {"save": "Renamed"})["error"]["code"], "wrong_phase")
+        self.assertEqual(e.call("saves.rename", {"save": "Renamed", "name": "Other"})["error"]["code"], "wrong_phase")
+        e.call("session.close")
+        e.process.wait(timeout=10)
+        e.stop()
+        self.engine = e = Engine(self.temp.name)
+        e.hello()
+        self.assertIn("result", e.call("saves.delete", {"save": "Renamed"}))
+        self.assertFalse((save_dir / "Renamed").exists())
+        self.assertNotIn("Renamed", [s["id"] for s in e.call("saves.list")["result"]])
+        self.assertEqual(occupied.read_bytes(), data)
+
     def test_birth_stat_cursor(self):
         e = self.engine
         e.hello()

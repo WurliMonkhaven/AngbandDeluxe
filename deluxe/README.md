@@ -49,6 +49,9 @@ Use a separate user directory when testing an existing save.
 
 Choose New character to enter a save name, or choose a saved character. The main
 menu shows only character choices and Settings; game panels appear after starting.
+Each saved character has Rename and Delete buttons. Rename changes the save's
+filename, preserving character data; Delete asks for confirmation before permanently
+removing it. Existing save names cannot be overwritten.
 The game takes keyboard focus
 automatically when starting/loading and after commands or prompts. Its thin blue
 border indicates focus; click it to return from another panel. Character creation and remaining classic menus use Angband's
@@ -101,12 +104,13 @@ restriction. Reading these values does not identify objects or spend turns.
 ## Validation recorded on Windows
 
 The earlier native Debug build passed all 934 existing Angband unit tests. The
-current RelWithDebInfo build passed six
+current RelWithDebInfo build passed seven
 real-engine integration tests: protocol validation; gameplay/save/reload;
 item prompt validation, cancellation and inscription; and same-save keyboard/API
 wait-action parity with repeated inspection queries; and descending into the
 dungeon, inspecting its items and returning upstairs; and terminal cursor position
-and visibility while changing the selected birth stat. Debug capture asserts RNG
+and visibility while changing the selected birth stat; and save rename/delete,
+including reload, collision/path validation and active-session protection. Debug capture asserts RNG
 purity. Manual desktop checks exercised character creation, load, item selection,
 native inscription prompts, cancellation, saving and closing.
 

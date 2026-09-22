@@ -493,6 +493,23 @@ static void pump(void)
   }
   launch_mode = streq(method, "session.new") ? GAME_NEW : GAME_LOAD;
   response(id, cJSON_CreateObject());
+ } else if (streq(method, "saves.rename") || streq(method, "saves.delete")) {
+  const char *name = str(p, "save"), *new_name = str(p, "name");
+  char source[sizeof(savefile)];
+  bool rename_save = streq(method, "saves.rename");
+  if (launch_mode >= 0) { error(id, "wrong_phase", "Manage saves from the main menu."); goto done; }
+  if (!*name || strlen(name) > 64 || strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(name) ||
+      (rename_save && (!*new_name || strlen(new_name) > 64 || strspn(new_name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(new_name)))) {
+   error(id, "invalid_argument", "Save names must use letters, numbers, hyphens or underscores."); goto done;
+  }
+  savefile_set_name(name, false, false); my_strcpy(source, savefile, sizeof(source));
+  if (!file_exists(source)) { error(id, "invalid_argument", "That save no longer exists."); goto done; }
+  if (rename_save) {
+   savefile_set_name(new_name, false, false);
+   if (file_exists(savefile)) { error(id, "invalid_argument", "That save name is already in use."); goto done; }
+   if (!file_move(source, savefile)) { error(id, "io_error", "Could not rename the save."); goto done; }
+  } else if (!file_delete(source)) { error(id, "io_error", "Could not delete the save."); goto done; }
+  response(id, cJSON_CreateObject());
  } else if (streq(method, "saves.list")) {
   savefile_getter g = NULL; cJSON *out = cJSON_CreateArray();
   while (got_savefile(&g)) {
