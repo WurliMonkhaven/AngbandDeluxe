@@ -59,16 +59,16 @@ static const CrtPreset &crt_preset(int strength) {
  };
  return presets[std::clamp(strength,0,3)];
 }
-enum CrtPart { Scanlines, Glow, Bloom, Fringe, Edges, Barrel, Hum, CrtPartCount };
-static const char *crt_labels[]={"Scanlines","Phosphor Glow","Bloom","Chromatic Aberration","Edge Shading","Barrel Distortion","Hum Bar"};
-static const char *crt_keys[]={"scanlines","glow","bloom","chromatic_aberration","edge_shading","barrel_distortion","hum_bar"};
+enum CrtPart { Scanlines, Glow, Bloom, Fringe, Edges, Barrel, Hum, Ghost, CrtPartCount };
+static const char *crt_labels[]={"Scanlines","Phosphor Glow","Bloom","Chromatic Aberration","Vignetting","Barrel Distortion","Hum Bar","Ghosting"};
+static const char *crt_keys[]={"scanlines","glow","bloom","chromatic_aberration","edge_shading","barrel_distortion","hum_bar","ghosting"};
 struct CrtControl { bool enabled=true; float value=0; };
 struct CrtSettings {
  std::array<CrtControl,CrtPartCount> parts;
  CrtSettings(int strength=1) {
   const auto &p=crt_preset(strength);
   const float values[]={p.scan_alpha/1.5f,p.glow_alpha/.004f,p.bloom_alpha/.002f,
-   p.fringe/ .016f,p.edge_alpha/1.6f,(.004f+.003f*std::clamp(strength,0,3))/.00018f,p.hum_alpha/.5f};
+   p.fringe/ .016f,p.edge_alpha/1.6f,(.004f+.003f*std::clamp(strength,0,3))/.00018f,p.hum_alpha/.5f,5.f+20.f*std::clamp(strength,0,3)};
   for(int i=0;i<CrtPartCount;++i) parts[i]={true,values[i]};
  }
  float level(int part) const { return parts[part].enabled?parts[part].value/100.f:0.f; }
@@ -86,8 +86,8 @@ struct CrtSettings {
  }
  CrtPreset resolved() const {
   return {int(150*level(Scanlines)),int(160*level(Edges)),int(50*level(Hum)),
-   1.6f*level(Fringe),.65f*level(Fringe),1.2f*level(Glow),.4f*level(Glow),
-   3.f*level(Bloom),.2f*level(Bloom)};
+   1.6f*level(Fringe),.65f*level(Fringe),4.f+6.f*std::sqrt(level(Glow)),.60f*level(Glow),
+   18.f*level(Bloom),.20f*level(Bloom)};
  }
 };
 // A downward-moving front lights the surface abruptly, fading smoothly behind it.
@@ -102,8 +102,22 @@ static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size,const CrtSettin
  const ImVec2 end(pos.x+size.x,pos.y+size.y);
  draw->PushClipRect(pos,end,true);
  const float pixel=1.f/std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.y);
- for(float y=pos.y;preset.scan_alpha>0 && y<end.y;y+=3.f*pixel)
-  draw->AddRectFilled(ImVec2(pos.x,y),ImVec2(end.x,std::min(end.y,y+pixel)),IM_COL32(0,0,0,preset.scan_alpha));
+ for(float y=pos.y;preset.scan_alpha>0 && y<end.y;y+=3.f*pixel) {
+  // Pixel coverage for a one-pixel stripe: retain its full darkness at the
+  // centre, with a one-pixel ramp on either side. These ramps travel through
+  // the barrel transform with the stripe, avoiding hard pixel-row jumps.
+  const float center=y+.5f*pixel;
+  auto coverage=[&](float row) {
+   return IM_COL32(0,0,0,int(preset.scan_alpha*std::max(0.f,1.f-std::abs(row-center)/pixel)));
+  };
+  for(int half=0;half<2;++half) {
+   const float top=std::max(pos.y,center+(half-1)*pixel);
+   const float bottom=std::min(end.y,center+half*pixel);
+   if(bottom<=top) continue;
+   const auto a=coverage(top),b=coverage(bottom);
+   draw->AddRectFilledMultiColor(ImVec2(pos.x,top),ImVec2(end.x,bottom),a,a,b,b);
+  }
+ }
  if(preset.edge_alpha>0) {
  const float edge=std::min(size.x,size.y)*.09f;
  const ImU32 dark=IM_COL32(0,8,5,preset.edge_alpha),clear=IM_COL32(0,8,5,0);
@@ -127,10 +141,35 @@ static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size,const CrtSettin
  }
  draw->PopClipRect();
 }
-// Reuse the font's antialiased glyph coverage for a small phosphor halo and
-// red/cyan channel fringes. Keep the original sharp glyph on top. Solid UI
-// backgrounds are passed through, and original draw order/clip rectangles
-// preserve popup occlusion. No full-screen blur buffers or flicker are needed.
+// Cache a smooth Gaussian light footprint in the font atlas. Each halo then
+// costs one textured quad rather than a large mesh or many letter copies.
+static ImFontAtlasRectId crt_halo_rect=ImFontAtlasRectId_Invalid;
+static float crt_halo_alpha(float x,float y) {
+ const float r2=x*x+y*y;
+ return r2>=1?0.f:(std::exp(-4.5f*r2)-std::exp(-4.5f))/(1-std::exp(-4.5f));
+}
+static void crt_init_halo() {
+ auto *atlas=ImGui::GetIO().Fonts;
+ ImFontAtlasRect rect;
+ crt_halo_rect=atlas->AddCustomRect(64,64,&rect);
+ if(crt_halo_rect==ImFontAtlasRectId_Invalid) return;
+ for(int y=0;y<64;++y) for(int x=0;x<64;++x) {
+  const unsigned char alpha=static_cast<unsigned char>(255*crt_halo_alpha((x-31.5f)/31.5f,(y-31.5f)/31.5f));
+  auto *pixel=static_cast<unsigned char*>(atlas->TexData->GetPixelsAt(rect.x+x,rect.y+y));
+  if(atlas->TexData->BytesPerPixel==4) { pixel[0]=pixel[1]=pixel[2]=255; pixel[3]=alpha; }
+  else pixel[0]=alpha;
+ }
+}
+static void crt_halo(ImDrawList *out,ImVec2 center,ImVec2 radius,ImU32 color,float opacity) {
+ if(opacity<=0) return;
+ auto *atlas=ImGui::GetIO().Fonts;
+ ImFontAtlasRect rect;
+ if(!atlas->GetCustomRect(crt_halo_rect,&rect)) return;
+ const auto alpha=ImU32(((color>>IM_COL32_A_SHIFT)&255)*std::clamp(opacity,0.f,1.f));
+ out->AddImage(atlas->TexRef,ImVec2(center.x-radius.x,center.y-radius.y),ImVec2(center.x+radius.x,center.y+radius.y),
+  rect.uv0,rect.uv1,(color&~IM_COL32_A_MASK)|(alpha<<IM_COL32_A_SHIFT));
+}
+// Preserve draw order, clipping and popup occlusion; sharp glyphs are drawn last.
 static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source,const CrtSettings &settings=CrtSettings{}) {
  const auto preset=settings.resolved();
  auto out=std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
@@ -161,18 +200,23 @@ static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source,const C
     }
    };
    if(font && textured) {
-    // Closely spaced horizontal taps simulate phosphor bleed without creating
-    // vertically displaced letter copies. Cap spread relative to small glyphs.
-    float left=v[0].pos.x,right=left;
-    for(unsigned k=1;k<count;++k) { left=std::min(left,v[k].pos.x); right=std::max(right,v[k].pos.x); }
-    const float limit=std::max(.25f,(right-left)/pixel*.22f);
-    const float radius=std::min(preset.glow_radius,limit),bloom=std::min(preset.bloom_radius,limit);
-    if(preset.glow_alpha>0) { emit(-radius,0,preset.glow_alpha,IM_COL32_WHITE); emit(radius,0,preset.glow_alpha,IM_COL32_WHITE); }
-    for(int tap=1;preset.bloom_alpha>0 && tap<=3;++tap) {
-     const float distance=bloom*tap/3.f;
-     const float opacity=preset.bloom_alpha*std::exp(-float(tap*tap)/4.f);
-     emit(-distance,0,opacity,IM_COL32_WHITE); emit(distance,0,opacity,IM_COL32_WHITE);
+    float left=v[0].pos.x,right=left,top=v[0].pos.y,bottom=top;
+    for(unsigned k=1;k<count;++k) {
+     left=std::min(left,v[k].pos.x); right=std::max(right,v[k].pos.x);
+     top=std::min(top,v[k].pos.y); bottom=std::max(bottom,v[k].pos.y);
     }
+    const float width=right-left,height=bottom-top;
+    const float limit=std::max(.25f,width/pixel*.22f);
+    const ImVec2 center((left+right)*.5f,(top+bottom)*.5f);
+    const ImU32 tint=v[0].col;
+    const float brightness=std::max({(tint>>IM_COL32_R_SHIFT)&255,(tint>>IM_COL32_G_SHIFT)&255,(tint>>IM_COL32_B_SHIFT)&255})/255.f;
+    // Bloom favours highlights and spreads much farther than local phosphor glow.
+    const float highlight=std::clamp((brightness-.30f)/.70f,0.f,1.f);
+    const float scale=std::max(pixel,height/16.f);
+    if(preset.bloom_alpha>0) crt_halo(out.get(),center,
+     ImVec2(width*.5f+preset.bloom_radius*scale,height*.5f+preset.bloom_radius*scale),tint,preset.bloom_alpha*highlight*highlight);
+    if(preset.glow_alpha>0) crt_halo(out.get(),center,
+     ImVec2(width*.5f+preset.glow_radius*scale,height*.5f+preset.glow_radius*scale),tint,preset.glow_alpha);
     const float fringe=std::min(preset.fringe,limit);
     if(preset.fringe_alpha>0) { emit(-fringe,0,preset.fringe_alpha,IM_COL32(255,0,0,255));
      emit(fringe,0,preset.fringe_alpha,IM_COL32(0,255,255,255)); }
@@ -214,6 +258,10 @@ static ImDrawVert crt_lerp(const ImDrawVert &a,const ImDrawVert &b,float t) {
 static std::unique_ptr<ImDrawList> crt_curve(const ImDrawList &source,const CrtCurve &curve) {
  auto out=std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
  out->_ResetForNewFrame(); out->Flags=source.Flags;
+ // Reuse transformed vertices for fine meshes such as diffuse light footprints.
+ // Cache absolute positions in the output buffer; check the current 16-bit
+ // index segment before reuse, since PrimReserve can start a new segment.
+ std::vector<int> transformed(source.VtxBuffer.Size,-1);
  auto triangle=[&](auto &&self,const ImDrawVert &a,const ImDrawVert &b,const ImDrawVert &c,int depth)->void {
   const ImDrawVert v[]={a,b,c};
   const ImVec2 p[]={curve.map(a.pos),curve.map(b.pos),curve.map(c.pos)};
@@ -251,7 +299,28 @@ static std::unique_ptr<ImDrawList> crt_curve(const ImDrawList &source,const CrtC
     bool inside=true;
     for(int k=0;k<3;++k) inside=inside && polygon[k].pos.x>=bounds[0] && polygon[k].pos.x<=bounds[1]
      && polygon[k].pos.y>=bounds[2] && polygon[k].pos.y<=bounds[3];
-    if(inside) { triangle(triangle,polygon[0],polygon[1],polygon[2],0); continue; }
+    if(inside) {
+     const auto &a=polygon[0].pos,&b=polygon[1].pos,&c=polygon[2].pos;
+     const float width=std::max({a.x,b.x,c.x})-std::min({a.x,b.x,c.x});
+     const float height=std::max({a.y,b.y,c.y})-std::min({a.y,b.y,c.y});
+     const float extent=std::max(width/curve.size.x,height/curve.size.y);
+     if(12*curve.amount*std::max(curve.size.x,curve.size.y)*extent*extent<.2f) {
+      out->PrimReserve(3,3);
+      const int offset=int(out->_VtxWritePtr-out->VtxBuffer.Data)-int(out->_VtxCurrentIdx);
+      int written=0;
+      for(int k=0;k<3;++k) {
+       const unsigned original=cmd.VtxOffset+source.IdxBuffer[cmd.IdxOffset+i+k];
+       int &cached=transformed[original];
+       if(cached<offset) {
+        cached=offset+int(out->_VtxCurrentIdx);
+        const auto &v=polygon[k]; out->PrimWriteVtx(curve.map(v.pos),v.uv,v.col); ++written;
+       }
+       out->PrimWriteIdx(ImDrawIdx(cached-offset));
+      }
+      out->PrimUnreserve(0,3-written);
+     } else triangle(triangle,polygon[0],polygon[1],polygon[2],0);
+     continue;
+    }
     for(int edge=0;edge<4 && count; ++edge) {
      auto distance=[&](const ImDrawVert &v) {
       const float coordinate=edge<2?v.pos.x:v.pos.y;
@@ -273,6 +342,38 @@ static std::unique_ptr<ImDrawList> crt_curve(const ImDrawList &source,const CrtC
  }
  return out;
 }
+// Frame-rate-independent phosphor persistence. Repeated compositing of an
+// unchanged image leaves it unchanged; only changed pixels retain an afterimage.
+static float crt_persistence_alpha(float strength,double elapsed) {
+ if(strength<=0 || elapsed<0 || elapsed>.3) return 0;
+ const double decay=.008+.022*std::clamp(strength,0.f,1.f);
+ return float(std::exp(-elapsed/decay));
+}
+struct CrtHistory {
+ SDL_GPUTexture *frames[2]{};
+ Uint32 width=0,height=0;
+ int previous=0;
+ bool valid=false;
+ double last_time=0;
+ std::string signature;
+ void clear(SDL_GPUDevice *gpu) {
+  for(auto &frame:frames) { if(frame) SDL_ReleaseGPUTexture(gpu,frame); frame=nullptr; }
+  valid=false; width=height=0; signature.clear();
+ }
+ bool prepare(SDL_GPUDevice *gpu,SDL_GPUTextureFormat format,Uint32 w,Uint32 h,const std::string &key) {
+  if(width!=w || height!=h) clear(gpu);
+  if(!frames[0]) {
+   SDL_GPUTextureCreateInfo info{}; info.type=SDL_GPU_TEXTURETYPE_2D; info.format=format;
+   info.usage=SDL_GPU_TEXTUREUSAGE_COLOR_TARGET|SDL_GPU_TEXTUREUSAGE_SAMPLER;
+   info.width=w; info.height=h; info.layer_count_or_depth=1; info.num_levels=1;
+   frames[0]=SDL_CreateGPUTexture(gpu,&info); frames[1]=SDL_CreateGPUTexture(gpu,&info);
+   if(!frames[0] || !frames[1]) { clear(gpu); return false; }
+   width=w; height=h;
+  }
+  if(signature!=key) { valid=false; signature=key; }
+  return true;
+ }
+};
 struct Connection {
  SDL_Process *process = nullptr;
  std::string received, outgoing, diagnostic, menu_error;
@@ -478,6 +579,7 @@ struct UI {
    crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
    crt_settings=CrtSettings(crt_strength);
    crt_settings.parts[Hum].enabled=j.value("hum_bar",false);
+   crt_settings.parts[Ghost].enabled=false; // New effects remain opt-in for legacy preferences.
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
@@ -989,12 +1091,13 @@ int main(int argc,char **argv) {
  IMGUI_CHECKVERSION(); ImGui::CreateContext();
  auto &io=ImGui::GetIO(); io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad;
  io.Fonts->AddFontFromFileTTF(DELUXE_FONT_FILE,18.f);
+ crt_init_halo();
  ImGui::StyleColorsDark(); ImGui::GetStyle().WindowRounding=5;
  ImGui::GetStyle().FontSizeBase=18.f;
  ImGui_ImplSDL3_InitForSDLGPU(window);
  ImGui_ImplSDLGPU3_InitInfo info{}; info.Device=gpu; info.ColorTargetFormat=SDL_GetGPUSwapchainTextureFormat(gpu,window); info.MSAASamples=SDL_GPU_SAMPLECOUNT_1;
  ImGui_ImplSDLGPU3_Init(&info);
- Connection connection; UI ui{connection};
+ Connection connection; UI ui{connection}; CrtHistory history;
  ui.base_style=ImGui::GetStyle();
  const char *base=SDL_GetBasePath();
  char *pref=SDL_GetPrefPath("AngbandDeluxe","AngbandDeluxe");
@@ -1020,6 +1123,7 @@ int main(int argc,char **argv) {
  while(!connection.closed) {
   connection.poll();
   if(connection.restart_ready) {
+   history.clear(gpu);
    // session.close has acknowledged a successful save and the child has exited.
    SDL_DestroyProcess(connection.process); connection.process=nullptr;
    connection=Connection{};
@@ -1098,20 +1202,48 @@ int main(int argc,char **argv) {
   // ImGui may stop text input when one of its textboxes loses focus. The
   // game also needs SDL's layout-aware text events (including shifted keys).
   if(ui.owns_keyboard() && !SDL_TextInputActive(window)) SDL_StartTextInput(window);
-  auto cmd=SDL_AcquireGPUCommandBuffer(gpu); SDL_GPUTexture *surface=nullptr;
+  auto cmd=SDL_AcquireGPUCommandBuffer(gpu); SDL_GPUTexture *surface=nullptr; Uint32 surface_width=0,surface_height=0;
   if(!cmd) break;
-  if(!SDL_WaitAndAcquireGPUSwapchainTexture(cmd,window,&surface,nullptr,nullptr)) { SDL_CancelGPUCommandBuffer(cmd); break; }
+  if(!SDL_WaitAndAcquireGPUSwapchainTexture(cmd,window,&surface,&surface_width,&surface_height)) { SDL_CancelGPUCommandBuffer(cmd); break; }
   if(surface) {
+   const float persistence=(ui.crt==2 || (ui.crt==1 && ui.game_draw_list))?ui.crt_settings.level(Ghost):0;
+   const double now=ImGui::GetTime();
+   bool accumulate=false;
+   ImDrawList afterimage(ImGui::GetDrawListSharedData()); afterimage._ResetForNewFrame();
+   ImDrawData history_data;
+   if(persistence>0) {
+    const std::string key=json::array({ui.crt,ui.scale,ui.crt_settings.serialize(),ui.game_pos.x,ui.game_pos.y,
+     ui.game_size.x,ui.game_size.y,connection.state.value("phase","")}).dump();
+    accumulate=history.prepare(gpu,SDL_GetGPUSwapchainTextureFormat(gpu,window),surface_width,surface_height,key);
+    if(accumulate && history.valid) {
+     const float alpha=crt_persistence_alpha(persistence,now-history.last_time);
+     const ImVec2 pos=render_data->DisplayPos,size=render_data->DisplaySize;
+     const ImVec2 clip_pos=ui.crt==2?pos:ui.game_pos,clip_size=ui.crt==2?size:ui.game_size;
+     afterimage.PushClipRect(clip_pos,ImVec2(clip_pos.x+clip_size.x,clip_pos.y+clip_size.y));
+     afterimage.AddImage(ImTextureRef((ImTextureID)(intptr_t)history.frames[history.previous]),pos,
+      ImVec2(pos.x+size.x,pos.y+size.y),ImVec2(0,0),ImVec2(1,1),IM_COL32(255,255,255,int(alpha*255)));
+     afterimage.PopClipRect();
+     history_data=*render_data; history_data.AddDrawList(&afterimage); render_data=&history_data;
+    }
+   } else history.clear(gpu);
    ImGui_ImplSDLGPU3_PrepareDrawData(render_data,cmd);
-   SDL_GPUColorTargetInfo target{}; target.texture=surface; target.load_op=SDL_GPU_LOADOP_CLEAR; target.store_op=SDL_GPU_STOREOP_STORE;
+   SDL_GPUColorTargetInfo target{}; target.texture=accumulate?history.frames[1-history.previous]:surface; target.load_op=SDL_GPU_LOADOP_CLEAR; target.store_op=SDL_GPU_STOREOP_STORE;
    target.clear_color=ui.crt==2?SDL_FColor{0,0,0,1.f}:SDL_FColor{.04f,.05f,.07f,1.f};
    auto pass=SDL_BeginGPURenderPass(cmd,&target,1,nullptr);
    ImGui_ImplSDLGPU3_RenderDrawData(render_data,cmd,pass); SDL_EndGPURenderPass(pass);
+   if(accumulate) {
+    SDL_GPUBlitInfo blit{};
+    blit.source.texture=target.texture; blit.source.w=surface_width; blit.source.h=surface_height;
+    blit.destination.texture=surface; blit.destination.w=surface_width; blit.destination.h=surface_height;
+    blit.load_op=SDL_GPU_LOADOP_DONT_CARE; blit.filter=SDL_GPU_FILTER_NEAREST;
+    SDL_BlitGPUTexture(cmd,&blit);
+    history.previous=1-history.previous; history.valid=true; history.last_time=now;
+   }
   }
   SDL_SubmitGPUCommandBuffer(cmd);
   if(SDL_GetWindowFlags(window)&SDL_WINDOW_MINIMIZED) SDL_Delay(20);
  }
- SDL_WaitForGPUIdle(gpu); ImGui_ImplSDLGPU3_Shutdown(); ImGui_ImplSDL3_Shutdown(); ImGui::DestroyContext();
+ SDL_WaitForGPUIdle(gpu); history.clear(gpu); ImGui_ImplSDLGPU3_Shutdown(); ImGui_ImplSDL3_Shutdown(); ImGui::DestroyContext();
  SDL_ReleaseWindowFromGPUDevice(gpu,window); SDL_DestroyGPUDevice(gpu); SDL_DestroyWindow(window); SDL_Quit(); return 0;
 }
 #endif

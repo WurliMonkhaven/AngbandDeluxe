@@ -50,6 +50,7 @@ int main(int argc,char **argv) {
   ImGui::CreateContext(); auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(1600,1000); io.DeltaTime=1.f/60;
   io.BackendFlags|=ImGuiBackendFlags_RendererHasVtxOffset;
   unsigned char *pixels; int w,h; io.Fonts->GetTexDataAsRGBA32(&pixels,&w,&h);
+  crt_init_halo();
   ImGui::NewFrame(); auto *draw=ImGui::GetForegroundDrawList();
   crt_effect(draw,ImVec2(20,30),ImVec2(400,300));
   check(draw->VtxBuffer.Size>0,"CRT effect emitted no geometry");
@@ -102,8 +103,42 @@ int main(int argc,char **argv) {
    for(int other=0;other<CrtPartCount;++other) check(isolated.level(other)==(other==part?1.f:0.f),"Components are coupled");
    if(part==Scanlines || part==Edges || part==Hum) {
     ImDrawList overlay(ImGui::GetDrawListSharedData()); overlay._ResetForNewFrame();
+    overlay.PushClipRect(ImVec2(20,30),ImVec2(420,330));
     crt_effect(&overlay,ImVec2(20,30),ImVec2(400,300),isolated,6);
+    overlay.PopClipRect();
     check(overlay.VtxBuffer.Size>0,"Independent overlay missing");
+    if(part==Scanlines) {
+     const CrtCurve scan_curve(ImVec2(20,30),ImVec2(400,300),3);
+     auto curved_scanlines=crt_curve(overlay,scan_curve);
+     bool bent=false;
+     for(const auto &v:curved_scanlines->VtxBuffer)
+      bent|=std::abs(scan_curve.map(v.pos,true).y-30)<.001f && v.pos.y>30.1f;
+     check(bent,"Scanlines were not included in barrel distortion");
+     // Sample actual curved triangles at neighbouring pixel centres. A hard
+     // stripe jumps by its full alpha; coverage ramps must change gradually.
+     auto sample=[&](float x,float y) {
+      float alpha=0;
+      for(const auto &cmd:curved_scanlines->CmdBuffer) for(unsigned i=0;i+2<cmd.ElemCount;i+=3) {
+       const auto &a=curved_scanlines->VtxBuffer[cmd.VtxOffset+curved_scanlines->IdxBuffer[cmd.IdxOffset+i]];
+       const auto &b=curved_scanlines->VtxBuffer[cmd.VtxOffset+curved_scanlines->IdxBuffer[cmd.IdxOffset+i+1]];
+       const auto &c=curved_scanlines->VtxBuffer[cmd.VtxOffset+curved_scanlines->IdxBuffer[cmd.IdxOffset+i+2]];
+       const float det=(b.pos.y-c.pos.y)*(a.pos.x-c.pos.x)+(c.pos.x-b.pos.x)*(a.pos.y-c.pos.y);
+       if(std::abs(det)<1e-8f) continue;
+       const float u=((b.pos.y-c.pos.y)*(x-c.pos.x)+(c.pos.x-b.pos.x)*(y-c.pos.y))/det;
+       const float v=((c.pos.y-a.pos.y)*(x-c.pos.x)+(a.pos.x-c.pos.x)*(y-c.pos.y))/det;
+       const float w=1-u-v;
+       if(u>=0 && v>=0 && w>=0) alpha=std::max(alpha,(u*(a.col>>IM_COL32_A_SHIFT)+v*(b.col>>IM_COL32_A_SHIFT)+w*(c.col>>IM_COL32_A_SHIFT))/255.f);
+      }
+      return alpha;
+     };
+     float last=sample(30.5f,33.5f),maximum_jump=0; bool partial=false;
+     for(int x=31;x<410;++x) {
+      const float current=sample(x+.5f,33.5f);
+      maximum_jump=std::max(maximum_jump,std::abs(current-last)); last=current;
+      partial|=current>.05f && current<.45f;
+     }
+     check(partial && maximum_jump<.08f,"Curved scanline edges still jump abruptly between pixels");
+    }
     if(part==Hum) for(const auto &v:overlay.VtxBuffer)
      check(v.pos.y<=180.001f,"Hum glow extends ahead of its downward-facing edge");
    }
@@ -112,12 +147,61 @@ int main(int argc,char **argv) {
     check(effect->IdxBuffer.Size>single.IdxBuffer.Size,"Independent text effect missing");
    }
   }
+  auto glow_only=disabled,bloom_only=disabled,ghost_only=disabled;
+  glow_only.parts[Glow]={true,100}; bloom_only.parts[Bloom]={true,100}; ghost_only.parts[Ghost]={true,100};
+  auto halo=crt_phosphor(single,glow_only),bloom=crt_phosphor(single,bloom_only),ghost=crt_phosphor(single,ghost_only);
+  auto extent=[](const ImDrawList &list) {
+   float top=1e6f,bottom=-1e6f;
+   for(const auto &v:list.VtxBuffer) { top=std::min(top,v.pos.y); bottom=std::max(bottom,v.pos.y); }
+   return bottom-top;
+  };
+  check(extent(*halo)>extent(single)+8,"Glow is still confined to the strokes");
+  check(extent(*bloom)>extent(*halo)+8,"Bloom is not more diffuse than glow");
+  // Probe the actual halo texture outside a glyph, where the sharp core cannot
+  // hide the light. Geometry-only checks missed the overly concentrated halo.
+  const auto glow_parameters=glow_only.resolved();
+  float glyph_left=single.VtxBuffer[0].pos.x,glyph_right=glyph_left;
+  float glyph_ymin=single.VtxBuffer[0].pos.y,glyph_ymax=glyph_ymin;
+  for(const auto &v:single.VtxBuffer) {
+   glyph_left=std::min(glyph_left,v.pos.x); glyph_right=std::max(glyph_right,v.pos.x);
+   glyph_ymin=std::min(glyph_ymin,v.pos.y); glyph_ymax=std::max(glyph_ymax,v.pos.y);
+  }
+  const float half_width=(glyph_right-glyph_left)*.5f;
+  const float glow_scale=std::max(1.f,(glyph_ymax-glyph_ymin)/16.f);
+  const float outside=(half_width+2)/(half_width+glow_parameters.glow_radius*glow_scale);
+  check(glow_parameters.glow_alpha*crt_halo_alpha(outside,0)>.12f,"Maximum glow is invisible outside glyphs");
+  check(crt_halo_alpha(0,0)==1 && crt_halo_alpha(1,0)==0 && crt_halo_alpha(.2f,0)>crt_halo_alpha(.7f,0),"Halo lacks smooth falloff to transparent edges");
+  ImFontAtlasRect halo_rect; check(io.Fonts->GetCustomRect(crt_halo_rect,&halo_rect),"Missing halo texture");
+  auto *edge_pixel=static_cast<unsigned char*>(io.Fonts->TexData->GetPixelsAt(halo_rect.x,halo_rect.y));
+  check(edge_pixel[io.Fonts->TexData->BytesPerPixel-1]==0,"Halo texture edge is opaque");
+  check(ghost->IdxBuffer.Size==single.IdxBuffer.Size,"Ghosting still creates displaced copies");
+  for(int i=0;i<6;++i) {
+   const auto &original=single.VtxBuffer[single.IdxBuffer[i]],&actual=ghost->VtxBuffer[i];
+   check(actual.pos.x==original.pos.x && actual.pos.y==original.pos.y,"Ghosting shifts the live image");
+  }
+  check(crt_persistence_alpha(0,.016)==0,"Disabled persistence retains history");
+  check(crt_persistence_alpha(1,.31)==0,"Stale image survives a long pause");
+  check(crt_persistence_alpha(.2f,.016)<crt_persistence_alpha(1,.016),"Persistence slider does not control decay");
+  for(float strength:{.1f,.5f,1.f}) {
+   const float frame=crt_persistence_alpha(strength,1./60.);
+   check(std::abs(frame*frame-crt_persistence_alpha(strength,1./30.))<.00001f,"Persistence depends on frame rate");
+   check(crt_persistence_alpha(strength,.1)<.04f,"Afterimage does not fade quickly");
+   float unchanged=.7f;
+   for(int i=0;i<100;++i) unchanged=.7f*(1-frame)+unchanged*frame;
+   check(std::abs(unchanged-.7f)<.00001f,"Static image accumulates brightness");
+  }
+  for(auto &v:single.VtxBuffer) v.col=IM_COL32(60,60,60,255);
+  auto dim_bloom=crt_phosphor(single,bloom_only);
+  check(dim_bloom->IdxBuffer.Size==single.IdxBuffer.Size,"Bloom should reject dim text below threshold");
+  for(auto &v:single.VtxBuffer) v.col=IM_COL32_WHITE;
   float glyph_top=single.VtxBuffer[0].pos.y,glyph_bottom=glyph_top;
   for(const auto &v:single.VtxBuffer) { glyph_top=std::min(glyph_top,v.pos.y); glyph_bottom=std::max(glyph_bottom,v.pos.y); }
   for(int strength=0;strength<4;++strength) {
    auto readable=crt_phosphor(single,strength);
-   for(const auto &v:readable->VtxBuffer)
-    check(v.pos.y==glyph_top || v.pos.y==glyph_bottom,"Glow introduced vertical glyph ghosts");
+   for(const auto &v:readable->VtxBuffer) {
+    const bool halo_uv=v.uv.x>=halo_rect.uv0.x && v.uv.x<=halo_rect.uv1.x && v.uv.y>=halo_rect.uv0.y && v.uv.y<=halo_rect.uv1.y;
+    if(!halo_uv) check(v.pos.y==glyph_top || v.pos.y==glyph_bottom,"Glow introduced vertical glyph copies");
+   }
    for(int k=0;k<6;++k) {
     const auto &original=single.VtxBuffer[single.IdxBuffer[k]];
     const auto &core=readable->VtxBuffer[readable->VtxBuffer.Size-6+k];
@@ -172,6 +256,19 @@ int main(int argc,char **argv) {
   }
   }
   ImGui::EndFrame(); ImGui::DestroyContext();
+  // Match the app's dynamic atlas lifecycle (including a subsequent font size).
+  ImGui::CreateContext(); auto &dynamic_io=ImGui::GetIO(); dynamic_io.IniFilename=nullptr;
+  dynamic_io.DisplaySize=ImVec2(800,600); dynamic_io.DeltaTime=1.f/60;
+  dynamic_io.BackendFlags|=ImGuiBackendFlags_RendererHasTextures;
+  dynamic_io.Fonts->AddFontDefault(); crt_init_halo();
+  for(float size:{18.f,36.f,72.f}) {
+   ImGui::NewFrame(); ImGui::GetFont()->GetFontBaked(size);
+   ImFontAtlasRect rect; check(dynamic_io.Fonts->GetCustomRect(crt_halo_rect,&rect),"Atlas lost the halo after font resize");
+   auto *center=static_cast<unsigned char*>(dynamic_io.Fonts->TexData->GetPixelsAt(rect.x+32,rect.y+32));
+   check(center[dynamic_io.Fonts->TexData->BytesPerPixel-1]>240,"Halo texture is empty after atlas update");
+   ImGui::EndFrame();
+  }
+  ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Graphics settings and CRT geometry checks passed\n";
   return 0;

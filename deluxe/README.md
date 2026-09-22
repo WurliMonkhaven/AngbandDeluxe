@@ -74,13 +74,19 @@ and UI scale choices from 75% to 150%. The CRT effects tab contains Effects Enab
 (Off, Game Window Only, or Full) and the Effect Strength preset selector (Subtle,
 Classic, Deluxe, Zero Cool). Selecting a preset resets all component sliders and
 switches. Each component has an independent checkbox and 0–100% slider: scanlines,
-phosphor glow, bloom, chromatic aberration, edge shading, barrel distortion, and hum
-bar. Manual adjustments show Custom in the preset selector and persist across restarts.
+phosphor glow, bloom, chromatic aberration, vignetting, barrel distortion, hum
+bar, and ghosting. Manual adjustments show Custom in the preset selector and persist across restarts.
 Existing preferences migrate using their previous preset and hum-bar switch.
 The hum bar has a hard downward-facing leading edge and a smoothly fading trail;
-it rolls every twelve seconds. Glow stays within the text's vertical bounds and
-is capped relative to glyph width to preserve readability. CRT applies to the
-selected surface; mouse targeting follows the barrel curve. Save and Close applies
+it rolls every twelve seconds. Phosphor glow creates a soft local halo; bloom spreads farther and favours bright
+text. Both use smooth light footprints beneath the sharp original glyphs instead
+of displaced letter copies. Ghosting retains the previous rendered image briefly as changed pixels fade out.
+Its slider controls a short decay (up to roughly 0.09 seconds for 95% of the
+afterimage to disappear). The fade is time-based and does not brighten static
+images. History resets on resize, scope/settings changes and session transitions.
+Existing settings leave the new ghosting effect off until enabled or a preset is selected. CRT applies to the
+selected surface; barrel distortion is applied after the effects, so scanlines
+curve with the image. Mouse targeting follows the barrel curve. Save and Close applies
 and persists all changes; Cancel discards them.
 UI scale resizes text, controls and
 spacing together. Character information stays fixed while tab contents scroll.
