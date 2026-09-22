@@ -79,8 +79,7 @@ bar, and ghosting. Manual adjustments show Custom in the preset selector and per
 Existing preferences migrate using their previous preset and hum-bar switch.
 The hum bar has a hard downward-facing leading edge and a smoothly fading trail;
 it rolls every twelve seconds. Phosphor glow creates a soft local halo; bloom spreads farther and favours bright
-text. Both use smooth light footprints beneath the sharp original glyphs instead
-of displaced letter copies. Ghosting retains the previous rendered image briefly as changed pixels fade out.
+text. Both are separable GPU blurs composed with the sharp source image. Ghosting retains the previous rendered image briefly as changed pixels fade out.
 Its slider controls a short decay (up to roughly 0.09 seconds for 95% of the
 afterimage to disappear). The fade is time-based and does not brighten static
 images. History resets on resize, scope/settings changes and session transitions.
@@ -134,10 +133,18 @@ native inscription prompts, cancellation, saving and closing.
 
 These checks do not establish parity for every command or validate other platforms.
 Headless client checks cover staged settings, persistence, failed saves, and CRT
-geometry bounds. Build with `python deluxe/build.py --ninja --target deluxe-client-tests`
+input mapping and decay. Build with `python deluxe/build.py --ninja --target deluxe-client-tests`
 and run `build-deluxe-native/game/deluxe-client-tests.exe` with an unused temporary
 settings-file path as its argument. These checks do not visually validate fullscreen
 or CRT appearance.
+Offscreen GPU readback tests cover pass-through/orientation, glow and bloom,
+curved scanlines, scope and popup layering, and temporal history. Build with
+`python deluxe/build.py --ninja --target deluxe-gpu-tests`, then run
+`build-deluxe-native/game/deluxe-gpu-tests.exe direct3d12` or `vulkan`.
+These tests create no desktop window. Both backends were checked on Windows;
+Metal still needs validation on macOS. Shader sources, regeneration instructions
+and the rendering architecture are documented in [shaders/README.md](shaders/README.md).
+
 The development wire contract is documented in
 [protocol 0.1](../docs/deluxe-protocol-0.1.md).
 
