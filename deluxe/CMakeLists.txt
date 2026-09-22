@@ -14,6 +14,10 @@ FetchContent_GetProperties(imgui)
 if(NOT imgui_POPULATED)
     FetchContent_Populate(imgui)
 endif()
+add_executable(deluxe-client-tests EXCLUDE_FROM_ALL test_client.cpp)
+target_compile_features(deluxe-client-tests PRIVATE cxx_std_17)
+target_compile_definitions(deluxe-client-tests PRIVATE SDL_MAIN_HANDLED DELUXE_CLIENT_TEST)
+target_link_libraries(deluxe-client-tests PRIVATE deluxe_imgui nlohmann_json::nlohmann_json)
 add_library(deluxe_imgui STATIC
     "${imgui_SOURCE_DIR}/imgui.cpp" "${imgui_SOURCE_DIR}/imgui_draw.cpp"
     "${imgui_SOURCE_DIR}/imgui_tables.cpp" "${imgui_SOURCE_DIR}/imgui_widgets.cpp"

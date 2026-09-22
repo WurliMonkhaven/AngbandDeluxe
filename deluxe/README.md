@@ -69,8 +69,11 @@ Confirmation, quantity, text and ordinary item-choice prompts use native
 widgets. The top-left Save and... menu offers Save and continue, Save and return
 to main menu, and Save and quit. Returning to the menu starts a fresh backend only
 after the save succeeds. System notices appear in Messages with a [SYSTEM] prefix.
-Settings at the top right opens a
-popup with UI scale choices from 75% to 150%. UI scale resizes text, controls and
+Settings at the top right opens a tabbed window. Its Graphics tab contains
+fullscreen, UI scale choices from 75% to 150%, and CRT Effects (Off, Game Window
+Only, or Full). CRT adds static scanlines and soft edge shading to the selected
+surface. Save and Close applies and persists the changes; Cancel discards them.
+UI scale resizes text, controls and
 spacing together. Character information stays fixed while tab contents scroll.
 HP, SP and food bars are red, blue and green respectively.
 UI settings persist.
@@ -115,6 +118,11 @@ purity. Manual desktop checks exercised character creation, load, item selection
 native inscription prompts, cancellation, saving and closing.
 
 These checks do not establish parity for every command or validate other platforms.
+Headless client checks cover staged settings, persistence, failed saves, and CRT
+geometry bounds. Build with `python deluxe/build.py --ninja --target deluxe-client-tests`
+and run `build-deluxe-native/game/deluxe-client-tests.exe` with an unused temporary
+settings-file path as its argument. These checks do not visually validate fullscreen
+or CRT appearance.
 The development wire contract is documented in
 [protocol 0.1](../docs/deluxe-protocol-0.1.md).
 

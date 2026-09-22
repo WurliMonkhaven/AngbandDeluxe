@@ -44,6 +44,23 @@ static ImU32 color(int index) {
  const auto &c = colors[std::max(0,index) % std::size(colors)];
  return IM_COL32(c[0],c[1],c[2],255);
 }
+// Static scanlines and a soft edge vignette: no flicker, extra render targets,
+// or gameplay changes. Draw on the chosen surface after its normal content.
+static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size) {
+ if(size.x<=0 || size.y<=0) return;
+ const ImVec2 end(pos.x+size.x,pos.y+size.y);
+ draw->PushClipRect(pos,end,true);
+ const float pixel=1.f/std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.y);
+ for(float y=pos.y;y<end.y;y+=3.f*pixel)
+  draw->AddRectFilled(ImVec2(pos.x,y),ImVec2(end.x,y+pixel),IM_COL32(0,0,0,48));
+ const float edge=std::min(size.x,size.y)*.09f;
+ const ImU32 dark=IM_COL32(0,8,5,80),clear=IM_COL32(0,8,5,0);
+ draw->AddRectFilledMultiColor(pos,ImVec2(pos.x+edge,end.y),dark,clear,clear,dark);
+ draw->AddRectFilledMultiColor(ImVec2(end.x-edge,pos.y),end,clear,dark,dark,clear);
+ draw->AddRectFilledMultiColor(pos,ImVec2(end.x,pos.y+edge),dark,dark,clear,clear);
+ draw->AddRectFilledMultiColor(ImVec2(pos.x,end.y-edge),end,clear,clear,dark,dark);
+ draw->PopClipRect();
+}
 struct Connection {
  SDL_Process *process = nullptr;
  std::string received, outgoing, diagnostic, menu_error;
@@ -219,6 +236,10 @@ static void properties(const json &value) {
 struct UI {
  Connection &c;
  float scale = 1.0f, game_fraction = .72f;
+ bool fullscreen=false, draft_fullscreen=false;
+ int crt=0, draft_crt=0;
+ float draft_scale=1.f;
+ std::string settings_error;
  float split_drag_y = 0.f, split_drag_fraction = .72f;
  bool quit_dialog = false;
  bool grid_focus = false, focus_requested = false, window_active = true;
@@ -236,10 +257,72 @@ struct UI {
   try { std::ifstream in(settings_path); if (!in) return; json j; in >> j;
    scale=std::clamp(j.value("scale",1.f),0.75f,1.5f);
    game_fraction=std::clamp(j.value("game_fraction",.72f),.2f,.9f);
+   fullscreen=j.value("fullscreen",false);
+   crt=std::clamp(j.value("crt",0),0,2);
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
+ bool write_settings(float zoom,bool full,int effect) {
+  const std::string temporary=settings_path+".tmp";
+  std::ofstream out(temporary);
+  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect}}.dump(2);
+  out.close();
+  return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
+ }
  void save_settings() {
-  std::ofstream out(settings_path); out << json{{"scale",scale},{"game_fraction",game_fraction}}.dump(2);
+  if(!write_settings(scale,fullscreen,crt)) c.notice("Settings could not be saved.");
+ }
+ void begin_settings() {
+  draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
+ }
+ bool apply_settings(SDL_Window *window) {
+  if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
+   settings_error=SDL_GetError(); return false;
+  }
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt)) {
+   if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
+   settings_error="Settings could not be saved. Please try again."; return false;
+  }
+  scale=draft_scale; fullscreen=draft_fullscreen; crt=draft_crt;
+  return true;
+ }
+ void settings_window(SDL_Window *window) {
+  auto vp=ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x+vp->WorkSize.x*.5f,vp->WorkPos.y+vp->WorkSize.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
+  ImGui::SetNextWindowSize(ImVec2(std::min(vp->WorkSize.x-24.f,ImGui::GetFontSize()*28),
+   std::min(vp->WorkSize.y-24.f,ImGui::GetFontSize()*19)),ImGuiCond_Appearing);
+  if(ImGui::BeginPopupModal("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings)) {
+   const float footer=ImGui::GetFrameHeightWithSpacing()+ImGui::GetStyle().ItemSpacing.y;
+   ImGui::BeginChild("Settings contents",ImVec2(0,-footer));
+   if(ImGui::BeginTabBar("Settings tabs")) {
+    if(ImGui::BeginTabItem("Graphics")) {
+     ImGui::Spacing(); ImGui::Checkbox("Fullscreen",&draft_fullscreen);
+     ImGui::Spacing(); ImGui::TextUnformatted("UI scale"); ImGui::SetNextItemWidth(-1);
+     char zoom[16]; SDL_snprintf(zoom,sizeof(zoom),"%.0f%%",draft_scale*100);
+     if(ImGui::BeginCombo("##UI scale",zoom)) {
+      for(float value:{.75f,1.f,1.25f,1.5f}) {
+       char label[16]; SDL_snprintf(label,sizeof(label),"%.0f%%",value*100);
+       if(ImGui::Selectable(label,draft_scale==value)) draft_scale=value;
+      }
+      ImGui::EndCombo();
+     }
+     ImGui::Spacing(); ImGui::TextUnformatted("CRT Effects"); ImGui::SetNextItemWidth(-1);
+     const char *effects[]={"Off","Game Window Only","Full"};
+     ImGui::Combo("##CRT Effects",&draft_crt,effects,3);
+     if(!settings_error.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",settings_error.c_str()); }
+     ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+   }
+   ImGui::EndChild();
+   if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+   ImGui::SameLine();
+   const float button_width=ImGui::CalcTextSize("Save and Close").x+2*ImGui::GetStyle().FramePadding.x;
+   ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowWidth()-ImGui::GetStyle().WindowPadding.x-button_width));
+   if(ImGui::Button("Save and Close")) {
+    if(apply_settings(window)) ImGui::CloseCurrentPopup();
+   }
+   ImGui::EndPopup();
+  }
  }
  void focus_game() { focus_requested=true; keys.clear(); }
  void execute(const std::string &id,const std::string &item="") { c.command(id,item); focus_game(); }
@@ -376,6 +459,7 @@ struct UI {
     draw->AddRect(p,ImVec2(p.x+cw,p.y+ch),IM_COL32(255,225,125,255),0,0,std::max(1.f,display_scale));
    }
   }
+  if(crt==1) crt_effect(draw,start,viewport);
   if(!ImGui::IsWindowFocused()) grid_focus=false;
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
@@ -525,7 +609,7 @@ struct UI {
    if(answered) ImGui::CloseCurrentPopup(); ImGui::EndPopup();
   }
  }
- void draw() {
+ void draw(SDL_Window *window) {
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(vp->WorkPos); ImGui::SetNextWindowSize(vp->WorkSize);
   ImGui::Begin("Angband Deluxe",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
@@ -545,22 +629,11 @@ struct UI {
   }
   const float settings_width=ImGui::CalcTextSize("Settings").x+2*ImGui::GetStyle().FramePadding.x;
   ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowSize().x-ImGui::GetStyle().WindowPadding.x-settings_width));
-  if(ImGui::Button("Settings")) ImGui::OpenPopup("Settings popup");
-  const auto settings_corner=ImGui::GetItemRectMax();
-  ImGui::SetNextWindowPos(ImVec2(settings_corner.x,settings_corner.y+ImGui::GetStyle().ItemSpacing.y),ImGuiCond_Always,ImVec2(1,0));
-  if(ImGui::BeginPopup("Settings popup")) {
-   ImGui::TextUnformatted("Settings"); ImGui::Separator();
-   ImGui::SetNextItemWidth(ImGui::GetFontSize()*6);
-   char zoom[16]; SDL_snprintf(zoom,sizeof(zoom),"%.0f%%",scale*100);
-   if(ImGui::BeginCombo("UI scale",zoom)) {
-    for(float value:{.75f,1.f,1.25f,1.5f}) {
-     char label[16]; SDL_snprintf(label,sizeof(label),"%.0f%%",value*100);
-     if(ImGui::Selectable(label,scale==value)) { scale=value; save_settings(); }
-    }
-    ImGui::EndCombo();
+  if(ImGui::Button("Settings")) {
+   begin_settings();
+   ImGui::OpenPopup("Settings");
    }
-   ImGui::EndPopup();
-  }
+  settings_window(window);
   if(!in_game) launcher();
   const auto phase=c.state.value("phase","launcher");
   const bool creating_character=in_game && (phase=="birth" || phase=="launcher");
@@ -654,6 +727,7 @@ struct UI {
  }
 };
 
+#ifndef DELUXE_CLIENT_TEST
 int main(int argc,char **argv) {
  if(!SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMEPAD)) return 1;
  const float dpi=SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -694,6 +768,7 @@ int main(int argc,char **argv) {
   else if(std::string(argv[i])=="--user-dir") user=argv[i+1];
  }
  fs::create_directories(user); ui.settings_path=(fs::path(user)/"settings.json").string(); ui.load_settings();
+ if(ui.fullscreen && !SDL_SetWindowFullscreen(window,true)) { ui.fullscreen=false; connection.notice(std::string("Fullscreen unavailable: ")+SDL_GetError()); }
  std::string ini=(fs::path(user)/"layout.ini").string(); io.IniFilename=ini.c_str();
  connection.start(backend,data,user);
  SDL_StartTextInput(window);
@@ -736,7 +811,11 @@ int main(int argc,char **argv) {
     const char *p=e.text.text; while(*p) ui.keys.push_back(SDL_StepUTF8(&p,nullptr));
    }
   }
-  ImGui_ImplSDLGPU3_NewFrame(); ImGui_ImplSDL3_NewFrame(); ImGui::NewFrame(); ui.draw(); ImGui::Render();
+  ImGui_ImplSDLGPU3_NewFrame(); ImGui_ImplSDL3_NewFrame(); ImGui::NewFrame(); ui.draw(window);
+  if(ui.crt==2) {
+   auto vp=ImGui::GetMainViewport(); crt_effect(ImGui::GetForegroundDrawList(),vp->Pos,vp->Size);
+  }
+  ImGui::Render();
   connection.flush_input(); // Dispatch this frame's input before waiting for presentation.
   // ImGui may stop text input when one of its textboxes loses focus. The
   // game also needs SDL's layout-aware text events (including shifted keys).
@@ -757,3 +836,4 @@ int main(int argc,char **argv) {
  SDL_WaitForGPUIdle(gpu); ImGui_ImplSDLGPU3_Shutdown(); ImGui_ImplSDL3_Shutdown(); ImGui::DestroyContext();
  SDL_ReleaseWindowFromGPUDevice(gpu,window); SDL_DestroyGPUDevice(gpu); SDL_DestroyWindow(window); SDL_Quit(); return 0;
 }
+#endif
