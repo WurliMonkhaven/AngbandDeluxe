@@ -29,15 +29,15 @@ SDL_GPUGraphicsPipeline *pipeline(SDL_GPUDevice *device,SDL_GPUTextureFormat for
  return SDL_CreateGPUGraphicsPipeline(device,&info);
 }
 struct BlurUniforms { float step[4],region[4]; };
-struct CrtUniforms { float region[4],viewport[4],effects[4],shape[4],surface[4]; };
-static_assert(sizeof(BlurUniforms)==32 && sizeof(CrtUniforms)==80,"Shader uniform layout changed");
+struct CrtUniforms { float region[4],viewport[4],effects[4],shape[4],surface[4],optics[4]; };
+static_assert(sizeof(BlurUniforms)==32 && sizeof(CrtUniforms)==96,"Shader uniform layout changed");
 }
 
 bool CrtRenderer::initialize(SDL_GPUDevice *device,SDL_GPUTextureFormat format) {
  shutdown(); device_=device; format_=format; error_.clear();
  auto *vertex=shader(device,CRT_SHADER(fullscreen),SDL_GPU_SHADERSTAGE_VERTEX,0,0);
  auto *blur=shader(device,CRT_SHADER(blur),SDL_GPU_SHADERSTAGE_FRAGMENT,1,1);
- auto *composite=shader(device,CRT_SHADER(crt),SDL_GPU_SHADERSTAGE_FRAGMENT,4,1);
+ auto *composite=shader(device,CRT_SHADER(crt),SDL_GPU_SHADERSTAGE_FRAGMENT,5,1);
  if(vertex && blur && composite) {
   blur_=pipeline(device,light_format,vertex,blur); composite_=pipeline(device,format,vertex,composite);
  }
@@ -74,10 +74,10 @@ bool CrtRenderer::resize(Uint32 width,Uint32 height) {
 bool CrtRenderer::ensure_target(int index) {
  if(targets_[index]) return true;
  SDL_GPUTextureCreateInfo info{};
- info.type=SDL_GPU_TEXTURETYPE_2D; info.format=(index>=1 && index<=4)?light_format:format_;
+ info.type=SDL_GPU_TEXTURETYPE_2D; info.format=((index>=1 && index<=4) || index>=7)?light_format:format_;
  info.usage=SDL_GPU_TEXTUREUSAGE_COLOR_TARGET|SDL_GPU_TEXTUREUSAGE_SAMPLER;
  info.layer_count_or_depth=info.num_levels=1;
- const unsigned divisor=(index==1 || index==2)?2:(index==3 || index==4)?4:1;
+ const unsigned divisor=(index==1 || index==2)?2:(index==3 || index==4 || index>=7)?4:1;
  info.width=std::max(1u,(width_+divisor-1)/divisor); info.height=std::max(1u,(height_+divisor-1)/divisor);
  targets_[index]=SDL_CreateGPUTexture(device_,&info);
  if(!targets_[index]) { error_=std::string("CRT texture allocation failed: ")+SDL_GetError(); release_targets(); return false; }
@@ -96,7 +96,7 @@ void CrtRenderer::draw_pass(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *target,SDL
  SDL_PushGPUFragmentUniformData(cmd,0,uniforms,bytes);
  auto *pass=SDL_BeginGPURenderPass(cmd,&color,1,nullptr);
  SDL_BindGPUGraphicsPipeline(pass,pipeline);
- SDL_GPUTextureSamplerBinding bindings[4]{};
+ SDL_GPUTextureSamplerBinding bindings[5]{};
  for(unsigned i=0;i<count;++i) bindings[i]={inputs[i],sampler_};
  SDL_BindGPUFragmentSamplers(pass,0,bindings,count);
  SDL_DrawGPUPrimitives(pass,3,1,0,0); SDL_EndGPURenderPass(pass);
@@ -112,8 +112,8 @@ void CrtRenderer::render(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *destination,U
  }
  const auto &settings=frame.settings;
  const bool persist=settings.level(Ghost)>0;
- for(int i=1;i<7;++i) {
-  const bool wanted=i<=2?settings.level(Glow)>0:i<=4?settings.level(Bloom)>0:persist;
+ for(int i=1;i<9;++i) {
+  const bool wanted=i<=2?settings.level(Glow)>0:i<=4?settings.level(Bloom)>0:i<=6?persist:settings.level(Glass)>0;
   if(wanted && !ensure_target(i)) { draw_ui(cmd,destination,data,true); return; }
   if(!wanted && targets_[i]) { SDL_ReleaseGPUTexture(device_,targets_[i]); targets_[i]=nullptr; }
  }
@@ -137,7 +137,9 @@ void CrtRenderer::render(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *destination,U
  u.effects[0]=settings.level(Scanlines); u.effects[1]=settings.level(Glow); u.effects[2]=settings.level(Bloom); u.effects[3]=settings.level(Fringe);
  u.shape[0]=settings.level(Edges); u.shape[1]=.018f*settings.level(Barrel); u.shape[2]=settings.level(Hum);
  u.shape[3]=std::clamp(frame.health_glitch,0.f,1.f);
- u.surface[0]=settings.level(Dots); u.surface[1]=settings.level(Interference);
+ u.surface[0]=settings.level(Dots); u.surface[1]=settings.level(Interference); u.surface[2]=float(settings.mask);
+ u.optics[0]=settings.level(Beam); u.optics[1]=settings.level(Focus); u.optics[2]=settings.level(Glass);
+ u.optics[3]=settings.raster_lines>0?std::max(.05f,u.region[3]*height/(3.f*settings.raster_lines)):1.f;
  auto blur=[&](int first,float radius,float threshold) {
   BlurUniforms b{}; std::copy(std::begin(u.region),std::end(u.region),b.region);
   const unsigned factor=first==1?2:4;
@@ -151,12 +153,13 @@ void CrtRenderer::render(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *destination,U
   b.step[0]=0; b.step[1]=1/blur_height; b.step[2]=1.7f*radius*blur_height/height;
   input=targets_[first]; draw_pass(cmd,targets_[first+1],blur_,&input,1,&b,sizeof(b));
  };
- const float glow_scale=std::max(1.f,frame.ui_scale*data->FramebufferScale.y);
+ const float glow_scale=settings.raster_lines>0?std::max(.25f,u.optics[3]):std::max(1.f,frame.ui_scale*data->FramebufferScale.y);
  if(u.effects[1]>0) blur(1,(1.2f+2.0f*std::sqrt(u.effects[1]))*glow_scale,.08f);
  if(u.effects[2]>0) blur(3,(2.f+5.f*u.effects[2])*glow_scale,.30f);
- SDL_GPUTexture *inputs[]={targets_[0],u.effects[1]>0?targets_[2]:targets_[0],u.effects[2]>0?targets_[4]:targets_[0],history_valid_?targets_[5+previous_]:targets_[0]};
+ if(u.optics[2]>0) blur(7,(6.f+12.f*u.optics[2])*glow_scale,.05f);
+ SDL_GPUTexture *inputs[]={targets_[0],u.effects[1]>0?targets_[2]:targets_[0],u.effects[2]>0?targets_[4]:targets_[0],history_valid_?targets_[5+previous_]:targets_[0],u.optics[2]>0?targets_[8]:targets_[0]};
  auto *output=persist?targets_[5+1-previous_]:destination;
- draw_pass(cmd,output,composite_,inputs,4,&u,sizeof(u));
+ draw_pass(cmd,output,composite_,inputs,5,&u,sizeof(u));
  if(persist) {
   SDL_GPUBlitInfo blit{}; blit.source.texture=output; blit.source.w=width; blit.source.h=height;
   blit.destination.texture=destination; blit.destination.w=width; blit.destination.h=height;

@@ -349,11 +349,28 @@ struct UI {
      ImGui::Spacing(); ImGui::TextUnformatted("Effects Enabled"); ImGui::SetNextItemWidth(-1);
      const char *effects[]={"Off","Game Window Only","Full"};
      ImGui::Combo("##CRT Effects",&draft_crt,effects,3);
+     ImGui::Spacing(); ImGui::TextUnformatted("Tube preset"); ImGui::SetNextItemWidth(-1);
+     const char *tubes[]={"Desktop Monitor","Shadow-mask Monitor","Soft Terminal"};
+     if(ImGui::BeginCombo("##Tube",draft_crt_settings.tube_preset<0?"Custom":tubes[draft_crt_settings.tube_preset])) {
+      for(int i=0;i<3;++i) if(ImGui::Selectable(tubes[i],draft_crt_settings.tube_preset==i)) { draft_crt_settings.tube(i); draft_crt_strength=-1; }
+      ImGui::EndCombo();
+     }
+     ImGui::TextUnformatted("Simulated raster lines"); ImGui::SetNextItemWidth(-1);
+     bool automatic_raster=draft_crt_settings.raster_lines==0;
+     if(ImGui::Checkbox("Match window resolution",&automatic_raster)) {
+      draft_crt_settings.raster_lines=automatic_raster?0:480; draft_crt_settings.tube_preset=-1; draft_crt_strength=-1;
+     }
+     if(!automatic_raster && ImGui::SliderInt("##Raster",&draft_crt_settings.raster_lines,240,1200)) { draft_crt_settings.tube_preset=-1; draft_crt_strength=-1; }
+     ImGui::TextUnformatted("Phosphor layout"); ImGui::SetNextItemWidth(-1);
+     const char *masks[]={"Delta RGB dots","Aperture grille","Slot mask"};
+     if(ImGui::Combo("##Mask",&draft_crt_settings.mask,masks,3)) { draft_crt_settings.tube_preset=-1; draft_crt_strength=-1; }
      ImGui::Spacing(); ImGui::TextUnformatted("Effect Strength"); ImGui::SetNextItemWidth(-1);
      const char *strengths[]={"Subtle","Classic","Deluxe","Zero Cool"};
      if(ImGui::BeginCombo("##CRT Effects Strength",draft_crt_strength<0?"Custom":strengths[draft_crt_strength])) {
       for(int i=0;i<4;++i) if(ImGui::Selectable(strengths[i],draft_crt_strength==i)) {
+       const int lines=draft_crt_settings.raster_lines,mask=draft_crt_settings.mask;
        draft_crt_strength=i; draft_crt_settings=CrtSettings(i);
+       draft_crt_settings.raster_lines=lines; draft_crt_settings.mask=mask; draft_crt_settings.tube_preset=-1;
       }
       ImGui::EndCombo();
      }
@@ -362,9 +379,9 @@ struct UI {
      for(int i=0;i<CrtPartCount;++i) {
       auto &control=draft_crt_settings.parts[i];
       ImGui::PushID(i); ImGui::Spacing();
-      if(ImGui::Checkbox(crt_labels[i],&control.enabled)) draft_crt_strength=-1;
+      if(ImGui::Checkbox(crt_labels[i],&control.enabled)) { draft_crt_strength=-1; draft_crt_settings.tube_preset=-1; }
       ImGui::BeginDisabled(!control.enabled); ImGui::SetNextItemWidth(-1);
-      if(ImGui::SliderFloat("##Amount",&control.value,0.f,100.f,"%.0f%%",ImGuiSliderFlags_AlwaysClamp)) draft_crt_strength=-1;
+      if(ImGui::SliderFloat("##Amount",&control.value,0.f,100.f,"%.0f%%",ImGuiSliderFlags_AlwaysClamp)) { draft_crt_strength=-1; draft_crt_settings.tube_preset=-1; }
       ImGui::EndDisabled(); ImGui::PopID();
      }
      ImGui::EndTabItem();

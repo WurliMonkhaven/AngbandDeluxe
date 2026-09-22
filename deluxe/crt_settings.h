@@ -7,34 +7,48 @@
 #include <cmath>
 using json = nlohmann::json;
 
-enum CrtPart { Scanlines, Glow, Bloom, Fringe, Edges, Barrel, Hum, Ghost, Dots, Interference, CrtPartCount };
-static const char *crt_labels[]={"Scanlines","Phosphor Glow","Bloom","Chromatic Aberration","Vignetting","Barrel Distortion","Hum Bar","Ghosting","Phosphor Dots","Signal Interference"};
-static const char *crt_keys[]={"scanlines","glow","bloom","chromatic_aberration","edge_shading","barrel_distortion","hum_bar","ghosting","phosphor_dots","interference"};
+enum CrtPart { Scanlines, Glow, Bloom, Fringe, Edges, Barrel, Hum, Ghost, Dots, Interference, Beam, Focus, Glass, CrtPartCount };
+static const char *crt_labels[]={"Scanlines","Phosphor Glow","Bloom","RGB Convergence","Vignetting","Barrel Distortion","Hum Bar","Ghosting","Phosphor Dots","Signal Interference","Beam Width","Edge Defocus","Glass Diffusion"};
+static const char *crt_keys[]={"scanlines","glow","bloom","chromatic_aberration","edge_shading","barrel_distortion","hum_bar","ghosting","phosphor_dots","interference","beam_width","edge_defocus","glass_diffusion"};
 struct CrtControl {
  bool enabled=true; float value=0;
  bool operator==(const CrtControl &other) const { return enabled==other.enabled && value==other.value; }
 };
 struct CrtSettings {
  std::array<CrtControl,CrtPartCount> parts;
+ int raster_lines=480, mask=1; // 0: delta dots, 1: aperture grille, 2: slot mask
+ int tube_preset=0; // -1 for a customized tube
  CrtSettings(int strength=1) {
   // Slider percentages, in CrtPart order. Keep persisted component keys stable.
   static constexpr float presets[4][CrtPartCount]={
-   {32.f,22.5f,17.5f,12.5f,50.f,22.222222f,24.f,5.f,5.f,1.f},
-   {41.333333f,35.f,27.5f,31.25f,50.f,38.888889f,36.f,25.f,10.f,3.f},
-   {57.333333f,52.5f,42.5f,53.125f,65.625f,55.555556f,52.f,45.f,25.f,8.f},
-   {73.333333f,80.f,75.f,78.125f,78.125f,72.222222f,76.f,65.f,60.f,35.f}
+   {32.f,22.5f,17.5f,12.5f,50.f,22.222222f,24.f,5.f,5.f,0.f,20.f,8.f,8.f},
+   {41.333333f,35.f,27.5f,31.25f,50.f,38.888889f,15.f,25.f,10.f,12.f,35.f,12.f,12.f},
+   {57.333333f,52.5f,42.5f,53.125f,65.625f,55.555556f,15.f,45.f,25.f,13.f,50.f,20.f,20.f},
+   {73.333333f,80.f,75.f,78.125f,78.125f,72.222222f,15.f,65.f,60.f,15.f,85.f,60.f,60.f}
   };
   const auto &values=presets[std::clamp(strength,0,3)];
   for(int i=0;i<CrtPartCount;++i) parts[i]={true,values[i]};
+  if(strength<1) { parts[Hum].enabled=false; parts[Interference].enabled=false; }
  }
- bool operator==(const CrtSettings &other) const { return parts==other.parts; }
+ bool operator==(const CrtSettings &other) const { return parts==other.parts && raster_lines==other.raster_lines && mask==other.mask && tube_preset==other.tube_preset; }
  float level(int part) const { return parts[part].enabled?parts[part].value/100.f:0.f; }
+ void tube(int preset) {
+  *this=CrtSettings(1); tube_preset=preset;
+  parts[Hum].enabled=false; parts[Interference].enabled=false;
+  if(preset==1) { raster_lines=360; mask=0; parts[Dots].value=35; parts[Barrel].value=45; }
+  if(preset==2) { raster_lines=240; mask=2; parts[Beam].value=65; parts[Glow].value=45; parts[Glass].value=30; parts[Focus].value=30; parts[Dots].value=30; }
+ }
  json serialize() const {
-  json j=json::object();
+  json j={{"tube",{{"lines",raster_lines},{"mask",mask},{"preset",tube_preset}}}};
   for(int i=0;i<CrtPartCount;++i) j[crt_keys[i]]={{"enabled",parts[i].enabled},{"value",parts[i].value}};
   return j;
  }
  void load(const json &j) {
+  if(j.contains("tube")) {
+   const auto &t=j.at("tube"); raster_lines=std::clamp(t.value("lines",480),0,1200);
+   mask=std::clamp(t.value("mask",1),0,2); tube_preset=std::clamp(t.value("preset",-1),-1,2);
+  } else { raster_lines=0; mask=0; tube_preset=-1; } // Preserve existing dot layout.
+
   for(int i=0;i<CrtPartCount;++i) if(j.contains(crt_keys[i])) {
    const auto &v=j.at(crt_keys[i]); parts[i].enabled=v.value("enabled",parts[i].enabled);
    const float value=v.value("value",parts[i].value);

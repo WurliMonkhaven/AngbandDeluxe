@@ -47,6 +47,7 @@ int main(int argc,char **argv) {
      ImGui::Render();
      auto *cmd=SDL_AcquireGPUCommandBuffer(gpu);
      CrtFrame frame; frame.scope=scope; frame.settings=CrtSettings(3); frame.game=draw;
+     frame.settings.mask=0; // Stress the costlier delta-dot reconstruction too.
      frame.game_pos=ImVec2(0,0); frame.game_size=ImVec2(1300,950); frame.seconds=sample/60.;
      const auto before=DeluxeGpuGetUploadStats();
      auto start=now(); renderer.render(cmd,target,1920,1080,ImGui::GetDrawData(),frame);
@@ -68,7 +69,7 @@ int main(int argc,char **argv) {
    renderer.shutdown(); SDL_ReleaseGPUTransferBuffer(gpu,download); SDL_ReleaseGPUTexture(gpu,target);
    SDL_WaitForGPUIdle(gpu); ImGui_ImplSDLGPU3_Shutdown(); ImGui::DestroyContext(); SDL_DestroyGPUDevice(gpu); SDL_Quit(); return 0;
   }
-  CrtFrame frame; frame.scope=2;
+  CrtFrame frame; frame.scope=2; frame.settings.raster_lines=0; frame.settings.mask=0;
   for(auto &part:frame.settings.parts) part.enabled=false;
   int thin_stroke=0;
   auto render=[&](bool lit,bool overlay=false) {
@@ -86,7 +87,11 @@ int main(int argc,char **argv) {
    if(thin_stroke) {
     draw->AddRectFilled(ImVec2(0,0),ImVec2(256,128),IM_COL32(0,0,0,255));
     if(thin_stroke==1) draw->AddRectFilled(ImVec2(96,64),ImVec2(160,65),IM_COL32_WHITE);
-    else draw->AddRectFilled(ImVec2(128,32),ImVec2(129,96),IM_COL32_WHITE);
+    else if(thin_stroke==2) draw->AddRectFilled(ImVec2(128,32),ImVec2(129,96),IM_COL32_WHITE);
+    else {
+     draw->AddRectFilled(ImVec2(32,32),ImVec2(96,64),IM_COL32_WHITE);
+     draw->AddRectFilled(ImVec2(160,32),ImVec2(224,64),IM_COL32(64,64,64,255));
+    }
    }
    ImGui::Render();
    auto *cmd=SDL_AcquireGPUCommandBuffer(gpu); check(cmd,"Command buffer");
@@ -108,6 +113,32 @@ int main(int argc,char **argv) {
   check(pixel(original,48,40)>250 && pixel(original,210,104,1)<3,"Offscreen source pattern");
   frame.scope=2; auto plain=render(true);
   check(pixel(plain,48,40)>250 && pixel(plain,48,88)<3 && pixel(plain,210,104)>250,"Shader orientation/pass-through");
+  frame.settings.parts[Glass]={true,100}; auto glass=render(true);
+  check(pixel(glass,75,40)>pixel(plain,75,40)+2,"Glass diffusion has no broad light spill");
+  frame.settings.parts[Glass].enabled=false;
+  frame.settings.parts[Focus]={true,100}; auto focus=render(true);
+  check(pixel(focus,6,12)>pixel(plain,6,12)+10,"Edge defocus has no optical spread");
+  frame.settings.parts[Focus].enabled=false;
+  frame.settings.parts[Beam]={true,100}; auto beam=render(true);
+  check(beam!=plain && pixel(beam,128,120)<3,"Beam profile missing or lifting black");
+  thin_stroke=3; auto beam_width=render(false); thin_stroke=0;
+  const float bright_tail=float(pixel(beam_width,64,36))/std::max(1,int(pixel(beam_width,64,37)));
+  const float dim_tail=float(pixel(beam_width,192,36))/std::max(1,int(pixel(beam_width,192,37)));
+  check(bright_tail>dim_tail+.2f,"Bright beams are not broader than dim beams");
+  frame.settings.parts[Beam].enabled=false;
+  frame.settings.parts[Scanlines]={true,100};
+  frame.settings.raster_lines=32; auto raster32=render(true);
+  frame.settings.raster_lines=64; auto raster64=render(true);
+  check(raster32!=raster64,"Raster resolution did not change beam spacing");
+  frame.settings.raster_lines=0; frame.settings.parts[Scanlines].enabled=false;
+  for(auto part:{Beam,Focus,Glass}) {
+   frame.settings.parts[part]={true,0}; check(render(true)==plain,"Zero optical effect changed image");
+   frame.settings.parts[part].enabled=false;
+  }
+  frame.settings.parts[Dots]={true,100}; frame.settings.mask=1; auto grille=render(true);
+  frame.settings.mask=2; auto slots=render(true);
+  check(grille!=slots && grille!=plain && slots!=plain,"Tube mask layouts are not distinct");
+  frame.settings.mask=0;
   frame.settings.parts[Dots]={true,100};
   auto dots=render(true);
   check(dots!=plain && pixel(dots,128,120)<3,"Phosphor dots missing or lifting black");
@@ -188,7 +219,7 @@ int main(int argc,char **argv) {
   check(pixel(bloom,64,40)>15,"Bloom halo lacks visible light spill");
   check(pixel(bloom,210,104,1)<3 && pixel(bloom,210,104,2)<3,"Bloom bleached saturated red");
   frame.settings.parts[Bloom].enabled=false; frame.settings.parts[Fringe]={true,100}; auto fringe=render(true);
-  check(pixel(fringe,55,40)<pixel(fringe,55,40,2)-20,"GPU chromatic aberration");
+  check(std::abs(int(pixel(fringe,55,40))-int(pixel(fringe,55,40,2)))>10,"GPU chromatic aberration");
   frame.settings.parts[Fringe].enabled=false; frame.settings.parts[Edges]={true,100}; auto vignette=render(true);
   check(pixel(vignette,10,8)<pixel(plain,10,8)-15,"GPU vignetting");
   frame.settings.parts[Edges].enabled=false; frame.settings.parts[Hum]={true,100}; frame.seconds=6; auto hum=render(false);

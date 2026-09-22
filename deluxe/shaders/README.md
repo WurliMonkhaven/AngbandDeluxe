@@ -19,14 +19,14 @@ glyphs, builds scanline geometry, or subdivides/warps triangles on the CPU.
 ## Pass order
 
 1. Render unmodified ImGui draw lists into a full-resolution scene texture.
-2. If enabled, calculate phosphor glow at half resolution and highlight bloom
-   at quarter resolution. Each first averages the source pixel area into linear
+2. If enabled, calculate phosphor glow at half resolution, highlight bloom
+   and broader glass diffusion at quarter resolution. Each first averages the source pixel area into linear
    light, then uses horizontal and vertical Gaussian passes covering contiguous
    texels. Adjacent Gaussian taps share a bilinear read; the number of taps grows
    with radius instead of stretching a sparse kernel and leaving sampling gaps.
    The three passes reuse two textures. Disabled components skip the work.
 3. A full-screen triangle samples the inverse barrel mapping, composes glow,
-   bloom and colour fringing, and evaluates scanlines, vignetting and the hum
+   bloom, glass diffusion and RGB convergence, and evaluates scanlines, vignetting and the hum
    wave in **source coordinates**. Consequently scanlines curve with the image.
    Screen-space derivatives smooth scanline coverage without blurring UI text.
    Lighting uses a reversible gamma-2 approximation: scene colours are decoded
@@ -51,6 +51,14 @@ glyphs, builds scanline geometry, or subdivides/warps triangles on the CPU.
    The slider blends from the original beam to resolved RGB groups, retaining
    a small continuous beam contribution for legibility at maximum strength.
    This is an SDR approximation, not a simulation of a particular CRT model.
+   A shared virtual raster sets beam spacing, phosphor pitch and optical blur
+   scale together. Fixed raster-line counts remain stable as the window changes
+   size; Match window resolution retains the previous pixel-based scaling.
+   Pixel derivatives integrate the raster footprint and suppress unresolved
+   mask detail. Beam Width blends in an energy-normalized Gaussian beam whose
+   width increases with luminance. RGB Convergence varies radially toward the
+   edges. Edge Defocus spreads the image near the corners while retaining a
+   sharp centre; delta-dot spots also broaden there.
    Signal Interference combines line gain noise, horizontal sync displacement
    and static. Static/displacement ramp quadratically to leave room for subtle
    low settings; maximum strength intentionally disrupts the picture. Both
@@ -73,6 +81,23 @@ resize, CRT settings/scope, display/UI scale, or session transitions. `shutdown`
 must run before destroying the SDL GPU device. SDL defers resource destruction
 until pending GPU use is complete. If shader setup or target allocation fails,
 the client reports a system message and draws the plain UI instead.
+
+## Tube controls and presets
+
+Tube presets are authored starting points, not measured hardware emulations:
+Desktop Monitor uses 480 raster lines and an aperture grille; Shadow-mask
+Monitor uses 360 lines and delta RGB dots; Soft Terminal uses 240 lines, a slot
+mask and softer optics. All three disable hum and signal interference. Strength
+presets adjust amounts while preserving the selected raster and mask. Manual
+changes mark the tube Custom. All tube controls participate in staged Save and
+Close/Cancel, persistence and temporal-history invalidation.
+
+Phosphor Glow supplies a tight core and halo, Bloom spreads bright highlights,
+and Glass Diffusion supplies a broader, lower-threshold veil. Each is independently
+enabled and allocated, and zero strength skips its passes. Existing component
+keys remain stable (including `chromatic_aberration`, now labeled RGB Convergence).
+Old saved configurations retain their delta mask and window-relative pitch
+until a tube preset or raster setting is chosen.
 
 ## Uploads and frame pacing
 

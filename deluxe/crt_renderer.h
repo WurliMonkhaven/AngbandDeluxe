@@ -39,7 +39,7 @@ private:
  SDL_GPUTextureFormat format_{};
  SDL_GPUGraphicsPipeline *blur_=nullptr,*composite_=nullptr;
  SDL_GPUSampler *sampler_=nullptr;
- std::array<SDL_GPUTexture*,7> targets_{}; // scene, glow pair, bloom pair, history pair
+ std::array<SDL_GPUTexture*,9> targets_{}; // scene, glow pair, bloom pair, history pair, glass pair
  Uint32 width_=0,height_=0;
  int previous_=0;
  bool history_valid_=false;

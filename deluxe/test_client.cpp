@@ -7,6 +7,13 @@ static void check(bool value,const char *message) { if(!value) throw std::runtim
 int main(int argc,char **argv) {
  try {
   check(argc==2,"Pass an unused settings-file path");
+  for(int tube=0;tube<3;++tube) {
+   CrtSettings preset; preset.tube(tube);
+   check(!preset.parts[Hum].enabled && !preset.parts[Interference].enabled,"Realistic tubes should not include signal faults");
+   CrtSettings restored; restored.load(preset.serialize());
+   check(restored==preset,"Tube layout/raster controls failed to round-trip");
+   check(preset.level(Beam)>0 && preset.level(Glass)>0 && preset.level(Focus)>0,"Tube preset is missing optics");
+  }
   Connection input; input.connected=true; input.state={{"readiness","ready"},{"context","input-test"}};
   check(input.key("up"),"Ready input should be dispatched");
   const auto queued_input=input.outgoing;
@@ -74,9 +81,11 @@ int main(int argc,char **argv) {
   check(ui.draft_crt_strength==1 && ui.crt_strength==1,"Cancelled strength was applied");
   check(!ui.draft_crt_settings.parts[Hum].enabled && !ui.crt_settings.parts[Hum].enabled,"Cancelled hum bar was applied");
   ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_crt_settings.parts[Hum].enabled=true;
+  ui.draft_crt_settings.raster_lines=720; ui.draft_crt_settings.mask=2; ui.draft_crt_settings.tube_preset=-1;
   ui.draft_low_animation=false; ui.draft_death_animation=true;
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
+  check(loaded.crt_settings.raster_lines==720 && loaded.crt_settings.mask==2,"Staged raster/mask settings did not persist");
   check(!loaded.low_animation && loaded.death_animation,"Independent animation switches did not persist");
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");
   check(loaded.crt_settings.parts[Hum].enabled,"Hum bar did not persist");
