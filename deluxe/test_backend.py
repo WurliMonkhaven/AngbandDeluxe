@@ -168,6 +168,30 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(e.call("session.load", {"save": "missing"})["error"]["code"], "invalid_argument")
         self.assertEqual(e.call("anything")["error"]["code"], "unsupported_capability")
 
+    def test_birth_stat_cursor(self):
+        e = self.engine
+        e.hello()
+        e.call("session.new", {"save": "CursorTest"})
+        e.next_state(None)
+        for _ in range(20):
+            if "Total Cost:" in e.screen():
+                break
+            e.key("enter")
+        else:
+            self.fail("Did not reach point-based stat allocation")
+        cursor = e.state["cursor"]
+        self.assertTrue(cursor["visible"])
+        self.assertEqual(cursor["y"], 2)
+        self.assertEqual(cursor["x"], 78)
+        self.assertIn("STR", e.screen().splitlines()[cursor["y"]])
+        e.key("down")
+        self.assertTrue(e.state["cursor"]["visible"])
+        self.assertEqual(e.state["cursor"]["x"], cursor["x"])
+        self.assertEqual(e.state["cursor"]["y"], cursor["y"] + 1)
+        self.assertIn("INT", e.screen().splitlines()[e.state["cursor"]["y"]])
+        e.key("up")
+        self.assertEqual(e.state["cursor"], cursor)
+
     def test_play_queries_save_reload(self):
         e = self.engine
         e.hello()

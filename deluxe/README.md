@@ -34,6 +34,11 @@ cmake --build build-deluxe --target OurExecutable angband-deluxe
 python3 deluxe/test_backend.py --backend build-deluxe/game/angband-backend
 ```
 
+The build helper defaults to RelWithDebInfo (optimised, with debugging symbols).
+Use `--config Debug` for an unoptimised diagnostic build. With Ninja, changing
+`--config` automatically reconfigures the cached build. Unoptimised client JSON
+processing can substantially increase input latency.
+
 Multi-configuration generators may add a Debug or Release directory. The
 backend and client must be beside one another, or specify `--backend PATH`.
 Both accept `--data-dir PATH` and `--user-dir PATH`. The client defaults to the
@@ -49,6 +54,7 @@ automatically when starting/loading and after commands or prompts. Its thin blue
 border indicates focus; click it to return from another panel. Character creation and remaining classic menus use Angband's
 normal controls. Enter acknowledges its `-more-` messages. The engine's Help
 command documents gameplay controls.
+The terminal cursor is drawn as a cell outline, including the selected birth stat.
 
 The side panels provide searchable items, inspection, selected-item actions,
 creatures, a minimap and a searchable command list. The magnifying glass beside
@@ -94,11 +100,13 @@ restriction. Reading these values does not identify objects or spend turns.
 
 ## Validation recorded on Windows
 
-The native Debug build passed all 934 existing Angband unit tests and five
+The earlier native Debug build passed all 934 existing Angband unit tests. The
+current RelWithDebInfo build passed six
 real-engine integration tests: protocol validation; gameplay/save/reload;
 item prompt validation, cancellation and inscription; and same-save keyboard/API
 wait-action parity with repeated inspection queries; and descending into the
-dungeon, inspecting its items and returning upstairs. Debug capture asserts RNG
+dungeon, inspecting its items and returning upstairs; and terminal cursor position
+and visibility while changing the selected birth stat. Debug capture asserts RNG
 purity. Manual desktop checks exercised character creation, load, item selection,
 native inscription prompts, cancellation, saving and closing.
 

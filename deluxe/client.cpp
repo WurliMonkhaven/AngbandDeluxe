@@ -105,10 +105,10 @@ struct Connection {
   send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",1048576}});
   return true;
  }
- void receive(const json &j) {
+ void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
-   if (name == "state.changed") { state = j.at("data"); update_messages(state.value("messages",json::array())); busy = false; }
+   if (name == "state.changed") { state = std::move(j.at("data")); update_messages(state.at("messages")); busy = false; }
    if (name == "prompt.requested") { prompt = j.at("data"); busy = false; }
    return;
   }
@@ -133,6 +133,12 @@ struct Connection {
   else if (method == "session.close") { close_confirmed=true; closed = !return_to_menu; busy = false; }
   else if (method == "prompt.reply") pending_prompt = json::object();
  }
+ void flush_input() {
+  if(connected && !outgoing.empty()) {
+   const auto n=SDL_WriteIO(SDL_GetProcessInput(process),outgoing.data(),outgoing.size());
+   outgoing.erase(0,n);
+  }
+ }
  void poll() {
   if (!connected) return;
   char buffer[16384]; size_t n;
@@ -153,10 +159,7 @@ struct Connection {
    }
    if (received.size() > 1048576) { notice("Backend frame too large"); connected = false; return; }
   }
-  if (!outgoing.empty()) {
-   n = SDL_WriteIO(SDL_GetProcessInput(process),outgoing.data(),outgoing.size());
-   outgoing.erase(0,n);
-  }
+  flush_input();
   int exit_code;
   if (SDL_WaitProcess(process,false,&exit_code)) {
    connected = false; busy = false;
@@ -317,6 +320,14 @@ struct UI {
    if (glyph && glyph!=' ') draw->AddText(ImGui::GetFont(),pixels,
     ImVec2(origin.x+float(x)*cw,origin.y+float(y)*ch),color(col),utf8(glyph).c_str());
   }
+  if(c.state.contains("cursor")) {
+   const auto &cursor=c.state["cursor"];
+   const int x=cursor.value("x",-1), y=cursor.value("y",-1);
+   if(cursor.value("visible",false) && x>=0 && y>=0 && size_t(y)<rows.size() && size_t(x)<columns) {
+    const ImVec2 p(origin.x+x*cw,origin.y+y*ch);
+    draw->AddRect(p,ImVec2(p.x+cw,p.y+ch),IM_COL32(255,225,125,255),0,0,std::max(1.f,display_scale));
+   }
+  }
   if(!ImGui::IsWindowFocused()) grid_focus=false;
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
@@ -361,15 +372,21 @@ struct UI {
  }
  void items() {
   ImGui::InputTextWithHint("##items","Search items",item_filter,sizeof(item_filter));
-  auto values=c.state.value("items",json::array());
-  std::stable_sort(values.begin(),values.end(),[](const json &a,const json &b){return a.value("location","")<b.value("location","");});
+  if(!c.state.contains("items")) return;
+  std::vector<const json*> values;
+  for(const auto &o:c.state["items"]) {
+   if(o.value("location","")=="Floor") {
+    if(!c.state.contains("player")) continue;
+    const auto &p=c.state["player"];
+    if(o.value("x",-1)!=p.value("x",-2)||o.value("y",-1)!=p.value("y",-2)) continue;
+   }
+   values.push_back(&o);
+  }
+  std::stable_sort(values.begin(),values.end(),[](const json *a,const json *b){return a->value("location","")<b->value("location","");});
   if(ImGui::BeginTable("items",3,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,ImGui::GetTextLineHeightWithSpacing()*10))) {
    ImGui::TableSetupColumn("Item",ImGuiTableColumnFlags_WidthStretch); ImGui::TableSetupColumn("Location"); ImGui::TableSetupColumn("Qty"); ImGui::TableHeadersRow();
-   for(const auto &o:values) {
-    if(o.value("location","")=="Floor") {
-     auto p=c.state.value("player",json::object());
-     if(o.value("x",-1)!=p.value("x",-2)||o.value("y",-1)!=p.value("y",-2)) continue;
-    }
+   for(const auto *item:values) {
+    const auto &o=*item;
     std::string label=o.value("label","");
     if(!matches(label,item_filter)) continue;
     auto id=o.value("id",""); ImGui::PushID(id.c_str());
@@ -386,7 +403,8 @@ struct UI {
    }
    ImGui::EndTable();
   }
-  for(const auto &o:values) if(o.value("id","")==selected) {
+  for(const auto *item:values) if(item->value("id","")==selected) {
+   const auto &o=*item;
    ImGui::SeparatorText("Inspection");
    properties(o["player_known"]);
    ImGui::BeginDisabled(!c.ready());
@@ -403,7 +421,8 @@ struct UI {
   }
  }
  void creatures() {
-  for(const auto &m:c.state.value("monsters",json::array())) {
+  if(!c.state.contains("monsters")) return;
+  for(const auto &m:c.state["monsters"]) {
    if(!m.value("visible",false)) continue;
    ImGui::PushID(m.value("id","").c_str());
    if(ImGui::TreeNode(m.value("name","").c_str())) {
@@ -667,6 +686,7 @@ int main(int argc,char **argv) {
    }
   }
   ImGui_ImplSDLGPU3_NewFrame(); ImGui_ImplSDL3_NewFrame(); ImGui::NewFrame(); ui.draw(); ImGui::Render();
+  connection.flush_input(); // Dispatch this frame's input before waiting for presentation.
   // ImGui may stop text input when one of its textboxes loses focus. The
   // game also needs SDL's layout-aware text events (including shifted keys).
   if(ui.owns_keyboard() && !SDL_TextInputActive(window)) SDL_StartTextInput(window);

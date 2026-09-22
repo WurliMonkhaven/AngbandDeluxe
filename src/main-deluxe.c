@@ -276,6 +276,12 @@ static cJSON *capture(void)
   cJSON_AddItemToArray(screen, row);
  }
  cJSON_AddItemToObject(s, "terminal", screen);
+ {
+  cJSON *cursor = cJSON_CreateObject();
+  number(cursor, "x", terminal.scr->cx); number(cursor, "y", terminal.scr->cy);
+  json_bool(cursor, "visible", terminal.scr->cv && !terminal.scr->cu);
+  cJSON_AddItemToObject(s, "cursor", cursor);
+ }
  if (character_generated && player && cave) {
   struct object *o; cJSON *p = cJSON_CreateObject(), *slots = cJSON_CreateArray();
   cJSON *map = cJSON_CreateObject(), *terrain = cJSON_CreateArray(), *known = cJSON_CreateArray();

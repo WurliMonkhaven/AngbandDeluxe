@@ -42,6 +42,8 @@ is waiting for more input.
 `state.changed` supplies a full snapshot at engine input boundaries: player,
 items, monsters, actual/known terrain, visibility, messages and terminal cells.
 The terminal is 100 by 34 cells; each cell is `[Unicode codepoint, colour index]`.
+The `cursor` record supplies zero-based `x`, `y` and `visible` for the terminal
+cursor, including the selected stat during point-based character creation.
 Item records distinguish `actual` from `player_known`; monster HP and actual map
 data include hidden state. No entitlement or player-knowledge gate applies.
 The presentation decides which information to display.
