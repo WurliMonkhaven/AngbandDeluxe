@@ -60,7 +60,7 @@ static const CrtPreset &crt_preset(int strength) {
  return presets[std::clamp(strength,0,3)];
 }
 // Scanlines, edge shading and a slow, soft rolling hum bar above the glow.
-static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size,int strength=1,double seconds=-1) {
+static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size,int strength=1,double seconds=-1,bool hum_enabled=true) {
  if(size.x<=0 || size.y<=0) return;
  const auto &preset=crt_preset(strength);
  const ImVec2 end(pos.x+size.x,pos.y+size.y);
@@ -74,16 +74,22 @@ static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size,int strength=1,
  draw->AddRectFilledMultiColor(ImVec2(end.x-edge,pos.y),end,clear,dark,dark,clear);
  draw->AddRectFilledMultiColor(pos,ImVec2(end.x,pos.y+edge),dark,dark,clear,clear);
  draw->AddRectFilledMultiColor(ImVec2(pos.x,end.y-edge),end,clear,clear,dark,dark);
- const float center=float(std::fmod(seconds<0?ImGui::GetTime():seconds,9.0)/9.0);
- auto hum=[&](float y) {
-  float distance=std::abs(y-center); distance=std::min(distance,1.f-distance);
-  // A luminance lift remains visible over dark, empty dungeon cells, unlike
-  // the previous near-transparent black bar. Gaussian edges avoid a hard seam.
-  return IM_COL32(90,120,110,int(preset.hum_alpha*std::exp(-distance*distance/.004f)));
- };
- for(int band=0;band<48;++band) {
-  const float top=band/48.f,bottom=(band+1)/48.f;
-  draw->AddRectFilledMultiColor(ImVec2(pos.x,pos.y+size.y*top),ImVec2(end.x,pos.y+size.y*bottom),hum(top),hum(top),hum(bottom),hum(bottom));
+ if(hum_enabled) {
+  const float center=float(std::fmod(seconds<0?ImGui::GetTime():seconds,12.0)/12.0);
+  auto wave=[&](float y,float offset,float width) {
+   float distance=std::abs(y-center-offset); distance=std::min(distance,1.f-distance);
+   return std::exp(-distance*distance/width);
+  };
+  // A broad neutral brightness drift with a weaker trailing shadow resembles
+  // power-supply interference, rather than a luminous coloured stripe.
+  for(int band=0;band<96;++band) {
+   const float top=band/96.f,bottom=(band+1)/96.f;
+   auto light=[&](float y) { return IM_COL32(150,150,150,int(preset.hum_alpha*.65f*wave(y,0,.009f))); };
+   auto shade=[&](float y) { return IM_COL32(0,0,0,int(preset.hum_alpha*.45f*wave(y,-.12f,.006f))); };
+   const ImVec2 a(pos.x,pos.y+size.y*top),b(end.x,pos.y+size.y*bottom);
+   draw->AddRectFilledMultiColor(a,b,shade(top),shade(top),shade(bottom),shade(bottom));
+   draw->AddRectFilledMultiColor(a,b,light(top),light(top),light(bottom),light(bottom));
+  }
  }
  draw->PopClipRect();
 }
@@ -139,6 +145,95 @@ static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source,int str
    }
    emit(0,0,1.f,IM_COL32_WHITE);
    i+=count;
+  }
+  out->PopTexture(); out->PopClipRect();
+ }
+ return out;
+}
+struct CrtCurve {
+ ImVec2 pos,size;
+ float amount;
+ CrtCurve(ImVec2 p,ImVec2 s,int strength):pos(p),size(s),amount(.004f+.003f*std::clamp(strength,0,3)) {}
+ ImVec2 map(ImVec2 p,bool inverse=false) const {
+  if(size.x<=0 || size.y<=0) return p;
+  const float x=2*(p.x-pos.x)/size.x-1,y=2*(p.y-pos.y)/size.y-1;
+  float u=x,v=y;
+  if(inverse) {
+   for(int i=0;i<6;++i) { u=x/(1-amount*v*v); v=y/(1-amount*u*u); }
+  } else { u=x*(1-amount*y*y); v=y*(1-amount*x*x); }
+  return ImVec2(pos.x+(u+1)*size.x*.5f,pos.y+(v+1)*size.y*.5f);
+ }
+};
+static ImDrawVert crt_lerp(const ImDrawVert &a,const ImDrawVert &b,float t) {
+ ImDrawVert v;
+ v.pos=ImVec2(a.pos.x+(b.pos.x-a.pos.x)*t,a.pos.y+(b.pos.y-a.pos.y)*t);
+ v.uv=ImVec2(a.uv.x+(b.uv.x-a.uv.x)*t,a.uv.y+(b.uv.y-a.uv.y)*t);
+ v.col=0;
+ for(int shift=0;shift<32;shift+=8) {
+  const float c=float((a.col>>shift)&255),d=float((b.col>>shift)&255);
+  v.col|=ImU32(std::clamp(c+(d-c)*t,0.f,255.f))<<shift;
+ }
+ return v;
+}
+// Clip before curving: rectangular GPU scissors alone cannot describe a bowed
+// scroll-pane edge. Subdivide long triangles to keep scanlines smoothly curved.
+static std::unique_ptr<ImDrawList> crt_curve(const ImDrawList &source,const CrtCurve &curve) {
+ auto out=std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
+ out->_ResetForNewFrame(); out->Flags=source.Flags;
+ auto triangle=[&](auto &&self,const ImDrawVert &a,const ImDrawVert &b,const ImDrawVert &c,int depth)->void {
+  const ImDrawVert v[]={a,b,c};
+  const ImVec2 p[]={curve.map(a.pos),curve.map(b.pos),curve.map(c.pos)};
+  int split=-1; float worst=.2f*.2f;
+  const float width=std::max({a.pos.x,b.pos.x,c.pos.x})-std::min({a.pos.x,b.pos.x,c.pos.x});
+  const float height=std::max({a.pos.y,b.pos.y,c.pos.y})-std::min({a.pos.y,b.pos.y,c.pos.y});
+  const float extent=std::max(width/curve.size.x,height/curve.size.y);
+  // Small glyph triangles are already far below the subdivision tolerance.
+  const bool small=12*curve.amount*std::max(curve.size.x,curve.size.y)*extent*extent<.2f;
+  for(int i=0;!small && i<3;++i) {
+   const int j=(i+1)%3;
+   const auto mid=curve.map(ImVec2((v[i].pos.x+v[j].pos.x)*.5f,(v[i].pos.y+v[j].pos.y)*.5f));
+   const float dx=mid.x-(p[i].x+p[j].x)*.5f,dy=mid.y-(p[i].y+p[j].y)*.5f;
+   if(dx*dx+dy*dy>worst) { worst=dx*dx+dy*dy; split=i; }
+  }
+  if(split>=0 && depth<9) {
+   const int j=(split+1)%3,k=(split+2)%3;
+   const auto mid=crt_lerp(v[split],v[j],.5f);
+   self(self,v[split],mid,v[k],depth+1); self(self,mid,v[j],v[k],depth+1);
+  } else {
+   out->PrimReserve(3,3);
+   for(int i=0;i<3;++i) out->PrimVtx(p[i],v[i].uv,v[i].col);
+  }
+ };
+ for(const auto &cmd:source.CmdBuffer) {
+  out->PushClipRect(curve.pos,ImVec2(curve.pos.x+curve.size.x,curve.pos.y+curve.size.y));
+  out->PushTexture(cmd.TexRef);
+  if(cmd.UserCallback) out->AddCallback(cmd.UserCallback,cmd.UserCallbackData);
+  else {
+   const float bounds[]={std::max(cmd.ClipRect.x,curve.pos.x),std::min(cmd.ClipRect.z,curve.pos.x+curve.size.x),
+    std::max(cmd.ClipRect.y,curve.pos.y),std::min(cmd.ClipRect.w,curve.pos.y+curve.size.y)};
+   if(bounds[0]<bounds[1] && bounds[2]<bounds[3]) for(unsigned i=0;i+2<cmd.ElemCount;i+=3) {
+    ImDrawVert polygon[12],clipped[12]; int count=3;
+    for(int k=0;k<3;++k) polygon[k]=source.VtxBuffer[cmd.VtxOffset+source.IdxBuffer[cmd.IdxOffset+i+k]];
+    bool inside=true;
+    for(int k=0;k<3;++k) inside=inside && polygon[k].pos.x>=bounds[0] && polygon[k].pos.x<=bounds[1]
+     && polygon[k].pos.y>=bounds[2] && polygon[k].pos.y<=bounds[3];
+    if(inside) { triangle(triangle,polygon[0],polygon[1],polygon[2],0); continue; }
+    for(int edge=0;edge<4 && count; ++edge) {
+     auto distance=[&](const ImDrawVert &v) {
+      const float coordinate=edge<2?v.pos.x:v.pos.y;
+      return edge%2?bounds[edge]-coordinate:coordinate-bounds[edge];
+     };
+     int n=0;
+     for(int k=0;k<count;++k) {
+      const auto &a=polygon[k],&b=polygon[(k+1)%count];
+      const float da=distance(a),db=distance(b);
+      if(da>=0) clipped[n++]=a;
+      if((da>=0)!=(db>=0)) clipped[n++]=crt_lerp(a,b,da/(da-db));
+     }
+     count=n; std::copy(clipped,clipped+n,polygon);
+    }
+    for(int k=1;k+1<count;++k) triangle(triangle,polygon[0],polygon[k],polygon[k+1],0);
+   }
   }
   out->PopTexture(); out->PopClipRect();
  }
@@ -322,9 +417,11 @@ struct UI {
  bool fullscreen=false, draft_fullscreen=false;
  int crt=0, draft_crt=0;
  int crt_strength=1, draft_crt_strength=1;
+ bool hum_bar=false, draft_hum_bar=false;
  float draft_scale=1.f;
  std::string settings_error;
  ImDrawList *game_draw_list=nullptr;
+ ImVec2 game_pos{},game_size{};
  float split_drag_y = 0.f, split_drag_fraction = .72f;
  bool quit_dialog = false;
  bool grid_focus = false, focus_requested = false, window_active = true;
@@ -345,32 +442,33 @@ struct UI {
    fullscreen=j.value("fullscreen",false);
    crt=std::clamp(j.value("crt",0),0,2);
    crt_strength=std::clamp(j.value("crt_strength",1),0,3);
+   hum_bar=j.value("hum_bar",false);
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength) {
+ bool write_settings(float zoom,bool full,int effect,int strength,bool hum) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength}}.dump(2);
+  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"hum_bar",hum}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
  void save_settings() {
-  if(!write_settings(scale,fullscreen,crt,crt_strength)) c.notice("Settings could not be saved.");
+  if(!write_settings(scale,fullscreen,crt,crt_strength,hum_bar)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
   draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
-  draft_crt_strength=crt_strength;
+  draft_crt_strength=crt_strength; draft_hum_bar=hum_bar;
  }
  bool apply_settings(SDL_Window *window) {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_hum_bar)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
   scale=draft_scale; fullscreen=draft_fullscreen; crt=draft_crt;
-  crt_strength=draft_crt_strength;
+  crt_strength=draft_crt_strength; hum_bar=draft_hum_bar;
   return true;
  }
  void settings_window(SDL_Window *window) {
@@ -399,6 +497,7 @@ struct UI {
      ImGui::Spacing(); ImGui::TextUnformatted("CRT Effects Strength"); ImGui::SetNextItemWidth(-1);
      const char *strengths[]={"Subtle","Classic","Deluxe","Zero Cool"};
      ImGui::Combo("##CRT Effects Strength",&draft_crt_strength,strengths,4);
+     ImGui::Spacing(); ImGui::Checkbox("Hum Bar",&draft_hum_bar);
      if(!settings_error.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",settings_error.c_str()); }
      ImGui::EndTabItem();
     }
@@ -536,7 +635,7 @@ struct UI {
   if (ImGui::IsItemClicked()) grid_focus = true;
   if(ImGui::IsItemFocused()) grid_focus=true;
   auto draw=ImGui::GetWindowDrawList();
-  game_draw_list=draw;
+  game_draw_list=draw; game_pos=ImGui::GetWindowPos(); game_size=ImGui::GetWindowSize();
   draw->AddRectFilled(start,ImVec2(start.x+viewport.x,start.y+viewport.y),IM_COL32(12,15,20,255));
   for (size_t y=0;y<rows.size();++y) for(size_t x=0;x<rows[y].size();++x) {
    unsigned glyph=rows[y][x][0].get<unsigned>(); int col=rows[y][x][1].get<int>();
@@ -551,7 +650,7 @@ struct UI {
     draw->AddRect(p,ImVec2(p.x+cw,p.y+ch),IM_COL32(255,225,125,255),0,0,std::max(1.f,display_scale));
    }
   }
-  if(crt==1) crt_effect(draw,start,viewport,crt_strength);
+  if(crt==1) crt_effect(draw,start,viewport,crt_strength,-1,hum_bar);
   if(!ImGui::IsWindowFocused()) grid_focus=false;
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
@@ -882,6 +981,13 @@ int main(int argc,char **argv) {
    if(e.type==SDL_EVENT_WINDOW_FOCUS_LOST) { ui.window_active=false; ui.keys.clear(); }
    if(e.type==SDL_EVENT_WINDOW_FOCUS_GAINED) ui.window_active=true;
    if(e.type==SDL_EVENT_MOUSE_BUTTON_DOWN) { ui.grid_focus=false; ui.keys.clear(); }
+   if(e.type==SDL_EVENT_MOUSE_MOTION && ui.crt!=0) {
+    auto vp=ImGui::GetMainViewport();
+    CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_strength);
+    if(e.motion.x>=curve.pos.x && e.motion.x<=curve.pos.x+curve.size.x && e.motion.y>=curve.pos.y && e.motion.y<=curve.pos.y+curve.size.y) {
+     auto p=curve.map(ImVec2(e.motion.x,e.motion.y),true); e.motion.x=p.x; e.motion.y=p.y;
+    }
+   }
    ImGui_ImplSDL3_ProcessEvent(&e);
    if(e.type==SDL_EVENT_QUIT) {
     if(!connection.state.contains("terminal")) { connection.closed=true; if(connection.process) SDL_KillProcess(connection.process,true); }
@@ -904,9 +1010,18 @@ int main(int argc,char **argv) {
     const char *p=e.text.text; while(*p) ui.keys.push_back(SDL_StepUTF8(&p,nullptr));
    }
   }
-  ImGui_ImplSDLGPU3_NewFrame(); ImGui_ImplSDL3_NewFrame(); ImGui::NewFrame(); ui.draw(window);
+  ImGui_ImplSDLGPU3_NewFrame(); ImGui_ImplSDL3_NewFrame();
+  if(ui.crt!=0 && SDL_GetMouseFocus()==window) {
+   float x,y; SDL_GetMouseState(&x,&y);
+   auto vp=ImGui::GetMainViewport();
+   CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_strength);
+   if(x>=curve.pos.x && x<=curve.pos.x+curve.size.x && y>=curve.pos.y && y<=curve.pos.y+curve.size.y) {
+    auto p=curve.map(ImVec2(x,y),true); ImGui::GetIO().AddMousePosEvent(p.x,p.y);
+   }
+  }
+  ImGui::NewFrame(); ui.draw(window);
   if(ui.crt==2) {
-   auto vp=ImGui::GetMainViewport(); crt_effect(ImGui::GetForegroundDrawList(),vp->Pos,vp->Size,ui.crt_strength);
+   auto vp=ImGui::GetMainViewport(); crt_effect(ImGui::GetForegroundDrawList(),vp->Pos,vp->Size,ui.crt_strength,-1,ui.hum_bar);
   }
   ImGui::Render();
   auto *render_data=ImGui::GetDrawData();
@@ -917,7 +1032,10 @@ int main(int argc,char **argv) {
    crt_data.CmdListsCount=crt_data.TotalIdxCount=crt_data.TotalVtxCount=0;
    for(auto *list:render_data->CmdLists) {
     if(ui.crt==2 || list==ui.game_draw_list) {
-     phosphor_lists.push_back(crt_phosphor(*list,ui.crt_strength)); list=phosphor_lists.back().get();
+     auto glow=crt_phosphor(*list,ui.crt_strength);
+     auto vp=ImGui::GetMainViewport();
+     CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_strength);
+     phosphor_lists.push_back(crt_curve(*glow,curve)); list=phosphor_lists.back().get();
     }
     crt_data.AddDrawList(list);
    }
@@ -933,7 +1051,7 @@ int main(int argc,char **argv) {
   if(surface) {
    ImGui_ImplSDLGPU3_PrepareDrawData(render_data,cmd);
    SDL_GPUColorTargetInfo target{}; target.texture=surface; target.load_op=SDL_GPU_LOADOP_CLEAR; target.store_op=SDL_GPU_STOREOP_STORE;
-   target.clear_color=SDL_FColor{.04f,.05f,.07f,1.f};
+   target.clear_color=ui.crt==2?SDL_FColor{0,0,0,1.f}:SDL_FColor{.04f,.05f,.07f,1.f};
    auto pass=SDL_BeginGPURenderPass(cmd,&target,1,nullptr);
    ImGui_ImplSDLGPU3_RenderDrawData(render_data,cmd,pass); SDL_EndGPURenderPass(pass);
   }

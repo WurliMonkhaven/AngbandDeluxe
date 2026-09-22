@@ -15,18 +15,21 @@ int main(int argc,char **argv) {
   ui.load_settings(); check(ui.scale==1.25f && !ui.fullscreen && ui.crt==0,"Legacy settings");
   check(ui.crt_strength==1,"Existing settings should default to Classic");
   ui.begin_settings(); ui.draft_scale=1.5f; ui.draft_crt=2; ui.draft_fullscreen=true;
-  ui.draft_crt_strength=3;
+  ui.draft_crt_strength=3; ui.draft_hum_bar=true;
+  check(!ui.hum_bar,"Hum bar draft applied immediately");
   check(ui.scale==1.25f && ui.crt==0 && !ui.fullscreen,"Draft changed live settings");
   ui.begin_settings(); // Reopening after Cancel discards the draft.
   check(ui.draft_scale==1.25f && ui.draft_crt==0 && !ui.draft_fullscreen,"Draft was retained");
   check(ui.draft_crt_strength==1 && ui.crt_strength==1,"Cancelled strength was applied");
-  ui.draft_scale=1.5f; ui.draft_crt=1;
+  check(!ui.draft_hum_bar && !ui.hum_bar,"Cancelled hum bar was applied");
+  ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_hum_bar=true;
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");
-  loaded.begin_settings(); loaded.draft_crt=2;
+  check(loaded.hum_bar,"Hum bar did not persist");
+  loaded.begin_settings(); loaded.draft_crt=2; loaded.draft_hum_bar=false;
   check(loaded.apply_settings(nullptr),"Replace settings file");
-  ui.load_settings(); check(ui.crt==2,"Full CRT persistence");
+  ui.load_settings(); check(!ui.hum_bar,"Hum bar off did not persist"); check(ui.crt==2,"Full CRT persistence");
   for(int strength=0;strength<4;++strength) {
    loaded.begin_settings(); loaded.draft_crt_strength=strength;
    check(loaded.apply_settings(nullptr),"Save CRT strength");
@@ -65,7 +68,12 @@ int main(int argc,char **argv) {
    for(unsigned i=0;i<command.ElemCount;++i)
     check(command.VtxOffset+glowing->IdxBuffer[command.IdxOffset+i]<unsigned(glowing->VtxBuffer.Size),"Invalid vertex offset");
   }
-  glowing.reset();
+  const auto curve_start=std::chrono::steady_clock::now();
+  auto curved=crt_curve(*glowing,CrtCurve(ImVec2(0,0),io.DisplaySize,3));
+  std::cout<<"Barrel geometry: "<<std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-curve_start).count()<<" ms\n";
+  for(const auto &cmd:curved->CmdBuffer) for(unsigned i=0;i<cmd.ElemCount;++i)
+   check(cmd.VtxOffset+curved->IdxBuffer[cmd.IdxOffset+i]<unsigned(curved->VtxBuffer.Size),"Curved index overflow");
+  curved.reset(); glowing.reset();
   {
   ImDrawList single(ImGui::GetDrawListSharedData()); single._ResetForNewFrame(); single.Flags=draw->Flags;
   single.PushClipRect(ImVec2(0,0),ImVec2(200,200)); single.PushTexture(io.Fonts->TexRef);
@@ -93,10 +101,38 @@ int main(int argc,char **argv) {
     const auto &v=first.VtxBuffer[i];
     check(v.pos.x>=20 && v.pos.x<=420 && v.pos.y>=30 && v.pos.y<=330,"Preset escaped surface");
     changed|=v.col!=later.VtxBuffer[i].col;
-    bright_bar|=(v.col&~IM_COL32_A_MASK)==IM_COL32(90,120,110,0) && ((v.col>>IM_COL32_A_SHIFT)&255)>=10;
+    bright_bar|=(v.col&~IM_COL32_A_MASK)==IM_COL32(150,150,150,0) && ((v.col>>IM_COL32_A_SHIFT)&255)>=5;
    }
    check(changed,"Hum bar did not roll");
    check(bright_bar,"Hum bar cannot lift dark background");
+   ImDrawList off(ImGui::GetDrawListSharedData()),off_later(ImGui::GetDrawListSharedData());
+   off._ResetForNewFrame(); off_later._ResetForNewFrame();
+   crt_effect(&off,ImVec2(20,30),ImVec2(400,300),strength,0,false);
+   crt_effect(&off_later,ImVec2(20,30),ImVec2(400,300),strength,4.5,false);
+   check(off.VtxBuffer.Size<first.VtxBuffer.Size,"Disabled hum still emitted geometry");
+   for(int i=0;i<off.VtxBuffer.Size;++i) check(off.VtxBuffer[i].col==off_later.VtxBuffer[i].col,"Disabled hum still animates");
+   CrtCurve curve(ImVec2(20,30),ImVec2(400,300),strength);
+   for(int y=0;y<=10;++y) for(int x=0;x<=10;++x) {
+    const ImVec2 p(20+x*40.f,30+y*30.f); const auto mapped=curve.map(p),inverse=curve.map(mapped,true);
+    check(std::abs(inverse.x-p.x)<.001f && std::abs(inverse.y-p.y)<.001f,"Curved mouse target mismatch");
+   }
+   const auto corner=curve.map(ImVec2(20,30));
+   check(corner.x>20 && corner.y>30,"Missing barrel curvature");
+   ImDrawList clipped(ImGui::GetDrawListSharedData()); clipped._ResetForNewFrame(); clipped.Flags=draw->Flags;
+   clipped.PushClipRect(ImVec2(40,50),ImVec2(380,310));
+   clipped.AddRectFilled(ImVec2(0,0),ImVec2(500,400),IM_COL32_WHITE);
+   clipped.PopClipRect();
+   auto bowed=crt_curve(clipped,curve);
+   check(bowed->IdxBuffer.Size>6,"Large surface was not subdivided for curvature");
+   for(const auto &v:bowed->VtxBuffer) {
+    const auto p=curve.map(v.pos,true);
+    check(p.x>=39.99f && p.x<=380.01f && p.y>=49.99f && p.y<=310.01f,"Curvature leaked past scroll clipping");
+   }
+   auto curved_single=crt_curve(single,curve);
+   for(const auto &v:curved_single->VtxBuffer) {
+    const auto original=curve.map(v.pos,true);
+    check(original.x>=49.99f && original.y>=49.99f,"Curve introduced extra glyph copies");
+   }
    auto preset=crt_phosphor(*draw,strength);
    for(const auto &command:preset->CmdBuffer) for(unsigned i=0;i<command.ElemCount;++i)
     check(command.VtxOffset+preset->IdxBuffer[command.IdxOffset+i]<unsigned(preset->VtxBuffer.Size),"Preset index overflow");
