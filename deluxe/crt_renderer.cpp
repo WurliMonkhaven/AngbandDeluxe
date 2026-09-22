@@ -3,6 +3,8 @@
 #include "shaders/generated.h"
 
 namespace {
+// Linear-light halos need precision near black to avoid visible falloff bands.
+constexpr auto light_format=SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 struct Bytes { const unsigned char *data; size_t size; };
 struct Shader { Bytes dxil,spirv,msl; };
 #define CRT_SHADER(name) Shader{{crt_shaders::name##_dxil,sizeof(crt_shaders::name##_dxil)}, {crt_shaders::name##_spirv,sizeof(crt_shaders::name##_spirv)}, {crt_shaders::name##_msl,sizeof(crt_shaders::name##_msl)}}
@@ -37,7 +39,7 @@ bool CrtRenderer::initialize(SDL_GPUDevice *device,SDL_GPUTextureFormat format) 
  auto *blur=shader(device,CRT_SHADER(blur),SDL_GPU_SHADERSTAGE_FRAGMENT,1,1);
  auto *composite=shader(device,CRT_SHADER(crt),SDL_GPU_SHADERSTAGE_FRAGMENT,4,1);
  if(vertex && blur && composite) {
-  blur_=pipeline(device,format,vertex,blur); composite_=pipeline(device,format,vertex,composite);
+  blur_=pipeline(device,light_format,vertex,blur); composite_=pipeline(device,format,vertex,composite);
  }
  if(vertex) SDL_ReleaseGPUShader(device,vertex);
  if(blur) SDL_ReleaseGPUShader(device,blur);
@@ -72,7 +74,7 @@ bool CrtRenderer::resize(Uint32 width,Uint32 height) {
 bool CrtRenderer::ensure_target(int index) {
  if(targets_[index]) return true;
  SDL_GPUTextureCreateInfo info{};
- info.type=SDL_GPU_TEXTURETYPE_2D; info.format=format_;
+ info.type=SDL_GPU_TEXTURETYPE_2D; info.format=(index>=1 && index<=4)?light_format:format_;
  info.usage=SDL_GPU_TEXTUREUSAGE_COLOR_TARGET|SDL_GPU_TEXTUREUSAGE_SAMPLER;
  info.layer_count_or_depth=info.num_levels=1;
  const unsigned divisor=(index==1 || index==2)?2:(index==3 || index==4)?4:1;
@@ -136,9 +138,15 @@ void CrtRenderer::render(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *destination,U
  u.shape[0]=settings.level(Edges); u.shape[1]=.018f*settings.level(Barrel); u.shape[2]=settings.level(Hum);
  auto blur=[&](int first,float radius,float threshold) {
   BlurUniforms b{}; std::copy(std::begin(u.region),std::end(u.region),b.region);
-  b.step[0]=radius/width; b.step[2]=threshold;
-  SDL_GPUTexture *input=targets_[0]; draw_pass(cmd,targets_[first],blur_,&input,1,&b,sizeof(b));
-  b.step[0]=0; b.step[1]=radius/height; b.step[2]=0;
+  const unsigned factor=first==1?2:4;
+  const float blur_width=float((width+factor-1)/factor),blur_height=float((height+factor-1)/factor);
+  b.step[0]=1/blur_width; b.step[1]=1/blur_height; b.step[2]=threshold; b.step[3]=float(factor);
+  SDL_GPUTexture *input=targets_[0]; draw_pass(cmd,targets_[first+1],blur_,&input,1,&b,sizeof(b));
+  // Match the old halo width, but sample a contiguous Gaussian at the actual
+  // reduced resolution. Reuse the pair for prefilter -> horizontal -> vertical.
+  b.step[1]=0; b.step[2]=1.7f*radius*blur_width/width; b.step[3]=0;
+  input=targets_[first+1]; draw_pass(cmd,targets_[first],blur_,&input,1,&b,sizeof(b));
+  b.step[0]=0; b.step[1]=1/blur_height; b.step[2]=1.7f*radius*blur_height/height;
   input=targets_[first]; draw_pass(cmd,targets_[first+1],blur_,&input,1,&b,sizeof(b));
  };
  const float glow_scale=std::max(1.f,frame.ui_scale*data->FramebufferScale.y);

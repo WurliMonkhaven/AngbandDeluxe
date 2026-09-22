@@ -36,16 +36,29 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
             c.g, scene.SampleLevel(scene_sampler, clamp(source - offset, region.xy, region.xy + region.zw), 0).b);
         c = lerp(c, fringe, 0.65 * effects.w);
     }
-    if (effects.y > 0) c += glow.SampleLevel(glow_sampler, source, 0).rgb * effects.y * 0.85;
-    if (effects.z > 0) c += bloom.SampleLevel(bloom_sampler, source, 0).rgb * effects.z * 0.8;
+    // Work in approximate linear light, matching the blur's gamma-2 decode.
+    // Drive luminous phosphors harder without lifting unlit screen/backgrounds.
+    float excitation = smoothstep(0.08, 0.45, max(c.r, max(c.g, c.b)));
+    c *= c;
+    c *= 1 + 0.9 * effects.y * excitation;
 
     float row = local.y * region.w * viewport.y;
     float distance = abs(frac((row - 0.5) / 3 + 0.5) * 3 - 1.5);
     float aa = max(0.5, 0.5 * fwidth(row));
     float scan = 1 - smoothstep(0.5 - aa, 0.5 + aa, distance);
-    c *= 1 - scan * effects.x * (150.0 / 255.0);
+    float scan_depth = effects.x * (150.0 / 255.0);
+    // Redistribute beam energy rather than simply removing it. Each dark line
+    // covers one third of the three-pixel pitch (including antialiasing).
+    c *= (1 - scan * scan_depth) / (1 - scan_depth / 3);
+    // Optical spill happens after the beam pattern, so its halos remain soft.
+    if (effects.y > 0) c += glow.SampleLevel(glow_sampler, source, 0).rgb * effects.y * 0.9;
+    if (effects.z > 0) c += bloom.SampleLevel(bloom_sampler, source, 0).rgb * effects.z * 1.2;
     float edge_width = min(region.z * viewport.x, region.w * viewport.y) * 0.09;
     c *= 1 - (1 - saturate(min(edge_pixels.x, edge_pixels.y) / max(edge_width, 1))) * shape.x * (160.0 / 255.0);
+    // Fit overbright light into SDR by scaling the whole colour: independent
+    // channel clipping would bleach saturated terminal colours toward white.
+    c /= max(1, max(c.r, max(c.g, c.b)));
+    c = sqrt(max(c, 0));
     float behind = frac(viewport.z / 12 - local.y + 1);
     float trail = pow(saturate(1 - behind / 0.24), 3);
     c = lerp(c, 1, trail * shape.z * (50.0 / 255.0));

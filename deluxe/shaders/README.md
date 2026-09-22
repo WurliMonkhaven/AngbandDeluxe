@@ -20,12 +20,23 @@ glyphs, builds scanline geometry, or subdivides/warps triangles on the CPU.
 
 1. Render unmodified ImGui draw lists into a full-resolution scene texture.
 2. If enabled, calculate phosphor glow at half resolution and highlight bloom
-   at quarter resolution. Each uses horizontal and vertical Gaussian passes,
-   with five bilinear texture reads per pass. Disabled components skip the work.
+   at quarter resolution. Each first averages the source pixel area into linear
+   light, then uses horizontal and vertical Gaussian passes covering contiguous
+   texels. Adjacent Gaussian taps share a bilinear read; the number of taps grows
+   with radius instead of stretching a sparse kernel and leaving sampling gaps.
+   The three passes reuse two textures. Disabled components skip the work.
 3. A full-screen triangle samples the inverse barrel mapping, composes glow,
    bloom and colour fringing, and evaluates scanlines, vignetting and the hum
    wave in **source coordinates**. Consequently scanlines curve with the image.
    Screen-space derivatives smooth scanline coverage without blurring UI text.
+   Lighting uses a reversible gamma-2 approximation: scene colours are decoded
+   before emission/blur and encoded after composition. Scanlines redistribute
+   beam energy; optical glow and bloom are added afterwards, so dark scanlines
+   do not cut through the halo. Phosphor glow also boosts the luminous core,
+   gated to leave dark backgrounds alone. Overbright colours scale as a whole
+   to fit SDR rather than clipping each channel and bleaching their hue.
+   Blur targets use 16-bit floating point to preserve the faint halo falloff;
+   the scene, history and final output remain in the window's normal format.
 4. Blend previous output for brief, frame-rate-independent ghosting. Two
    full-resolution history textures alternate so a pass never samples its own
    render target. The CPU supplies elapsed time; the GPU blends the images.

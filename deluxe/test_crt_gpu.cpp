@@ -70,6 +70,7 @@ int main(int argc,char **argv) {
   }
   CrtFrame frame; frame.scope=2;
   for(auto &part:frame.settings.parts) part.enabled=false;
+  int thin_stroke=0;
   auto render=[&](bool lit,bool overlay=false) {
    io.DisplaySize=ImVec2(float(texture.width),float(texture.height));
    ImGui_ImplSDLGPU3_NewFrame(); ImGui::NewFrame();
@@ -80,6 +81,13 @@ int main(int argc,char **argv) {
    if(overlay) ImGui::GetForegroundDrawList()->AddRectFilled(ImVec2(44,36),ImVec2(52,44),IM_COL32(0,255,0,255));
    if(lit) draw->AddRectFilled(ImVec2(40,32),ImVec2(56,48),IM_COL32_WHITE);
    draw->AddRectFilled(ImVec2(200,96),ImVec2(220,112),IM_COL32(255,0,0,255));
+   draw->AddRectFilled(ImVec2(80,80),ImVec2(112,96),IM_COL32(120,180,60,255));
+   draw->AddRectFilled(ImVec2(144,80),ImVec2(176,96),IM_COL32(12,12,12,255));
+   if(thin_stroke) {
+    draw->AddRectFilled(ImVec2(0,0),ImVec2(256,128),IM_COL32(0,0,0,255));
+    if(thin_stroke==1) draw->AddRectFilled(ImVec2(96,64),ImVec2(160,65),IM_COL32_WHITE);
+    else draw->AddRectFilled(ImVec2(128,32),ImVec2(129,96),IM_COL32_WHITE);
+   }
    ImGui::Render();
    auto *cmd=SDL_AcquireGPUCommandBuffer(gpu); check(cmd,"Command buffer");
    const auto uploads_before=DeluxeGpuGetUploadStats().uploads;
@@ -102,8 +110,26 @@ int main(int argc,char **argv) {
   check(pixel(plain,48,40)>250 && pixel(plain,48,88)<3 && pixel(plain,210,104)>250,"Shader orientation/pass-through");
   frame.settings.parts[Glow]={true,100}; auto glow=render(true);
   check(pixel(glow,58,40)>pixel(plain,58,40)+5,"GPU glow outside bright pixels");
+  check(pixel(glow,96,88,1)>pixel(plain,96,88,1)+35,"Phosphor core is not luminous");
+  check(std::abs(pixel(glow,96,88)*1.5f-pixel(glow,96,88,1))<5,"Emission washed out colour ratios");
+  check(pixel(glow,160,88)<=14 && pixel(glow,128,120)<3,"Emission lifted dark backgrounds");
+  for(auto part:{Glow,Bloom}) for(float scale:{1.f,1.5f}) {
+   frame.settings.parts[Glow].enabled=false;
+   frame.settings.parts[Bloom].enabled=false;
+   frame.settings.parts[part]={true,100}; frame.ui_scale=scale;
+   for(thin_stroke=1;thin_stroke<=2;++thin_stroke) {
+    auto halo=render(false);
+    auto sample=[&](int d) { return thin_stroke==1?pixel(halo,128,64+d):pixel(halo,128+d,64); };
+    check(sample(2)>15,"Thin strokes disappeared during glow downsampling");
+    for(int d=2;d<30;++d)
+     check(sample(d+1)<=sample(d)+1,"Streaks: thin-stroke halo brightens again away from source");
+   }
+  }
+  thin_stroke=0; frame.ui_scale=1;
   frame.settings.parts[Glow].enabled=false; frame.settings.parts[Bloom]={true,100}; auto bloom=render(true);
   check(pixel(bloom,64,40)>pixel(plain,64,40)+2,"GPU bloom diffusion");
+  check(pixel(bloom,64,40)>15,"Bloom halo lacks visible light spill");
+  check(pixel(bloom,210,104,1)<3 && pixel(bloom,210,104,2)<3,"Bloom bleached saturated red");
   frame.settings.parts[Bloom].enabled=false; frame.settings.parts[Fringe]={true,100}; auto fringe=render(true);
   check(pixel(fringe,55,40)<pixel(fringe,55,40,2)-20,"GPU chromatic aberration");
   frame.settings.parts[Fringe].enabled=false; frame.settings.parts[Edges]={true,100}; auto vignette=render(true);
@@ -123,7 +149,8 @@ int main(int argc,char **argv) {
    const float phase=(row-.5f)/3+.5f;
    const float distance=std::abs((phase-std::floor(phase))*3-1.5f);
    const float t=std::clamp((distance-(.5f-aa))/(2*aa),0.f,1.f);
-   const float expected=255-150*(1-t*t*(3-2*t));
+   const float beam=(1-(150.f/255)*(1-t*t*(3-2*t)))/(1-50.f/255);
+   const float expected=255*std::sqrt(std::min(1.f,beam));
    check(std::abs(pixel(curved,x,16)-expected)<5,"Scanlines do not follow inverse barrel coordinates");
   }
   frame.scope=1; frame.game_pos=ImVec2(0,0); frame.game_size=ImVec2(128,128);
