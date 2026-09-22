@@ -423,3 +423,15 @@ it never resumes later. Existing pickup capacity checks and pile prompts remain.
 Remembered pickup attempts do not require current sight or an actual object
 at the remembered location. If nothing remains on arrival (or the image was
 a hallucination), the trip simply ends without picking anything up.
+
+The dungeon context menu groups Move here, contextual actions, and Look/Target
+with separators. Contextual actions include Pick up, Tunnel for remembered
+diggable walls/rubble (excluding permanent rock), and Go up/Go down for stairs.
+Terrain actions share interruption-safe travel: tunnelling approaches an
+adjacent passable tile; stairs are used after arriving on their tile. The
+original engine commands retain digging attempts, tools, turns and stair rules.
+
+Movement-direction prompts (including T) keep the native dungeon clickable
+and feed clicks into the original engine direction handler. Context-menu Tunnel
+continues until the hole is made or normal engine interruption/futility stops
+it; exhaustion of a repeat batch alone does not abandon the requested dig.

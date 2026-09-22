@@ -56,6 +56,9 @@ int main(int argc,char **argv) {
   view_state.erase("targeting"); view_state["aiming"]=true;
   check(dungeon_view(view_state),"Native aim-direction prompt keeps the dungeon view");
   view_state["aiming"]=false;
+  view_state["direction_prompt"]=true;
+  check(dungeon_view(view_state),"Movement direction prompts must retain the clickable dungeon");
+  view_state["direction_prompt"]=false;
   int tile_x=-1,tile_y=-1;
   check(grid_cell_at(15,25,10,20,4,3,tile_x,tile_y) && tile_x==1 && tile_y==1,"Tile hit test must use fitted cell dimensions");
   check(!grid_cell_at(-1,5,10,20,4,3,tile_x,tile_y),"Letterbox must not select a tile");

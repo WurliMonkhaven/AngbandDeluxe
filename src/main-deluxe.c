@@ -294,7 +294,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  return j;
 }
 #include "deluxe-view.h"
-#include "deluxe-pickup.h"
+#include "deluxe-travel.h"
 
 static cJSON *capture(void)
 {
@@ -360,6 +360,7 @@ static cJSON *capture(void)
   }
   cJSON_AddItemToObject(s, "player", p);
   deluxe_capture_view(s);
+  deluxe_capture_terrain_actions(s);
   for (o = player->gear; o; o = o->next) {
    int slot = object_slot(player->body, o);
    const char *place = slot >= 0 && slot < player->body.count ? player->body.slots[slot].name :
@@ -529,7 +530,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -597,6 +598,17 @@ static void pump(void)
    (streq(type, "quantity") && cJSON_IsNumber(v) && v->valuedouble == v->valueint && v->valueint >= 0 && v->valueint <= num(active_prompt, "maximum", 0))))
    error(id, "invalid_argument", "Invalid prompt value.");
   else { reply_value = cJSON_Duplicate(v, true); response(id, cJSON_CreateObject()); }
+ } else if (streq(method,"dungeon.terrain")) {
+  cJSON *jx=cJSON_GetObjectItem(p,"x"), *jy=cJSON_GetObjectItem(p,"y");
+  struct loc grid=loc(num(p,"x",-1),num(p,"y",-1));
+  cmd_code command=deluxe_terrain_command(grid);
+  if(active_prompt || !streq(str(p,"context"),context_text)) error(id,"stale_revision","Input context changed.");
+  else if(!ready || !character_generated || !streq(phase,"playing") || screen_save_depth || !cJSON_GetObjectItem(snapshot,"dungeon")) error(id,"busy","Return to normal play first.");
+  else if(!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) || jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint || command==CMD_NULL || !streq(str(p,"action"),deluxe_terrain_action(command))) error(id,"invalid_argument","That action is not available on this terrain.");
+  else {
+   travel_command=command; travel_grid=grid; travel_level=deluxe_level; travel_stage=TRAVEL_START;
+   ready=false; Term_keypress(ESCAPE,0); response(id,cJSON_CreateObject());
+  }
  } else if (streq(method,"dungeon.pickup")) {
   cJSON *jx=cJSON_GetObjectItem(p,"x"), *jy=cJSON_GetObjectItem(p,"y");
   struct loc grid=loc(num(p,"x",-1),num(p,"y",-1));
@@ -606,7 +618,7 @@ static void pump(void)
   else if(!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) || jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint || !deluxe_pickup_observed(grid))
    error(id,"invalid_argument","No observed item at that location.");
   else {
-   pickup_grid=grid; pickup_level=deluxe_level; pickup_stage=PICKUP_START;
+   travel_command=CMD_PICKUP; travel_grid=grid; travel_level=deluxe_level; travel_stage=TRAVEL_START;
    ready=false; Term_keypress(ESCAPE,0); response(id,cJSON_CreateObject());
   }
  } else if (streq(method,"dungeon.click")) {
@@ -639,8 +651,8 @@ static void pump(void)
   if(active_prompt || !streq(str(p,"context"),context_text)) error(id,"stale_revision","Input context changed.");
   else if(!character_generated || !streq(phase,"playing") || screen_save_depth || !cJSON_GetObjectItem(snapshot,"dungeon"))
    error(id,"busy","Return to the dungeon view first.");
-  else if(begin && (!ready || target_ui_current || textui_aiming)) error(id,"busy","Finish the current interaction first.");
-  else if(!begin && !target_ui_current && !textui_aiming) error(id,"busy","No targeting interaction is active.");
+  else if(begin && (!ready || target_ui_current || textui_aiming || textui_direction)) error(id,"busy","Finish the current interaction first.");
+  else if(!begin && !target_ui_current && !textui_aiming && !textui_direction) error(id,"busy","No targeting interaction is active.");
   else if((immediate || select || jx || jy) && (!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) || jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint || !square_in_bounds_fully(cave,grid)))
    error(id,"invalid_argument","Select an interior dungeon tile.");
   else if(begin) {
@@ -660,13 +672,14 @@ static void pump(void)
     /* The engine's aim-direction handler already accepts a mouse location. */
     if(grid.x<terminal.offset_x || grid.y<terminal.offset_y || grid.x>=terminal.offset_x+SCREEN_WID || grid.y>=terminal.offset_y+SCREEN_HGT)
      error(id,"invalid_argument","Select a tile in the current viewport.");
-    else { Term_mousepress(COL_MAP+grid.x-terminal.offset_x,ROW_MAP+grid.y-terminal.offset_y,1); response(id,cJSON_CreateObject()); }
+    else { Term_mousepress(COL_MAP+(grid.x-terminal.offset_x)*tile_width,ROW_MAP+(grid.y-terminal.offset_y)*tile_height,1); response(id,cJSON_CreateObject()); }
    }
   } else {
    int key=streq(operation,"cancel")?ESCAPE:streq(operation,"next")?'+':streq(operation,"previous")?'-':
     streq(operation,"free")?'o':streq(operation,"interesting")?'m':streq(operation,"player")?'p':
     streq(operation,"confirm")?'t':streq(operation,"recall")?'r':streq(operation,"target")?'*':0;
    if(!key) error(id,"invalid_argument","Unknown targeting operation.");
+   else if(textui_direction && key!=ESCAPE) error(id,"invalid_argument","Choose a direction or cancel.");
    else if(textui_aiming && key!=ESCAPE && key!='*') error(id,"invalid_argument","Choose a direction or enter targeting first.");
    else if(key=='t' && !target_ui_current->can_confirm && !deluxe_look_location()) error(id,"invalid_argument","This selection cannot be confirmed.");
    else { deluxe_target_key(key); response(id,cJSON_CreateObject()); }
@@ -684,7 +697,7 @@ static void pump(void)
   else if (streq(name, "right")) key = ARROW_RIGHT;
   if (active_prompt || !streq(str(p, "context"), context_text)) error(id, "stale_revision", "Input context changed.");
   else if (key < 1 || key > 0x10ffff) error(id, "invalid_argument", "Invalid key.");
-  else { pickup_stage=PICKUP_IDLE; deluxe_target_key(key); response(id, cJSON_CreateObject()); }
+  else { travel_stage=TRAVEL_IDLE; deluxe_target_key(key); response(id, cJSON_CreateObject()); }
  } else if (streq(method, "command.execute")) {
   if (!ready || active_prompt) error(id, "busy", "Finish the current prompt first.");
   else if (!streq(str(p, "revision"), revision_text)) error(id, "stale_revision", "State changed; choose again.");
@@ -739,7 +752,7 @@ static errr xtra(int n, int v)
 {
  if (n == TERM_XTRA_EVENT) {
   if (!v) { if (input_available()) pump(); return 0; }
-  pickup_stage=PICKUP_IDLE; /* Never resume an intent after a user-input prompt. */
+  travel_stage=TRAVEL_IDLE; /* Never resume an intent after a user-input prompt. */
   publish(); if (ready) complete();
   while (terminal.key_head == terminal.key_tail && connected) pump();
   ready = false;
@@ -754,9 +767,9 @@ static errr get_command(cmd_context context)
  if (context != CTX_GAME) return textui_get_cmd(context);
  /* Short pickup trips may finish between running's interrupt polls. Honor
   * pending input before advancing any stage, especially the final pickup. */
- if(pickup_stage!=PICKUP_IDLE && input_available()) { ready=false; pump(); }
+ if(travel_stage!=TRAVEL_IDLE && input_available()) { ready=false; pump(); }
  phase = "playing"; ready = true;
- if(deluxe_pickup_continue()) { ready=false; return 0; }
+ if(deluxe_travel_continue()) { ready=false; return 0; }
  if(click_after_look) {
   ui_event click={0}; click.type=EVT_MOUSE; click.mouse.button=1; click.mouse.mods=look_click_mods;
   click_after_look=false; ready=false;
@@ -824,12 +837,12 @@ int main(int argc, char **argv)
  event_add_handler(EVENT_ENTER_STORE, lifecycle, NULL);
  event_add_handler(EVENT_LEAVE_STORE, lifecycle, NULL);
  event_add_handler(EVENT_ENTER_DEATH, lifecycle, NULL);
- event_add_handler(EVENT_INPUT_FLUSH,deluxe_pickup_event,NULL);
- event_add_handler(EVENT_AUTOPICKUP_BEGIN,deluxe_pickup_event,NULL);
- event_add_handler(EVENT_AUTOPICKUP_END,deluxe_pickup_event,NULL);
- event_add_handler(EVENT_NEW_LEVEL_DISPLAY,deluxe_pickup_event,NULL);
- event_add_handler(EVENT_ENTER_STORE,deluxe_pickup_event,NULL);
- event_add_handler(EVENT_ENTER_DEATH,deluxe_pickup_event,NULL);
+ event_add_handler(EVENT_INPUT_FLUSH,deluxe_travel_event,NULL);
+ event_add_handler(EVENT_AUTOPICKUP_BEGIN,deluxe_travel_event,NULL);
+ event_add_handler(EVENT_AUTOPICKUP_END,deluxe_travel_event,NULL);
+ event_add_handler(EVENT_NEW_LEVEL_DISPLAY,deluxe_travel_event,NULL);
+ event_add_handler(EVENT_ENTER_STORE,deluxe_travel_event,NULL);
+ event_add_handler(EVENT_ENTER_DEATH,deluxe_travel_event,NULL);
  play_game((enum game_mode_type)launch_mode);
  phase = "finished"; ready = false; publish(); complete();
  textui_cleanup(); cleanup_angband();

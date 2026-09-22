@@ -219,3 +219,21 @@ objects therefore remain selectable even if no real object exists. Arrival
 checks the actual pile and carrying capacity; an empty destination ends quietly.
 `can_pickup` on actual item records remains a current-visibility/capacity check
 and does not determine whether a remembered pickup attempt is offered.
+
+### Terrain actions (`interaction.terrain: 1`)
+
+`terrain_actions` lists observed viewport tiles as `{x,y,action}` entries,
+where action is `tunnel`, `up` or `down`. Eligibility uses remembered engine
+terrain, not client glyph/name matching. `dungeon.terrain` accepts those fields
+and the latest `context` in normal ready play. It shares travel cancellation
+with pickup, approaches a diggable wall or stands on stairs, then queues the
+engine command. Tunnelling uses its ordinary repeat and interruption rules.
+Stale contexts, mismatched actions and ineligible terrain are rejected.
+
+`direction_prompt: true` identifies the engine movement-direction prompt
+used by tunnelling, opening and similar commands. It retains `dungeon`.
+`targeting.select` supplies a mouse click to that original direction handler;
+`targeting.control` accepts only cancel in this context, without ranged-target
+confirmation. `aiming` continues to mean the separate ranged direction prompt.
+Context-menu Tunnel continues with another engine repeat batch when the prior
+batch expires. Success, impossible digging and ordinary disturbance end it.

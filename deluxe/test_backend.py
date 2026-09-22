@@ -324,6 +324,28 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(any(o['location']=='Pack' and o['actual']['kind']==kind for o in e.state['items']),(e.screen(),e.errors))
         self.assertFalse(any(o['location']=='Floor' and o['x']==x and o['y']==y and o['actual']['kind']==kind for o in e.state['items']))
 
+    def test_tunnel_direction_click(self):
+        e=self.engine
+        e.hello(); e.birth()
+        x,y=e.state['player']['x'],e.state['player']['y']
+        for semantic in (False,True):
+            if semantic:
+                old=e.state['revision']
+                self.assertIn('result',e.call('command.execute',{'revision':old,'command':'core.tunnel'}))
+                e.next_state(old)
+            else: e.key(ord('T'))
+            self.assertTrue(e.state.get('direction_prompt'),e.screen())
+            self.assertIn('dungeon',e.state)
+            self.assertFalse(e.state.get('aiming',False))
+            self.assertEqual(e.call('targeting.control',{'context':e.state['context'],'operation':'target'})['error']['code'],'invalid_argument')
+            self.targeting('targeting.select',x=x+1,y=y)
+            while e.state['readiness']!='ready': e.key('enter')
+            self.assertFalse(e.state.get('direction_prompt',False))
+            self.assertNotIn('targeting',e.state)
+        e.key(ord('T'))
+        self.targeting('targeting.control',operation='cancel')
+        self.assertEqual(e.state['readiness'],'ready')
+
     def test_immediate_target(self):
         e = self.engine
         e.hello(); e.birth()
@@ -639,7 +661,11 @@ class BackendTests(unittest.TestCase):
                 e.key("enter")
         else:
             self.fail("Did not reach town stairs")
-        e.key(ord(">"))
+        down=next(a for a in e.state['terrain_actions'] if a['x']==e.state['player']['x'] and a['y']==e.state['player']['y'])
+        self.assertEqual(down['action'],'down')
+        self.assertEqual(e.call('dungeon.terrain',{'context':'old',**down})['error']['code'],'stale_revision')
+        self.assertEqual(e.call('dungeon.terrain',{'context':e.state['context'],**down,'action':'tunnel'})['error']['code'],'invalid_argument')
+        self.targeting('dungeon.terrain',**down)
         while e.state["readiness"] != "ready":
             e.key("enter")
         dungeon = e.call("state.get")["result"]
@@ -665,13 +691,42 @@ class BackendTests(unittest.TestCase):
         self.targeting('targeting.control',operation='cancel')
         self.assertEqual(e.state['turn'],dungeon['turn'])
         self.assert_semantic_view(e.state)
-        # The return stairs also exercise the '<' codepoint and another level change.
-        e.key(ord("<"))
+        up=next(a for a in e.state['terrain_actions'] if a['action']=='up' and a['x']==e.state['player']['x'] and a['y']==e.state['player']['y'])
+        self.targeting('dungeon.terrain',**up)
         while e.state["readiness"] != "ready":
             e.key("enter")
         self.assertEqual(e.state["player"]["depth"], 0)
         self.assert_semantic_view(e.state)
         self.assertNotEqual(e.state["dungeon"]["level_id"], dungeon["dungeon"]["level_id"])
+        # Exercise tunnelling through the same context-action API on a fresh
+        # dungeon. Select the closest observed diggable wall, never permanent rock.
+        self.targeting('dungeon.terrain',x=e.state['player']['x'],y=e.state['player']['y'],action='down')
+        while e.state['readiness']!='ready': e.key('enter')
+        # Give this disposable character a real chance to dig granite and clear
+        # nearby monsters, so this checks completion rather than futile digging
+        # or a legitimate danger interruption.
+        for wizard_key in ('A','z'):
+            e.key(1); e.key(ord(wizard_key))
+            for _ in range(20):
+                if e.state['readiness']=='ready': break
+                e.call('state.get')
+                if e.prompt:
+                    prompt=e.prompt; e.prompt=None; old=e.state['revision']
+                    value=True if prompt['type']=='confirmation' else 20
+                    e.call('prompt.reply',{'prompt_id':prompt['prompt_id'],'value':value})
+                    e.next_state(old)
+                else: e.key('enter')
+        px,py=e.state['player']['x'],e.state['player']['y']
+        walls=[a for a in e.state['terrain_actions'] if a['action']=='tunnel']
+        self.assertTrue(walls)
+        wall=min(walls,key=lambda a:max(abs(a['x']-px),abs(a['y']-py)))
+        original_feature=e.state['map']['actual'][wall['y']][wall['x']]
+        turn=e.state['turn']
+        self.targeting('dungeon.terrain',**wall)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertGreater(e.state['turn'],turn)
+        self.assertLessEqual(max(abs(e.state['player']['x']-wall['x']),abs(e.state['player']['y']-wall['y'])),1)
+        self.assertNotEqual(e.state['map']['actual'][wall['y']][wall['x']],original_feature,e.screen())
 
     def test_item_prompt_cancel_and_inscription(self):
         e = self.engine

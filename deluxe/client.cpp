@@ -221,7 +221,7 @@ struct Connection {
  void target(const std::string &method,json params=json::object()) {
   if(!connected || busy || !prompt.empty()) return;
   params["context"]=state.value("context",""); send(method,std::move(params)); busy=true;
-  pickup_travel=method=="dungeon.pickup";
+  pickup_travel=method=="dungeon.pickup" || method=="dungeon.terrain";
  }
  void command(const std::string &id, const std::string &item = "") {
   if (!ready()) return;
@@ -601,7 +601,7 @@ struct UI {
     ImGui::BeginTooltip(); ImGui::PushTextWrapPos(ImGui::GetFontSize()*26);
     tile_details(x,y,false); ImGui::PopTextWrapPos(); ImGui::EndTooltip();
     if(ImGui::IsMouseClicked(0) && c.native_targeting() && !c.busy && !c.state.value("message_pending",false)) {
-     const bool active=c.state.contains("targeting") || c.state.value("aiming",false);
+     const bool active=c.state.contains("targeting") || c.state.value("aiming",false) || c.state.value("direction_prompt",false);
      if(active || (c.ready() && c.mouse_movement())) {
       const auto &io=ImGui::GetIO();
       const bool exit_look=click_exits_look && c.state.contains("targeting") && c.state["targeting"].value("mode","")=="look";
@@ -616,7 +616,7 @@ struct UI {
    }
   }
   if(ImGui::BeginPopup("Dungeon actions")) {
-   const bool active=c.state.contains("targeting") || c.state.value("aiming",false);
+   const bool active=c.state.contains("targeting") || c.state.value("aiming",false) || c.state.value("direction_prompt",false);
    const bool usable=!c.busy && grid_menu_context==c.state.value("context","") && c.state.contains("dungeon") && !c.state.value("message_pending",false);
    auto choose=[&](const char *label,const char *method,json extra=json::object()) {
     if(ImGui::MenuItem(label)) {
@@ -633,6 +633,7 @@ struct UI {
     ImGui::BeginDisabled(!c.mouse_movement());
     choose("Move here","dungeon.click");
     ImGui::EndDisabled();
+    ImGui::Separator();
     bool pickup=false;
     if(c.capabilities.value("interaction.pickup",0)>0 && c.state.contains("dungeon")) {
      const auto &view=c.state["dungeon"];
@@ -641,7 +642,16 @@ struct UI {
       pickup=view["cells"][y][x][4].get<int>()!=0;
     }
     if(pickup) choose("Pick up","dungeon.pickup");
-    ImGui::Separator();
+    bool contextual=pickup;
+    if(c.capabilities.value("interaction.terrain",0)>0 && c.state.contains("terrain_actions"))
+     for(const auto &entry:c.state["terrain_actions"]) if(entry.value("x",-1)==grid_menu_x && entry.value("y",-1)==grid_menu_y) {
+      const std::string action=entry.value("action","");
+      if(action=="tunnel" || action=="up" || action=="down") {
+       contextual=true;
+       choose(action=="tunnel"?"Tunnel":action=="up"?"Go up":"Go down","dungeon.terrain",{{"action",action}});
+      }
+     }
+    if(contextual) ImGui::Separator();
     choose("Look","targeting.begin",{{"mode","look"}});
     choose("Target","targeting.set");
     ImGui::EndDisabled();
@@ -765,7 +775,10 @@ struct UI {
    if(ImGui::Button(label)) { c.target("targeting.control",{{"operation",operation}}); focus_game(); }
   };
   ImGui::BeginDisabled(c.busy);
-  if(aiming) {
+  if(c.state.value("direction_prompt",false)) {
+   ImGui::TextWrapped("Choose a direction or click a tile. Escape cancels.");
+   action("Cancel","cancel");
+  } else if(aiming) {
    ImGui::TextWrapped("Choose a direction, or click a tile to aim. Escape cancels.");
    action("Choose target","target"); ImGui::SameLine(); action("Cancel","cancel");
   } else {
@@ -1001,7 +1014,7 @@ struct UI {
    character();
    ImGui::Dummy(ImVec2(0,ImGui::GetTextLineHeight()*.45f));
    ImGui::Separator();
-   const bool targeting_active=c.state.contains("targeting") || c.state.value("aiming",false);
+   const bool targeting_active=c.state.contains("targeting") || c.state.value("aiming",false) || c.state.value("direction_prompt",false);
    if(ImGui::BeginTabBar("panels")) {
     if(targeting_active && ImGui::BeginTabItem("Look / Target",nullptr,targeting_was_active?ImGuiTabItemFlags_None:ImGuiTabItemFlags_SetSelected)) {
      ImGui::BeginChild("Target content"); targeting_panel(); ImGui::EndChild(); ImGui::EndTabItem();

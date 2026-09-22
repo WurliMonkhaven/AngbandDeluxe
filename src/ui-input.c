@@ -1489,7 +1489,7 @@ static int dir_transitions[10][10] =
  *
  * The direction, "0", is illegal and will not be accepted.
  */
-static bool textui_get_rep_dir(int *dp, bool allow_5)
+static bool textui_get_rep_dir_impl(int *dp, bool allow_5)
 {
 	int dir = 0;
 
@@ -1595,6 +1595,16 @@ static bool textui_get_rep_dir(int *dp, bool allow_5)
 
 	/* Success */
 	return (true);
+}
+
+bool textui_direction;
+static bool textui_get_rep_dir(int *dp, bool allow_5)
+{
+	bool result;
+	textui_direction = true;
+	result = textui_get_rep_dir_impl(dp, allow_5);
+	textui_direction = false;
+	return result;
 }
 
 /**

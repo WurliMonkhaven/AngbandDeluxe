@@ -46,7 +46,7 @@ static void deluxe_capture_view(cJSON *state_record)
  cJSON *view, *rows;
  /* Native targeting/aiming share the dungeon; nested recall screens still own
   * the terminal. Presentation mode never depends on parsing terminal text. */
- if ((!ready && !textui_message_pending && !target_ui_current && !textui_aiming) || active_prompt || screen_save_depth || !streq(phase,"playing") || !deluxe_cells) return;
+ if ((!ready && !textui_message_pending && !target_ui_current && !textui_aiming && !textui_direction) || active_prompt || screen_save_depth || !streq(phase,"playing") || !deluxe_cells) return;
  width = MIN(SCREEN_WID, cave->width - terminal.offset_x);
  height = MIN(SCREEN_HGT, cave->height - terminal.offset_y);
  if (width < 1 || height < 1 || terminal.offset_x < 0 || terminal.offset_y < 0) return;
@@ -86,6 +86,7 @@ static void deluxe_capture_view(cJSON *state_record)
   cJSON_AddItemToObject(state_record,"targeting",selection);
  }
  json_bool(state_record,"aiming",textui_aiming);
+ json_bool(state_record,"direction_prompt",textui_direction);
 }
 static void deluxe_character_details(cJSON *p)
 {
