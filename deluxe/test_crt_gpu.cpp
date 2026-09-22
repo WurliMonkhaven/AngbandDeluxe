@@ -111,17 +111,46 @@ int main(int argc,char **argv) {
   frame.settings.parts[Dots]={true,100};
   auto dots=render(true);
   check(dots!=plain && pixel(dots,128,120)<3,"Phosphor dots missing or lifting black");
-  int green=0;
-  for(int y=84;y<90;++y) for(int x=90;x<96;++x) green+=pixel(dots,x,y,1);
-  check(std::abs(green/36.f-180)<8,"Dot mask removed too much mean brightness");
+  int darkest=255,brightest=0;
+  for(int y=84;y<90;++y) for(int x=90;x<96;++x) {
+   darkest=std::min(darkest,int(pixel(dots,x,y,1))); brightest=std::max(brightest,int(pixel(dots,x,y,1)));
+  }
+  check(brightest-darkest>100,"Maximum dot strength is too subtle");
+  double channels[3]={}; int colour_contrast=0;
+  for(int y=11;y<21;++y) for(int x=16;x<240;++x) {
+   const int red=pixel(dots,x,y), green=pixel(dots,x,y,1), blue=pixel(dots,x,y,2);
+   channels[0]+=red; channels[1]+=green; channels[2]+=blue;
+   colour_contrast=std::max(colour_contrast,std::max({red,green,blue})-std::min({red,green,blue}));
+  }
+  check(colour_contrast>70,"RGB phosphor emitters are not visibly separated");
+  check(std::abs(channels[0]/channels[1]-1)<.08 && std::abs(channels[2]/channels[1]-1)<.08,"RGB triads tint neutral areas on average");
+  check(pixel(dots,210,104,1)<3 && pixel(dots,210,104,2)<3,"Red phosphor source emitted unrelated colours");
   frame.scope=1; frame.game_pos=ImVec2(0,0); frame.game_size=ImVec2(128,128);
   auto dot_scope=render(true);
   check(pixel(dot_scope,210,104)==pixel(plain,210,104),"Phosphor dots escaped scope");
   frame.scope=2; frame.settings.parts[Dots].enabled=false;
   frame.settings.parts[Interference]={true,100}; frame.seconds=0;
   auto signal_a=render(true); frame.seconds=.2; auto signal_b=render(true);
-  check(signal_a!=signal_b && pixel(signal_b,128,120)<3,"Signal interference missing or lifting black");
+  check(signal_a!=signal_b,"Signal interference is not animated");
+  auto difference=[&](const auto &value) {
+   double sum=0;
+   for(size_t i=0;i<value.size();i+=4) sum+=std::abs(int(value[i])-int(plain[i]));
+   return sum/(texture.width*texture.height);
+  };
+  check(difference(signal_b)>35,"Maximum interference is too subtle");
   frame.settings.parts[Interference].enabled=false;
+  for(auto part:{Dots,Interference}) {
+   double previous=-1;
+   for(float strength:{0.f,25.f,50.f,75.f,100.f}) {
+    frame.settings.parts[part]={true,strength};
+    auto stepped=render(true);
+    if(strength==0) check(stepped==plain,"Zero effect strength must be invisible");
+    const double change=difference(stepped);
+    check(change>=previous,"Effect strength did not increase across slider range");
+    previous=change;
+   }
+   frame.settings.parts[part].enabled=false;
+  }
   frame.health_glitch=1;
   bool glitched=false;
   for(int i=0;i<6;++i) {

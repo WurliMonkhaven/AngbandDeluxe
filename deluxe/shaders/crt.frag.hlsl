@@ -37,6 +37,11 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
     float burst = step(frac(viewport.z * 1.5), 0.10 + shape.w * 0.32);
     float glitch = shape.w * burst * step(0.76 - shape.w * 0.18, noise);
     source.x += (noise - 0.5) * 18 * glitch / viewport.x;
+    // Signal strength has a deliberately broad range: fine instability at low
+    // settings, visibly broken horizontal sync at the top of the slider.
+    float signal = surface.y * surface.y;
+    float line_noise = frac(sin(floor(local.y * region.w * viewport.y / 3) * 12.9898 + floor(viewport.z * 24) * 78.233) * 43758.5453) - 0.5;
+    source.x += line_noise * 36 * signal / viewport.x;
     source = clamp(source, region.xy + 0.5 / viewport.xy, region.xy + region.zw - 0.5 / viewport.xy);
     float3 c = scene.SampleLevel(scene_sampler, source, 0).rgb;
     if (effects.w > 0 || glitch > 0) {
@@ -60,18 +65,48 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
     // Redistribute beam energy rather than simply removing it. Each dark line
     // covers one third of the three-pixel pitch (including antialiasing).
     c *= (1 - scan * scan_depth) / (1 - scan_depth / 3);
-    // RGB phosphor triads, anchored to the tube rather than the glyphs. A
-    // smooth mask plus derivative attenuation avoids hard subpixel moire as
-    // the barrel bends the three-pixel dot pitch. Keep mean beam energy intact.
+    // Staggered delta-gun triads: all three emitters in a group receive the
+    // SAME area-filtered image sample. That is essential for thin white strokes
+    // to illuminate a complete RGB group instead of arbitrary coloured specks.
     float2 tube = local * region.zw * viewport.xy;
-    float2 phase = tube * (6.2831853 / 3);
-    float2 filtering = exp(-0.125 * float2(fwidth(phase.x), fwidth(phase.y)) * float2(fwidth(phase.x), fwidth(phase.y)));
-    float3 triad = cos(phase.x + float3(0, 2.0943951, 4.1887902));
-    c *= 1 + surface.x * (0.32 * triad * filtering.x + 0.12 * cos(phase.y) * filtering.y);
-    // Small line-correlated gain noise, not a flashing white overlay: black
-    // remains black. Presets deliberately keep this almost imperceptible.
+    float footprint = max(length(ddx(tube)), length(ddy(tube)));
+    float resolved = 1 - smoothstep(2, 4, footprint);
+    if (surface.x > 0 && resolved > 0) {
+        const float pitch = 4;
+        const float row_pitch = 3.4641016;
+        float sigma2 = 0.36 + footprint * footprint / 12;
+        float3 emitted = 0;
+        float row_center = round(tube.y / row_pitch);
+        [unroll] for (int ry = -1; ry <= 1; ++ry) {
+            float cy = row_center + ry;
+            float shift = frac(cy * 0.5) * pitch;
+            float column = floor((tube.x - shift) / pitch);
+            [unroll] for (int rx = 0; rx < 2; ++rx) {
+                float2 center = float2((column + rx) * pitch + shift, cy * row_pitch);
+                float3 drive = 0;
+                [unroll] for (int sample_y = -1; sample_y <= 1; sample_y += 2)
+                    [unroll] for (int sample_x = -1; sample_x <= 1; sample_x += 2) {
+                        float2 sample_uv = source + (center - tube + float2(sample_x, sample_y) * 0.85) / viewport.xy;
+                        sample_uv = clamp(sample_uv, region.xy + 0.5 / viewport.xy, region.xy + region.zw - 0.5 / viewport.xy);
+                        float3 sample_color = scene.SampleLevel(scene_sampler, sample_uv, 0).rgb;
+                        drive += sample_color * sample_color * 0.25;
+                    }
+                float2 d = tube - center;
+                float2 dr = d - float2(-0.95, -0.55);
+                float2 dg = d - float2(0.95, -0.55);
+                float2 db = d - float2(0, 1.1);
+                float3 distance2 = float3(dot(dr,dr), dot(dg,dg), dot(db,db));
+                // Gaussian spot profiles overlap optically; normalize their
+                // integrated energy, not their individual peak RGB values.
+                emitted += drive * exp(-distance2 / (2 * sigma2)) * (pitch * row_pitch / (6.2831853 * sigma2));
+            }
+        }
+        emitted *= (1 + 0.9 * effects.y * excitation) * (1 - scan * scan_depth) / (1 - scan_depth / 3);
+        c = lerp(c, emitted, surface.x * resolved * 0.85);
+    }
+    // Local gain noise, not a full-screen brightness flash.
     float grain = frac(sin(floor(tube.y) * 12.9898 + floor(viewport.z * 24) * 78.233) * 43758.5453) - 0.5;
-    c *= 1 + grain * surface.y * 0.08;
+    c *= 1 + grain * surface.y * 1.8;
     // Optical spill happens after the beam pattern, so its halos remain soft.
     if (effects.y > 0) c += glow.SampleLevel(glow_sampler, source, 0).rgb * effects.y * 0.9;
     if (effects.z > 0) c += bloom.SampleLevel(bloom_sampler, source, 0).rgb * effects.z * 1.2;
@@ -79,8 +114,12 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
     c *= 1 - (1 - saturate(min(edge_pixels.x, edge_pixels.y) / max(edge_width, 1))) * shape.x * (160.0 / 255.0);
     // Fit overbright light into SDR by scaling the whole colour: independent
     // channel clipping would bleach saturated terminal colours toward white.
-    c /= max(1, max(c.r, max(c.g, c.b)));
+    float3 hue_fitted = c / max(1, max(c.r, max(c.g, c.b)));
+    c = lerp(hue_fitted, saturate(c), surface.x * resolved);
     c = sqrt(max(c, 0));
+    // At strong settings the signal also leaks visible static into unlit areas.
+    float static_noise = frac(sin(dot(floor(tube), float2(127.1,311.7)) + floor(viewport.z * 24) * 74.7) * 43758.5453);
+    c = lerp(c, static_noise.xxx, signal * 0.65);
     float behind = frac(viewport.z / 12 - local.y + 1);
     float trail = pow(saturate(1 - behind / 0.24), 3);
     c = lerp(c, 1, trail * shape.z * (50.0 / 255.0));

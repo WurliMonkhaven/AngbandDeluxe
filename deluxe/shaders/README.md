@@ -43,10 +43,19 @@ glyphs, builds scanline geometry, or subdivides/warps triangles on the CPU.
    it at the tombstone. This adds no render pass or texture allocation.
    Independent Low Health Animation and Death Animation preferences gate the
    intensity; both preserve the selected CRT scope and staged settings behavior.
-   Phosphor Dots adds a smooth RGB triad mask at a three-output-pixel pitch in
-   tube coordinates, with derivative attenuation to limit aliasing. Signal
-   Interference adds small line-correlated gain fluctuations. Both act before
-   optical light spill, preserve black, and have separate controls and presets.
+   Phosphor Dots reconstructs staggered triangular RGB groups at a fixed
+   four-pixel pitch in tube coordinates. All emitters in a group share an
+   area-filtered linear-light image sample, instead of masking unrelated glyph
+   pixels per channel. Gaussian spots overlap and are energy-normalized;
+   unwrapped derivatives widen their footprint and fade unresolved groups.
+   The slider blends from the original beam to resolved RGB groups, retaining
+   a small continuous beam contribution for legibility at maximum strength.
+   This is an SDR approximation, not a simulation of a particular CRT model.
+   Signal Interference combines line gain noise, horizontal sync displacement
+   and static. Static/displacement ramp quadratically to leave room for subtle
+   low settings; maximum strength intentionally disrupts the picture. Both
+   controls are invisible at zero. Presets use restrained amounts except Zero
+   Cool; manually selected 100% is intentionally beyond the preset range.
 4. Blend previous output for brief, frame-rate-independent ghosting. Two
    full-resolution history textures alternate so a pass never samples its own
    render target. The CPU supplies elapsed time; the GPU blends the images.
