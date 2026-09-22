@@ -2,6 +2,7 @@
 #include "client.cpp"
 #include <iostream>
 #include <stdexcept>
+#include <chrono>
 static void check(bool value,const char *message) { if(!value) throw std::runtime_error(message); }
 int main(int argc,char **argv) {
  try {
@@ -27,12 +28,36 @@ int main(int argc,char **argv) {
   loaded.begin_settings(); loaded.draft_scale=.75f;
   check(!loaded.apply_settings(nullptr) && loaded.scale==1.5f,"Failed save changed active settings");
   // Exercise draw-list generation and clip bounds without rendering a window.
-  ImGui::CreateContext(); auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(800,600); io.DeltaTime=1.f/60;
+  ImGui::CreateContext(); auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(1600,1000); io.DeltaTime=1.f/60;
+  io.BackendFlags|=ImGuiBackendFlags_RendererHasVtxOffset;
   unsigned char *pixels; int w,h; io.Fonts->GetTexDataAsRGBA32(&pixels,&w,&h);
   ImGui::NewFrame(); auto *draw=ImGui::GetForegroundDrawList();
   crt_effect(draw,ImVec2(20,30),ImVec2(400,300));
   check(draw->VtxBuffer.Size>0,"CRT effect emitted no geometry");
   for(const auto &v:draw->VtxBuffer) check(v.pos.x>=20 && v.pos.x<=420 && v.pos.y>=30 && v.pos.y<=330,"CRT escaped selected surface");
+  auto plain=crt_phosphor(*draw);
+  check(plain->IdxBuffer.Size==draw->IdxBuffer.Size,"Solid backgrounds acquired a halo");
+  plain.reset();
+  draw->PushClipRect(ImVec2(20,30),ImVec2(1400,950));
+  const std::string row(80,'@');
+  for(int y=0;y<34;++y) draw->AddText(ImVec2(30,40+y*20.f),IM_COL32_WHITE,row.c_str());
+  draw->PopClipRect();
+  const auto start=std::chrono::steady_clock::now();
+  auto glowing=crt_phosphor(*draw);
+  std::cout<<"CRT geometry for 2,720 glyphs: "<<std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count()<<" ms\n";
+  check(glowing->IdxBuffer.Size>draw->IdxBuffer.Size,"Missing text glow geometry");
+  bool red=false,cyan=false;
+  for(const auto &v:glowing->VtxBuffer) {
+   red|=(v.col&~IM_COL32_A_MASK)==(IM_COL32(255,0,0,0));
+   cyan|=(v.col&~IM_COL32_A_MASK)==(IM_COL32(0,255,255,0));
+  }
+  check(red&&cyan,"Missing chromatic fringes");
+  for(const auto &command:glowing->CmdBuffer) {
+   check(command.IdxOffset+command.ElemCount<=unsigned(glowing->IdxBuffer.Size),"Invalid draw range");
+   for(unsigned i=0;i<command.ElemCount;++i)
+    check(command.VtxOffset+glowing->IdxBuffer[command.IdxOffset+i]<unsigned(glowing->VtxBuffer.Size),"Invalid vertex offset");
+  }
+  glowing.reset();
   ImGui::EndFrame(); ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Graphics settings and CRT geometry checks passed\n";

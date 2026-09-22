@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 using json = nlohmann::json;
@@ -44,15 +45,14 @@ static ImU32 color(int index) {
  const auto &c = colors[std::max(0,index) % std::size(colors)];
  return IM_COL32(c[0],c[1],c[2],255);
 }
-// Static scanlines and a soft edge vignette: no flicker, extra render targets,
-// or gameplay changes. Draw on the chosen surface after its normal content.
+// Static scanlines and a soft edge vignette, drawn above the phosphor glow.
 static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size) {
  if(size.x<=0 || size.y<=0) return;
  const ImVec2 end(pos.x+size.x,pos.y+size.y);
  draw->PushClipRect(pos,end,true);
  const float pixel=1.f/std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.y);
  for(float y=pos.y;y<end.y;y+=3.f*pixel)
-  draw->AddRectFilled(ImVec2(pos.x,y),ImVec2(end.x,y+pixel),IM_COL32(0,0,0,48));
+  draw->AddRectFilled(ImVec2(pos.x,y),ImVec2(end.x,y+pixel),IM_COL32(0,0,0,62));
  const float edge=std::min(size.x,size.y)*.09f;
  const ImU32 dark=IM_COL32(0,8,5,80),clear=IM_COL32(0,8,5,0);
  draw->AddRectFilledMultiColor(pos,ImVec2(pos.x+edge,end.y),dark,clear,clear,dark);
@@ -60,6 +60,45 @@ static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size) {
  draw->AddRectFilledMultiColor(pos,ImVec2(end.x,pos.y+edge),dark,dark,clear,clear);
  draw->AddRectFilledMultiColor(ImVec2(pos.x,end.y-edge),end,clear,clear,dark,dark);
  draw->PopClipRect();
+}
+// Reuse the font's antialiased glyph coverage for a small phosphor halo and
+// red/cyan channel fringes. Keep the original sharp glyph on top. Solid UI
+// backgrounds are passed through, and original draw order/clip rectangles
+// preserve popup occlusion. No full-screen blur buffers or flicker are needed.
+static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source) {
+ auto out=std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
+ out->_ResetForNewFrame(); out->Flags=source.Flags;
+ const float pixel=1.f/std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.y);
+ for(const auto &cmd:source.CmdBuffer) {
+  out->PushClipRect(ImVec2(cmd.ClipRect.x,cmd.ClipRect.y),ImVec2(cmd.ClipRect.z,cmd.ClipRect.w));
+  out->PushTexture(cmd.TexRef);
+  if(cmd.UserCallback) out->AddCallback(cmd.UserCallback,cmd.UserCallbackData);
+  else for(unsigned i=0;i+2<cmd.ElemCount;i+=3) {
+   ImDrawVert v[3];
+   for(int k=0;k<3;++k) v[k]=source.VtxBuffer[cmd.VtxOffset+source.IdxBuffer[cmd.IdxOffset+i+k]];
+   bool font=false;
+   for(const auto *texture:ImGui::GetIO().Fonts->TexList) if(cmd.TexRef._TexData==texture) font=true;
+   const bool textured=v[0].uv.x!=v[1].uv.x || v[0].uv.y!=v[1].uv.y || v[0].uv.x!=v[2].uv.x || v[0].uv.y!=v[2].uv.y;
+   auto emit=[&](float dx,float dy,float opacity,ImU32 channels) {
+    out->PrimReserve(3,3);
+    for(const auto &vertex:v) {
+     const unsigned alpha=(vertex.col>>IM_COL32_A_SHIFT)&255;
+     const ImU32 tint=(vertex.col&channels&~IM_COL32_A_MASK) | (ImU32(alpha*opacity)<<IM_COL32_A_SHIFT);
+     out->PrimVtx(ImVec2(vertex.pos.x+dx*pixel,vertex.pos.y+dy*pixel),vertex.uv,tint);
+    }
+   };
+   if(font && textured) {
+    // Low-opacity spread provides a soft halo; offsets stay small for legibility.
+    emit(-1.8f,0,.10f,IM_COL32_WHITE); emit(1.8f,0,.10f,IM_COL32_WHITE);
+    emit(0,-1.8f,.10f,IM_COL32_WHITE); emit(0,1.8f,.10f,IM_COL32_WHITE);
+    emit(-.85f,0,.38f,IM_COL32(255,0,0,255));
+    emit(.85f,0,.38f,IM_COL32(0,255,255,255));
+   }
+   emit(0,0,1.f,IM_COL32_WHITE);
+  }
+  out->PopTexture(); out->PopClipRect();
+ }
+ return out;
 }
 struct Connection {
  SDL_Process *process = nullptr;
@@ -240,6 +279,7 @@ struct UI {
  int crt=0, draft_crt=0;
  float draft_scale=1.f;
  std::string settings_error;
+ ImDrawList *game_draw_list=nullptr;
  float split_drag_y = 0.f, split_drag_fraction = .72f;
  bool quit_dialog = false;
  bool grid_focus = false, focus_requested = false, window_active = true;
@@ -445,6 +485,7 @@ struct UI {
   if (ImGui::IsItemClicked()) grid_focus = true;
   if(ImGui::IsItemFocused()) grid_focus=true;
   auto draw=ImGui::GetWindowDrawList();
+  game_draw_list=draw;
   draw->AddRectFilled(start,ImVec2(start.x+viewport.x,start.y+viewport.y),IM_COL32(12,15,20,255));
   for (size_t y=0;y<rows.size();++y) for(size_t x=0;x<rows[y].size();++x) {
    unsigned glyph=rows[y][x][0].get<unsigned>(); int col=rows[y][x][1].get<int>();
@@ -610,6 +651,7 @@ struct UI {
   }
  }
  void draw(SDL_Window *window) {
+  game_draw_list=nullptr;
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(vp->WorkPos); ImGui::SetNextWindowSize(vp->WorkSize);
   ImGui::Begin("Angband Deluxe",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
@@ -816,6 +858,20 @@ int main(int argc,char **argv) {
    auto vp=ImGui::GetMainViewport(); crt_effect(ImGui::GetForegroundDrawList(),vp->Pos,vp->Size);
   }
   ImGui::Render();
+  auto *render_data=ImGui::GetDrawData();
+  ImDrawData crt_data;
+  std::vector<std::unique_ptr<ImDrawList>> phosphor_lists;
+  if(ui.crt!=0) {
+   crt_data=*render_data; crt_data.CmdLists.resize(0);
+   crt_data.CmdListsCount=crt_data.TotalIdxCount=crt_data.TotalVtxCount=0;
+   for(auto *list:render_data->CmdLists) {
+    if(ui.crt==2 || list==ui.game_draw_list) {
+     phosphor_lists.push_back(crt_phosphor(*list)); list=phosphor_lists.back().get();
+    }
+    crt_data.AddDrawList(list);
+   }
+   render_data=&crt_data;
+  }
   connection.flush_input(); // Dispatch this frame's input before waiting for presentation.
   // ImGui may stop text input when one of its textboxes loses focus. The
   // game also needs SDL's layout-aware text events (including shifted keys).
@@ -824,11 +880,11 @@ int main(int argc,char **argv) {
   if(!cmd) break;
   if(!SDL_WaitAndAcquireGPUSwapchainTexture(cmd,window,&surface,nullptr,nullptr)) { SDL_CancelGPUCommandBuffer(cmd); break; }
   if(surface) {
-   ImGui_ImplSDLGPU3_PrepareDrawData(ImGui::GetDrawData(),cmd);
+   ImGui_ImplSDLGPU3_PrepareDrawData(render_data,cmd);
    SDL_GPUColorTargetInfo target{}; target.texture=surface; target.load_op=SDL_GPU_LOADOP_CLEAR; target.store_op=SDL_GPU_STOREOP_STORE;
    target.clear_color=SDL_FColor{.04f,.05f,.07f,1.f};
    auto pass=SDL_BeginGPURenderPass(cmd,&target,1,nullptr);
-   ImGui_ImplSDLGPU3_RenderDrawData(ImGui::GetDrawData(),cmd,pass); SDL_EndGPURenderPass(pass);
+   ImGui_ImplSDLGPU3_RenderDrawData(render_data,cmd,pass); SDL_EndGPURenderPass(pass);
   }
   SDL_SubmitGPUCommandBuffer(cmd);
   if(SDL_GetWindowFlags(window)&SDL_WINDOW_MINIMIZED) SDL_Delay(20);
