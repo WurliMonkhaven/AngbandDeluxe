@@ -25,17 +25,18 @@ static float resource_fraction(int value,int maximum) {
 }
 struct HealthGlitch {
  double death_started=-1;
- float update(const json &state,double seconds) {
+ float update(const json &state,double seconds,bool low=true,bool death=true) {
   const auto phase=state.value("phase","");
   if((phase!="playing" && phase!="store") || !state.contains("player")) { death_started=-1; return 0; }
   const auto &p=state["player"];
   if(p.value("death_pending",false)) {
+   if(!death) { death_started=-1; return 0; }
    if(death_started<0) death_started=seconds;
    return .45f+.55f*float(std::exp(-std::max(0.,seconds-death_started)/.7));
   }
   death_started=-1;
   const int warning=p.value("hp_warning",0), hp=p.value("hp",0);
-  return warning>0 && hp<warning ? .12f+.18f*(1-resource_fraction(hp,warning)) : 0;
+  return low && warning>0 && hp<warning ? .12f+.18f*(1-resource_fraction(hp,warning)) : 0;
  }
 };
 
@@ -253,6 +254,8 @@ struct UI {
  Connection &c;
  float scale = 1.0f, game_fraction = .72f;
  bool fullscreen=false, draft_fullscreen=false;
+ bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
+ int damage_amount=1;
  int crt=0, draft_crt=0;
  int crt_strength=1, draft_crt_strength=1;
  CrtSettings crt_settings{}, draft_crt_settings{};
@@ -278,6 +281,7 @@ struct UI {
    scale=std::clamp(j.value("scale",1.f),0.75f,1.5f);
    game_fraction=std::clamp(j.value("game_fraction",.72f),.2f,.9f);
    fullscreen=j.value("fullscreen",false);
+   low_animation=j.value("low_health_animation",true); death_animation=j.value("death_animation",true);
    crt=std::clamp(j.value("crt",0),0,2);
    crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
    crt_settings=CrtSettings(crt_strength);
@@ -286,17 +290,18 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()}}.dump(2);
+  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"low_health_animation",low},{"death_animation",death}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
  void save_settings() {
-  if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings)) c.notice("Settings could not be saved.");
+  if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
+  draft_low_animation=low_animation; draft_death_animation=death_animation;
   draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
   draft_crt_strength=crt_strength; draft_crt_settings=crt_settings;
  }
@@ -304,10 +309,11 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
+  low_animation=draft_low_animation; death_animation=draft_death_animation;
   scale=draft_scale; fullscreen=draft_fullscreen; crt=draft_crt;
   crt_strength=draft_crt_strength; crt_settings=draft_crt_settings;
   return true;
@@ -332,6 +338,11 @@ struct UI {
       }
       ImGui::EndCombo();
      }
+     ImGui::EndTabItem();
+    }
+    if(ImGui::BeginTabItem("Animations")) {
+     ImGui::Spacing(); ImGui::Checkbox("Low Health Animation",&draft_low_animation);
+     ImGui::Checkbox("Death Animation",&draft_death_animation);
      ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("CRT effects")) {
@@ -678,7 +689,34 @@ struct UI {
    ImGui::SameLine();
   }
   const float settings_width=ImGui::CalcTextSize("Settings").x+2*ImGui::GetStyle().FramePadding.x;
-  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowSize().x-ImGui::GetStyle().WindowPadding.x-settings_width));
+  const float dev_width=ImGui::CalcTextSize("Dev tools").x+2*ImGui::GetStyle().FramePadding.x;
+  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowSize().x-ImGui::GetStyle().WindowPadding.x-settings_width-dev_width-ImGui::GetStyle().ItemSpacing.x));
+  ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.55f,.12f,.15f,1));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered,ImVec4(.72f,.19f,.22f,1));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive,ImVec4(.85f,.24f,.26f,1));
+  if(ImGui::Button("Dev tools")) ImGui::OpenPopup("Developer tools");
+  ImGui::PopStyleColor(3);
+  bool open_damage=false;
+  if(ImGui::BeginPopup("Developer tools")) {
+   if(ImGui::MenuItem("Inflict damage on player",nullptr,false,c.ready() && c.state.value("phase","")=="playing")) open_damage=true;
+   ImGui::EndPopup();
+  }
+  if(open_damage) { damage_amount=1; ImGui::OpenPopup("Inflict damage on player"); }
+  if(ImGui::BeginPopupModal("Inflict damage on player",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+   ImGui::TextUnformatted("Damage to deal");
+   if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+   ImGui::InputInt("##Damage",&damage_amount,1,10);
+   ImGui::TextDisabled("1–30000 HP. Damage can kill your character.");
+   ImGui::BeginDisabled(!c.ready() || damage_amount<1 || damage_amount>30000);
+   if(ImGui::Button("Inflict damage")) {
+    c.send("debug.damage",{{"amount",damage_amount}}); c.busy=true;
+    ImGui::CloseCurrentPopup(); focus_game();
+   }
+   ImGui::EndDisabled(); ImGui::SameLine();
+   if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+   ImGui::EndPopup();
+  }
+  ImGui::SameLine();
   if(ImGui::Button("Settings")) {
    begin_settings();
    ImGui::OpenPopup("Settings");
@@ -923,7 +961,7 @@ int main(int argc,char **argv) {
    frame.scope=ui.crt; frame.settings=ui.crt_settings;
    frame.game=ui.game_draw_list; frame.game_pos=ui.game_pos; frame.game_size=ui.game_size;
    frame.seconds=double(SDL_GetTicksNS())/1e9; frame.ui_scale=ui.scale*ui.display_scale; frame.session=connection.state.value("phase","");
-   frame.health_glitch=health_glitch.update(connection.state,frame.seconds);
+   frame.health_glitch=health_glitch.update(connection.state,frame.seconds,ui.low_animation,ui.death_animation);
    crt_renderer.render(cmd,surface,surface_width,surface_height,render_data,frame);
    if(renderer_error!=crt_renderer.error()) {
     renderer_error=crt_renderer.error(); if(!renderer_error.empty()) connection.notice(renderer_error);

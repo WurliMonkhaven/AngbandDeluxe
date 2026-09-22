@@ -20,11 +20,13 @@ int main(int argc,char **argv) {
   check(health.update(health_state,1)==0,"HP at warning threshold should not glitch");
   health_state["player"]["hp"]=29;
   const float mild=health.update(health_state,2);
+  check(health.update(health_state,2,false,true)==0,"Low health animation switch");
   health_state["player"]["hp"]=0;
   check(mild>0 && mild<health.update(health_state,3),"Low HP glitch severity");
   health_state["player"]["hp"]=-10;
   check(health.update(health_state,4)<=.3f,"Bloodlust negative HP must not imply death");
   health_state["player"]["death_pending"]=true;
+  check(health.update(health_state,5,true,false)==0,"Death animation switch");
   check(health.update(health_state,5)==1 && health.update(health_state,6)<1,"Fatal burst should settle quickly");
   health_state["phase"]="dead";
   check(health.update(health_state,7)==0,"Tombstone must stop health glitches");
@@ -61,16 +63,21 @@ int main(int argc,char **argv) {
   ui.load_settings(); check(ui.scale==1.25f && !ui.fullscreen && ui.crt==0,"Legacy settings");
   check(ui.crt_strength==1,"Existing settings should default to Classic");
   ui.begin_settings(); ui.draft_scale=1.5f; ui.draft_crt=2; ui.draft_fullscreen=true;
+  ui.draft_low_animation=false; ui.draft_death_animation=false;
+  check(ui.low_animation && ui.death_animation,"Animation drafts applied immediately");
   ui.draft_crt_strength=3; ui.draft_crt_settings.parts[Hum].enabled=true;
   check(!ui.crt_settings.parts[Hum].enabled,"Hum bar draft applied immediately");
   check(ui.scale==1.25f && ui.crt==0 && !ui.fullscreen,"Draft changed live settings");
   ui.begin_settings(); // Reopening after Cancel discards the draft.
+  check(ui.draft_low_animation && ui.draft_death_animation,"Cancelled animation draft retained");
   check(ui.draft_scale==1.25f && ui.draft_crt==0 && !ui.draft_fullscreen,"Draft was retained");
   check(ui.draft_crt_strength==1 && ui.crt_strength==1,"Cancelled strength was applied");
   check(!ui.draft_crt_settings.parts[Hum].enabled && !ui.crt_settings.parts[Hum].enabled,"Cancelled hum bar was applied");
   ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_crt_settings.parts[Hum].enabled=true;
+  ui.draft_low_animation=false; ui.draft_death_animation=true;
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
+  check(!loaded.low_animation && loaded.death_animation,"Independent animation switches did not persist");
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");
   check(loaded.crt_settings.parts[Hum].enabled,"Hum bar did not persist");
   loaded.begin_settings(); loaded.draft_crt=2; loaded.draft_crt_settings.parts[Hum].enabled=false;

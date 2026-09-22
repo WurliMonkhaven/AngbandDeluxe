@@ -108,6 +108,20 @@ int main(int argc,char **argv) {
   check(pixel(original,48,40)>250 && pixel(original,210,104,1)<3,"Offscreen source pattern");
   frame.scope=2; auto plain=render(true);
   check(pixel(plain,48,40)>250 && pixel(plain,48,88)<3 && pixel(plain,210,104)>250,"Shader orientation/pass-through");
+  frame.settings.parts[Dots]={true,100};
+  auto dots=render(true);
+  check(dots!=plain && pixel(dots,128,120)<3,"Phosphor dots missing or lifting black");
+  int green=0;
+  for(int y=84;y<90;++y) for(int x=90;x<96;++x) green+=pixel(dots,x,y,1);
+  check(std::abs(green/36.f-180)<8,"Dot mask removed too much mean brightness");
+  frame.scope=1; frame.game_pos=ImVec2(0,0); frame.game_size=ImVec2(128,128);
+  auto dot_scope=render(true);
+  check(pixel(dot_scope,210,104)==pixel(plain,210,104),"Phosphor dots escaped scope");
+  frame.scope=2; frame.settings.parts[Dots].enabled=false;
+  frame.settings.parts[Interference]={true,100}; frame.seconds=0;
+  auto signal_a=render(true); frame.seconds=.2; auto signal_b=render(true);
+  check(signal_a!=signal_b && pixel(signal_b,128,120)<3,"Signal interference missing or lifting black");
+  frame.settings.parts[Interference].enabled=false;
   frame.health_glitch=1;
   bool glitched=false;
   for(int i=0;i<6;++i) {

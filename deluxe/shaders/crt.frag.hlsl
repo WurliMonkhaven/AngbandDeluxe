@@ -11,6 +11,7 @@ cbuffer Crt : register(b0, space3) {
     float4 viewport;    // pixel size.xy, time, history retention
     float4 effects;     // scanlines, glow, bloom, chromatic aberration
     float4 shape;       // vignette, barrel coefficient, hum, health glitch
+    float4 surface;     // phosphor dots, signal interference, reserved, reserved
 };
 float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
     float3 untouched = scene.SampleLevel(scene_sampler, uv, 0).rgb;
@@ -59,6 +60,18 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
     // Redistribute beam energy rather than simply removing it. Each dark line
     // covers one third of the three-pixel pitch (including antialiasing).
     c *= (1 - scan * scan_depth) / (1 - scan_depth / 3);
+    // RGB phosphor triads, anchored to the tube rather than the glyphs. A
+    // smooth mask plus derivative attenuation avoids hard subpixel moire as
+    // the barrel bends the three-pixel dot pitch. Keep mean beam energy intact.
+    float2 tube = local * region.zw * viewport.xy;
+    float2 phase = tube * (6.2831853 / 3);
+    float2 filtering = exp(-0.125 * float2(fwidth(phase.x), fwidth(phase.y)) * float2(fwidth(phase.x), fwidth(phase.y)));
+    float3 triad = cos(phase.x + float3(0, 2.0943951, 4.1887902));
+    c *= 1 + surface.x * (0.32 * triad * filtering.x + 0.12 * cos(phase.y) * filtering.y);
+    // Small line-correlated gain noise, not a flashing white overlay: black
+    // remains black. Presets deliberately keep this almost imperceptible.
+    float grain = frac(sin(floor(tube.y) * 12.9898 + floor(viewport.z * 24) * 78.233) * 43758.5453) - 0.5;
+    c *= 1 + grain * surface.y * 0.08;
     // Optical spill happens after the beam pattern, so its halos remain soft.
     if (effects.y > 0) c += glow.SampleLevel(glow_sampler, source, 0).rgb * effects.y * 0.9;
     if (effects.z > 0) c += bloom.SampleLevel(bloom_sampler, source, 0).rgb * effects.z * 1.2;

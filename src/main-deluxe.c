@@ -19,6 +19,7 @@
 #include "obj-util.h"
 #include "obj-tval.h"
 #include "player.h"
+#include "player-util.h"
 #include "player-timed.h"
 #include "ui-command.h"
 #include "ui-display.h"
@@ -45,6 +46,7 @@ static bool connected = true, negotiated, initialized, ready, closing;
 static unsigned long revision, sequence, context_id;
 static char revision_text[32], context_text[32];
 static const char *phase = "launcher";
+static int debug_damage;
 static char action[80];
 static cJSON *snapshot, *reply_value, *active_prompt;
 static cJSON *next_choices;
@@ -585,6 +587,16 @@ static void pump(void)
     response(id, out);
    }
   }
+ } else if (streq(method, "debug.damage")) {
+  cJSON *amount = cJSON_GetObjectItem(p, "amount");
+  if (!ready || active_prompt || !character_generated || player->is_dead || !streq(phase, "playing"))
+   error(id, "busy", "Return to normal play before inflicting damage.");
+  else if (!cJSON_IsNumber(amount) || amount->valuedouble != amount->valueint || amount->valueint < 1 || amount->valueint > 30000)
+   error(id, "invalid_argument", "Damage must be a whole number from 1 to 30000.");
+  else {
+   debug_damage = amount->valueint; ready = false;
+   response(id, cJSON_CreateObject()); Term_keypress(ESCAPE, 0);
+  }
  } else if (streq(method, "session.save") || streq(method, "session.close")) {
   if (!ready || active_prompt || !character_generated) error(id, "busy", "Return to normal play before saving.");
   else if (!save_game_checked()) error(id, "io_error", "The engine could not save. Your game remains open.");
@@ -611,7 +623,14 @@ static errr get_command(cmd_context context)
 {
  if (context != CTX_GAME) return textui_get_cmd(context);
  phase = "playing"; ready = true;
- return textui_get_cmd(context);
+ {
+  errr result = textui_get_cmd(context);
+  if (debug_damage) {
+   int damage = debug_damage; debug_damage = 0; ready = false;
+   take_hit(player, damage, "Deluxe developer tools");
+  }
+  return result;
+ }
 }
 static void lifecycle(game_event_type type, game_event_data *data, void *user)
 {

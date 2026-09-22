@@ -41,6 +41,12 @@ glyphs, builds scanline geometry, or subdivides/warps triangles on the CPU.
    and colour separation in the same scope. The engine supplies its warning
    threshold and death status; the client ramps a fatal burst down and disables
    it at the tombstone. This adds no render pass or texture allocation.
+   Independent Low Health Animation and Death Animation preferences gate the
+   intensity; both preserve the selected CRT scope and staged settings behavior.
+   Phosphor Dots adds a smooth RGB triad mask at a three-output-pixel pitch in
+   tube coordinates, with derivative attenuation to limit aliasing. Signal
+   Interference adds small line-correlated gain fluctuations. Both act before
+   optical light spill, preserve black, and have separate controls and presets.
 4. Blend previous output for brief, frame-rate-independent ghosting. Two
    full-resolution history textures alternate so a pass never samples its own
    render target. The CPU supplies elapsed time; the GPU blends the images.

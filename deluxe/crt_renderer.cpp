@@ -29,8 +29,8 @@ SDL_GPUGraphicsPipeline *pipeline(SDL_GPUDevice *device,SDL_GPUTextureFormat for
  return SDL_CreateGPUGraphicsPipeline(device,&info);
 }
 struct BlurUniforms { float step[4],region[4]; };
-struct CrtUniforms { float region[4],viewport[4],effects[4],shape[4]; };
-static_assert(sizeof(BlurUniforms)==32 && sizeof(CrtUniforms)==64,"Shader uniform layout changed");
+struct CrtUniforms { float region[4],viewport[4],effects[4],shape[4],surface[4]; };
+static_assert(sizeof(BlurUniforms)==32 && sizeof(CrtUniforms)==80,"Shader uniform layout changed");
 }
 
 bool CrtRenderer::initialize(SDL_GPUDevice *device,SDL_GPUTextureFormat format) {
@@ -137,6 +137,7 @@ void CrtRenderer::render(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *destination,U
  u.effects[0]=settings.level(Scanlines); u.effects[1]=settings.level(Glow); u.effects[2]=settings.level(Bloom); u.effects[3]=settings.level(Fringe);
  u.shape[0]=settings.level(Edges); u.shape[1]=.018f*settings.level(Barrel); u.shape[2]=settings.level(Hum);
  u.shape[3]=std::clamp(frame.health_glitch,0.f,1.f);
+ u.surface[0]=settings.level(Dots); u.surface[1]=settings.level(Interference);
  auto blur=[&](int first,float radius,float threshold) {
   BlurUniforms b{}; std::copy(std::begin(u.region),std::end(u.region),b.region);
   const unsigned factor=first==1?2:4;

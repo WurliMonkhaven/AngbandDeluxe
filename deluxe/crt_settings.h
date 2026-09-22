@@ -7,9 +7,9 @@
 #include <cmath>
 using json = nlohmann::json;
 
-enum CrtPart { Scanlines, Glow, Bloom, Fringe, Edges, Barrel, Hum, Ghost, CrtPartCount };
-static const char *crt_labels[]={"Scanlines","Phosphor Glow","Bloom","Chromatic Aberration","Vignetting","Barrel Distortion","Hum Bar","Ghosting"};
-static const char *crt_keys[]={"scanlines","glow","bloom","chromatic_aberration","edge_shading","barrel_distortion","hum_bar","ghosting"};
+enum CrtPart { Scanlines, Glow, Bloom, Fringe, Edges, Barrel, Hum, Ghost, Dots, Interference, CrtPartCount };
+static const char *crt_labels[]={"Scanlines","Phosphor Glow","Bloom","Chromatic Aberration","Vignetting","Barrel Distortion","Hum Bar","Ghosting","Phosphor Dots","Signal Interference"};
+static const char *crt_keys[]={"scanlines","glow","bloom","chromatic_aberration","edge_shading","barrel_distortion","hum_bar","ghosting","phosphor_dots","interference"};
 struct CrtControl {
  bool enabled=true; float value=0;
  bool operator==(const CrtControl &other) const { return enabled==other.enabled && value==other.value; }
@@ -19,10 +19,10 @@ struct CrtSettings {
  CrtSettings(int strength=1) {
   // Slider percentages, in CrtPart order. Keep persisted component keys stable.
   static constexpr float presets[4][CrtPartCount]={
-   {32.f,22.5f,17.5f,12.5f,50.f,22.222222f,24.f,5.f},
-   {41.333333f,35.f,27.5f,31.25f,50.f,38.888889f,36.f,25.f},
-   {57.333333f,52.5f,42.5f,53.125f,65.625f,55.555556f,52.f,45.f},
-   {73.333333f,80.f,75.f,78.125f,78.125f,72.222222f,76.f,65.f}
+   {32.f,22.5f,17.5f,12.5f,50.f,22.222222f,24.f,5.f,15.f,3.f},
+   {41.333333f,35.f,27.5f,31.25f,50.f,38.888889f,36.f,25.f,25.f,5.f},
+   {57.333333f,52.5f,42.5f,53.125f,65.625f,55.555556f,52.f,45.f,40.f,8.f},
+   {73.333333f,80.f,75.f,78.125f,78.125f,72.222222f,76.f,65.f,65.f,12.f}
   };
   const auto &values=presets[std::clamp(strength,0,3)];
   for(int i=0;i<CrtPartCount;++i) parts[i]={true,values[i]};

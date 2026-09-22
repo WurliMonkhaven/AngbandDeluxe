@@ -239,6 +239,27 @@ class BackendTests(unittest.TestCase):
         e.key("up")
         self.assertEqual(e.state["cursor"], cursor)
 
+    def test_debug_damage(self):
+        e = self.engine
+        e.hello()
+        self.assertIn("error", e.call("debug.damage", {"amount": 1}))
+        e.birth()
+        for amount in (0, -1, 1.5, 30001, "10"):
+            self.assertEqual(e.call("debug.damage", {"amount": amount})["error"]["code"], "invalid_argument")
+        before = e.state
+        self.assertIn("result", e.call("debug.damage", {"amount": 1}))
+        after = e.next_state(before["revision"])
+        self.assertEqual(after["player"]["hp"], before["player"]["hp"] - 1)
+        self.assertEqual(after["turn"], before["turn"])
+        self.assertIn("result", e.call("debug.damage", {"amount": 30000}))
+        e.next_state(after["revision"])
+        self.assertTrue(e.state["player"]["death_pending"])
+        for _ in range(10):
+            if e.state["phase"] == "dead":
+                break
+            e.key("enter")
+        self.assertEqual(e.state["phase"], "dead")
+
     def test_play_queries_save_reload(self):
         e = self.engine
         e.hello()

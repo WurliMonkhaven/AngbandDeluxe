@@ -61,6 +61,12 @@ fatal message, which precedes the engine's dead flag. Negative HP alone does not
 imply death (bloodlust). Phase `dead` begins at the tombstone/retirement screen;
 `finished` marks completion of the post-game interaction.
 
+`debug.damage` is an explicit developer action. Supply integer `amount` from
+1 to 30000 during normal ready play. It applies Angband's normal damage handling
+without advancing a turn, including fatal-message acknowledgement and death.
+It is rejected during character creation, stores, prompts or after death. This
+is a state-changing debug operation, not a normal gameplay command.
+
 Item and monster IDs are **snapshot-scoped** and expire on the next revision.
 Inspecting a stale ID fails. Select current records before issuing an action.
 Item actions still apply the engine's item tester, accessibility constraints and
