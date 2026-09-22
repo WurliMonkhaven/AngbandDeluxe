@@ -15,29 +15,37 @@ int main(int argc,char **argv) {
   ui.load_settings(); check(ui.scale==1.25f && !ui.fullscreen && ui.crt==0,"Legacy settings");
   check(ui.crt_strength==1,"Existing settings should default to Classic");
   ui.begin_settings(); ui.draft_scale=1.5f; ui.draft_crt=2; ui.draft_fullscreen=true;
-  ui.draft_crt_strength=3; ui.draft_hum_bar=true;
-  check(!ui.hum_bar,"Hum bar draft applied immediately");
+  ui.draft_crt_strength=3; ui.draft_crt_settings.parts[Hum].enabled=true;
+  check(!ui.crt_settings.parts[Hum].enabled,"Hum bar draft applied immediately");
   check(ui.scale==1.25f && ui.crt==0 && !ui.fullscreen,"Draft changed live settings");
   ui.begin_settings(); // Reopening after Cancel discards the draft.
   check(ui.draft_scale==1.25f && ui.draft_crt==0 && !ui.draft_fullscreen,"Draft was retained");
   check(ui.draft_crt_strength==1 && ui.crt_strength==1,"Cancelled strength was applied");
-  check(!ui.draft_hum_bar && !ui.hum_bar,"Cancelled hum bar was applied");
-  ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_hum_bar=true;
+  check(!ui.draft_crt_settings.parts[Hum].enabled && !ui.crt_settings.parts[Hum].enabled,"Cancelled hum bar was applied");
+  ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_crt_settings.parts[Hum].enabled=true;
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");
-  check(loaded.hum_bar,"Hum bar did not persist");
-  loaded.begin_settings(); loaded.draft_crt=2; loaded.draft_hum_bar=false;
+  check(loaded.crt_settings.parts[Hum].enabled,"Hum bar did not persist");
+  loaded.begin_settings(); loaded.draft_crt=2; loaded.draft_crt_settings.parts[Hum].enabled=false;
   check(loaded.apply_settings(nullptr),"Replace settings file");
-  ui.load_settings(); check(!ui.hum_bar,"Hum bar off did not persist"); check(ui.crt==2,"Full CRT persistence");
+  ui.load_settings(); check(!ui.crt_settings.parts[Hum].enabled,"Hum bar off did not persist"); check(ui.crt==2,"Full CRT persistence");
   for(int strength=0;strength<4;++strength) {
-   loaded.begin_settings(); loaded.draft_crt_strength=strength;
+   loaded.begin_settings(); loaded.draft_crt_strength=strength; loaded.draft_crt_settings=CrtSettings(strength);
    check(loaded.apply_settings(nullptr),"Save CRT strength");
    ui.load_settings(); check(ui.crt_strength==strength,"Strength did not persist");
   }
+  loaded.begin_settings(); loaded.draft_crt_strength=-1;
+  for(int i=0;i<CrtPartCount;++i) loaded.draft_crt_settings.parts[i]={i%2==0,13.f+i*7.f};
+  check(loaded.apply_settings(nullptr),"Save custom components"); ui.load_settings();
+  check(ui.crt_strength==-1 && ui.crt_settings.serialize()==loaded.crt_settings.serialize(),"Custom components did not persist");
+  ui.begin_settings(); ui.draft_crt_settings=CrtSettings(3); ui.begin_settings();
+  check(ui.draft_crt_settings.serialize()==ui.crt_settings.serialize(),"Cancel retained component changes");
   loaded.settings_path=(path/"missing"/"settings.json").string();
   loaded.begin_settings(); loaded.draft_scale=.75f;
   check(!loaded.apply_settings(nullptr) && loaded.scale==1.5f,"Failed save changed active settings");
+  check(crt_hum_trail(-.0001f)==0 && crt_hum_trail(0)==1,"Hum leading edge is not sharp");
+  check(crt_hum_trail(.02f)>crt_hum_trail(.1f) && crt_hum_trail(.24f)==0,"Hum trailing edge does not fade");
   // Exercise draw-list generation and clip bounds without rendering a window.
   ImGui::CreateContext(); auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(1600,1000); io.DeltaTime=1.f/60;
   io.BackendFlags|=ImGuiBackendFlags_RendererHasVtxOffset;
@@ -80,6 +88,30 @@ int main(int argc,char **argv) {
   single.AddText(ImVec2(50,50),IM_COL32_WHITE,"H");
   single.PopTexture(); single.PopClipRect();
   check(single.IdxBuffer.Size==6,"Expected one glyph quad");
+  CrtSettings disabled;
+  for(auto &part:disabled.parts) part.enabled=false;
+  auto no_glow=crt_phosphor(single,disabled);
+  check(no_glow->IdxBuffer.Size==single.IdxBuffer.Size,"Disabled components still add text effects");
+  CrtCurve flat(ImVec2(0,0),ImVec2(400,300),disabled);
+  check(flat.map(ImVec2(10,10)).x==10 && flat.map(ImVec2(10,10)).y==10,"Disabled barrel still curves");
+  ImDrawList no_overlay(ImGui::GetDrawListSharedData()); no_overlay._ResetForNewFrame();
+  crt_effect(&no_overlay,ImVec2(20,30),ImVec2(400,300),disabled,6);
+  check(no_overlay.VtxBuffer.Size==0,"Disabled overlays still draw");
+  for(int part=0;part<CrtPartCount;++part) {
+   auto isolated=disabled; isolated.parts[part]={true,100};
+   for(int other=0;other<CrtPartCount;++other) check(isolated.level(other)==(other==part?1.f:0.f),"Components are coupled");
+   if(part==Scanlines || part==Edges || part==Hum) {
+    ImDrawList overlay(ImGui::GetDrawListSharedData()); overlay._ResetForNewFrame();
+    crt_effect(&overlay,ImVec2(20,30),ImVec2(400,300),isolated,6);
+    check(overlay.VtxBuffer.Size>0,"Independent overlay missing");
+    if(part==Hum) for(const auto &v:overlay.VtxBuffer)
+     check(v.pos.y<=180.001f,"Hum glow extends ahead of its downward-facing edge");
+   }
+   if(part==Glow || part==Bloom || part==Fringe) {
+    auto effect=crt_phosphor(single,isolated);
+    check(effect->IdxBuffer.Size>single.IdxBuffer.Size,"Independent text effect missing");
+   }
+  }
   float glyph_top=single.VtxBuffer[0].pos.y,glyph_bottom=glyph_top;
   for(const auto &v:single.VtxBuffer) { glyph_top=std::min(glyph_top,v.pos.y); glyph_bottom=std::max(glyph_bottom,v.pos.y); }
   for(int strength=0;strength<4;++strength) {
@@ -95,20 +127,21 @@ int main(int argc,char **argv) {
    first._ResetForNewFrame(); later._ResetForNewFrame();
    crt_effect(&first,ImVec2(20,30),ImVec2(400,300),strength,0);
    crt_effect(&later,ImVec2(20,30),ImVec2(400,300),strength,4.5);
-   check(first.VtxBuffer.Size==later.VtxBuffer.Size,"Hum animation changes geometry size");
+   check(first.VtxBuffer.Size==later.VtxBuffer.Size,"Unexpected wave geometry at aligned phases");
    bool changed=false,bright_bar=false;
    for(int i=0;i<first.VtxBuffer.Size;++i) {
     const auto &v=first.VtxBuffer[i];
     check(v.pos.x>=20 && v.pos.x<=420 && v.pos.y>=30 && v.pos.y<=330,"Preset escaped surface");
-    changed|=v.col!=later.VtxBuffer[i].col;
-    bright_bar|=(v.col&~IM_COL32_A_MASK)==IM_COL32(150,150,150,0) && ((v.col>>IM_COL32_A_SHIFT)&255)>=5;
+    changed|=v.col!=later.VtxBuffer[i].col || v.pos.y!=later.VtxBuffer[i].pos.y;
+    bright_bar|=(v.col&~IM_COL32_A_MASK)==IM_COL32(255,255,255,0) && ((v.col>>IM_COL32_A_SHIFT)&255)>=5;
    }
    check(changed,"Hum bar did not roll");
    check(bright_bar,"Hum bar cannot lift dark background");
    ImDrawList off(ImGui::GetDrawListSharedData()),off_later(ImGui::GetDrawListSharedData());
    off._ResetForNewFrame(); off_later._ResetForNewFrame();
-   crt_effect(&off,ImVec2(20,30),ImVec2(400,300),strength,0,false);
-   crt_effect(&off_later,ImVec2(20,30),ImVec2(400,300),strength,4.5,false);
+   CrtSettings disabled_hum(strength); disabled_hum.parts[Hum].enabled=false;
+   crt_effect(&off,ImVec2(20,30),ImVec2(400,300),disabled_hum,0);
+   crt_effect(&off_later,ImVec2(20,30),ImVec2(400,300),disabled_hum,4.5);
    check(off.VtxBuffer.Size<first.VtxBuffer.Size,"Disabled hum still emitted geometry");
    for(int i=0;i<off.VtxBuffer.Size;++i) check(off.VtxBuffer[i].col==off_later.VtxBuffer[i].col,"Disabled hum still animates");
    CrtCurve curve(ImVec2(20,30),ImVec2(400,300),strength);

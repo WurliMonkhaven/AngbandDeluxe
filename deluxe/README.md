@@ -69,15 +69,19 @@ Confirmation, quantity, text and ordinary item-choice prompts use native
 widgets. The top-left Save and... menu offers Save and continue, Save and return
 to main menu, and Save and quit. Returning to the menu starts a fresh backend only
 after the save succeeds. System notices appear in Messages with a [SYSTEM] prefix.
-Settings at the top right opens a tabbed window. Its Graphics tab contains
-fullscreen, UI scale choices from 75% to 150%, and CRT Effects Enabled (Off, Game Window
-Only, or Full). CRT Effects Strength offers Subtle, Classic (the default), Deluxe,
-and Zero Cool. The presets increase scanline darkness, colour fringing, edge shading
-and phosphor glow, with closely spaced horizontal bloom and slight barrel curvature.
-The optional Hum Bar checkbox below strength defaults to off. When enabled, a
-soft neutral brightness wave with a faint trailing shadow rolls every twelve seconds. Glow stays within the text's vertical bounds and
-is capped relative to glyph width to preserve readability. CRT applies to text and glyphs on the selected
-surface; mouse targeting follows the curve. Save and Close applies and persists the changes; Cancel discards them.
+Settings at the top right opens a tabbed window. Graphics contains fullscreen
+and UI scale choices from 75% to 150%. The CRT effects tab contains Effects Enabled
+(Off, Game Window Only, or Full) and the Effect Strength preset selector (Subtle,
+Classic, Deluxe, Zero Cool). Selecting a preset resets all component sliders and
+switches. Each component has an independent checkbox and 0–100% slider: scanlines,
+phosphor glow, bloom, chromatic aberration, edge shading, barrel distortion, and hum
+bar. Manual adjustments show Custom in the preset selector and persist across restarts.
+Existing preferences migrate using their previous preset and hum-bar switch.
+The hum bar has a hard downward-facing leading edge and a smoothly fading trail;
+it rolls every twelve seconds. Glow stays within the text's vertical bounds and
+is capped relative to glyph width to preserve readability. CRT applies to the
+selected surface; mouse targeting follows the barrel curve. Save and Close applies
+and persists all changes; Cancel discards them.
 UI scale resizes text, controls and
 spacing together. Character information stays fixed while tab contents scroll.
 HP, SP and food bars are red, blue and green respectively.

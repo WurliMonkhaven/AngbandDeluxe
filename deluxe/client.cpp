@@ -59,36 +59,70 @@ static const CrtPreset &crt_preset(int strength) {
  };
  return presets[std::clamp(strength,0,3)];
 }
-// Scanlines, edge shading and a slow, soft rolling hum bar above the glow.
-static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size,int strength=1,double seconds=-1,bool hum_enabled=true) {
+enum CrtPart { Scanlines, Glow, Bloom, Fringe, Edges, Barrel, Hum, CrtPartCount };
+static const char *crt_labels[]={"Scanlines","Phosphor Glow","Bloom","Chromatic Aberration","Edge Shading","Barrel Distortion","Hum Bar"};
+static const char *crt_keys[]={"scanlines","glow","bloom","chromatic_aberration","edge_shading","barrel_distortion","hum_bar"};
+struct CrtControl { bool enabled=true; float value=0; };
+struct CrtSettings {
+ std::array<CrtControl,CrtPartCount> parts;
+ CrtSettings(int strength=1) {
+  const auto &p=crt_preset(strength);
+  const float values[]={p.scan_alpha/1.5f,p.glow_alpha/.004f,p.bloom_alpha/.002f,
+   p.fringe/ .016f,p.edge_alpha/1.6f,(.004f+.003f*std::clamp(strength,0,3))/.00018f,p.hum_alpha/.5f};
+  for(int i=0;i<CrtPartCount;++i) parts[i]={true,values[i]};
+ }
+ float level(int part) const { return parts[part].enabled?parts[part].value/100.f:0.f; }
+ json serialize() const {
+  json j=json::object();
+  for(int i=0;i<CrtPartCount;++i) j[crt_keys[i]]={{"enabled",parts[i].enabled},{"value",parts[i].value}};
+  return j;
+ }
+ void load(const json &j) {
+  for(int i=0;i<CrtPartCount;++i) if(j.contains(crt_keys[i])) {
+   const auto &v=j.at(crt_keys[i]); parts[i].enabled=v.value("enabled",parts[i].enabled);
+   const float value=v.value("value",parts[i].value);
+   if(std::isfinite(value)) parts[i].value=std::clamp(value,0.f,100.f);
+  }
+ }
+ CrtPreset resolved() const {
+  return {int(150*level(Scanlines)),int(160*level(Edges)),int(50*level(Hum)),
+   1.6f*level(Fringe),.65f*level(Fringe),1.2f*level(Glow),.4f*level(Glow),
+   3.f*level(Bloom),.2f*level(Bloom)};
+ }
+};
+// A downward-moving front lights the surface abruptly, fading smoothly behind it.
+static float crt_hum_trail(float distance) {
+ if(distance<0 || distance>=.24f) return 0;
+ const float t=distance/.24f; return (1-t)*(1-t)*(1-t);
+}
+// Scanlines, edge shading and the asymmetric rolling wave above the glow.
+static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size,const CrtSettings &settings=CrtSettings{},double seconds=-1) {
  if(size.x<=0 || size.y<=0) return;
- const auto &preset=crt_preset(strength);
+ const auto preset=settings.resolved();
  const ImVec2 end(pos.x+size.x,pos.y+size.y);
  draw->PushClipRect(pos,end,true);
  const float pixel=1.f/std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.y);
- for(float y=pos.y;y<end.y;y+=3.f*pixel)
+ for(float y=pos.y;preset.scan_alpha>0 && y<end.y;y+=3.f*pixel)
   draw->AddRectFilled(ImVec2(pos.x,y),ImVec2(end.x,std::min(end.y,y+pixel)),IM_COL32(0,0,0,preset.scan_alpha));
+ if(preset.edge_alpha>0) {
  const float edge=std::min(size.x,size.y)*.09f;
  const ImU32 dark=IM_COL32(0,8,5,preset.edge_alpha),clear=IM_COL32(0,8,5,0);
  draw->AddRectFilledMultiColor(pos,ImVec2(pos.x+edge,end.y),dark,clear,clear,dark);
  draw->AddRectFilledMultiColor(ImVec2(end.x-edge,pos.y),end,clear,dark,dark,clear);
  draw->AddRectFilledMultiColor(pos,ImVec2(end.x,pos.y+edge),dark,dark,clear,clear);
  draw->AddRectFilledMultiColor(ImVec2(pos.x,end.y-edge),end,clear,clear,dark,dark);
- if(hum_enabled) {
-  const float center=float(std::fmod(seconds<0?ImGui::GetTime():seconds,12.0)/12.0);
-  auto wave=[&](float y,float offset,float width) {
-   float distance=std::abs(y-center-offset); distance=std::min(distance,1.f-distance);
-   return std::exp(-distance*distance/width);
-  };
-  // A broad neutral brightness drift with a weaker trailing shadow resembles
-  // power-supply interference, rather than a luminous coloured stripe.
-  for(int band=0;band<96;++band) {
-   const float top=band/96.f,bottom=(band+1)/96.f;
-   auto light=[&](float y) { return IM_COL32(150,150,150,int(preset.hum_alpha*.65f*wave(y,0,.009f))); };
-   auto shade=[&](float y) { return IM_COL32(0,0,0,int(preset.hum_alpha*.45f*wave(y,-.12f,.006f))); };
-   const ImVec2 a(pos.x,pos.y+size.y*top),b(end.x,pos.y+size.y*bottom);
-   draw->AddRectFilledMultiColor(a,b,shade(top),shade(top),shade(bottom),shade(bottom));
-   draw->AddRectFilledMultiColor(a,b,light(top),light(top),light(bottom),light(bottom));
+ }
+ if(preset.hum_alpha>0) {
+  const float front=float(std::fmod(seconds<0?ImGui::GetTime():seconds,12.0)/12.0);
+  // Split at the actual front, not fixed screen rows: its leading edge stays
+  // hard at every animation phase. The previous sweep's tail wraps at the top.
+  for(float head:{front,front+1.f}) for(int band=0;band<48;++band) {
+   const float near_distance=band*.24f/48,far_distance=(band+1)*.24f/48;
+   const float top=std::max(0.f,head-far_distance),bottom=std::min(1.f,head-near_distance);
+   if(bottom<=top) continue;
+   auto light=[&](float y) { return IM_COL32(255,255,255,int(preset.hum_alpha*crt_hum_trail(head-y))); };
+   draw->AddRectFilledMultiColor(ImVec2(pos.x,pos.y+size.y*top),ImVec2(end.x,pos.y+size.y*bottom),
+    light(top),light(top),light(bottom),light(bottom));
   }
  }
  draw->PopClipRect();
@@ -97,8 +131,8 @@ static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size,int strength=1,
 // red/cyan channel fringes. Keep the original sharp glyph on top. Solid UI
 // backgrounds are passed through, and original draw order/clip rectangles
 // preserve popup occlusion. No full-screen blur buffers or flicker are needed.
-static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source,int strength=1) {
- const auto &preset=crt_preset(strength);
+static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source,const CrtSettings &settings=CrtSettings{}) {
+ const auto preset=settings.resolved();
  auto out=std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
  out->_ResetForNewFrame(); out->Flags=source.Flags;
  const float pixel=1.f/std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.y);
@@ -133,15 +167,15 @@ static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source,int str
     for(unsigned k=1;k<count;++k) { left=std::min(left,v[k].pos.x); right=std::max(right,v[k].pos.x); }
     const float limit=std::max(.25f,(right-left)/pixel*.22f);
     const float radius=std::min(preset.glow_radius,limit),bloom=std::min(preset.bloom_radius,limit);
-    emit(-radius,0,preset.glow_alpha,IM_COL32_WHITE); emit(radius,0,preset.glow_alpha,IM_COL32_WHITE);
-    for(int tap=1;tap<=3;++tap) {
+    if(preset.glow_alpha>0) { emit(-radius,0,preset.glow_alpha,IM_COL32_WHITE); emit(radius,0,preset.glow_alpha,IM_COL32_WHITE); }
+    for(int tap=1;preset.bloom_alpha>0 && tap<=3;++tap) {
      const float distance=bloom*tap/3.f;
      const float opacity=preset.bloom_alpha*std::exp(-float(tap*tap)/4.f);
      emit(-distance,0,opacity,IM_COL32_WHITE); emit(distance,0,opacity,IM_COL32_WHITE);
     }
     const float fringe=std::min(preset.fringe,limit);
-    emit(-fringe,0,preset.fringe_alpha,IM_COL32(255,0,0,255));
-    emit(fringe,0,preset.fringe_alpha,IM_COL32(0,255,255,255));
+    if(preset.fringe_alpha>0) { emit(-fringe,0,preset.fringe_alpha,IM_COL32(255,0,0,255));
+     emit(fringe,0,preset.fringe_alpha,IM_COL32(0,255,255,255)); }
    }
    emit(0,0,1.f,IM_COL32_WHITE);
    i+=count;
@@ -153,9 +187,9 @@ static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source,int str
 struct CrtCurve {
  ImVec2 pos,size;
  float amount;
- CrtCurve(ImVec2 p,ImVec2 s,int strength):pos(p),size(s),amount(.004f+.003f*std::clamp(strength,0,3)) {}
+ CrtCurve(ImVec2 p,ImVec2 s,const CrtSettings &settings):pos(p),size(s),amount(.018f*settings.level(Barrel)) {}
  ImVec2 map(ImVec2 p,bool inverse=false) const {
-  if(size.x<=0 || size.y<=0) return p;
+  if(amount==0 || size.x<=0 || size.y<=0) return p;
   const float x=2*(p.x-pos.x)/size.x-1,y=2*(p.y-pos.y)/size.y-1;
   float u=x,v=y;
   if(inverse) {
@@ -417,7 +451,7 @@ struct UI {
  bool fullscreen=false, draft_fullscreen=false;
  int crt=0, draft_crt=0;
  int crt_strength=1, draft_crt_strength=1;
- bool hum_bar=false, draft_hum_bar=false;
+ CrtSettings crt_settings{}, draft_crt_settings{};
  float draft_scale=1.f;
  std::string settings_error;
  ImDrawList *game_draw_list=nullptr;
@@ -441,41 +475,43 @@ struct UI {
    game_fraction=std::clamp(j.value("game_fraction",.72f),.2f,.9f);
    fullscreen=j.value("fullscreen",false);
    crt=std::clamp(j.value("crt",0),0,2);
-   crt_strength=std::clamp(j.value("crt_strength",1),0,3);
-   hum_bar=j.value("hum_bar",false);
+   crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
+   crt_settings=CrtSettings(crt_strength);
+   crt_settings.parts[Hum].enabled=j.value("hum_bar",false);
+   if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,bool hum) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"hum_bar",hum}}.dump(2);
+  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
  void save_settings() {
-  if(!write_settings(scale,fullscreen,crt,crt_strength,hum_bar)) c.notice("Settings could not be saved.");
+  if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
   draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
-  draft_crt_strength=crt_strength; draft_hum_bar=hum_bar;
+  draft_crt_strength=crt_strength; draft_crt_settings=crt_settings;
  }
  bool apply_settings(SDL_Window *window) {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_hum_bar)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
   scale=draft_scale; fullscreen=draft_fullscreen; crt=draft_crt;
-  crt_strength=draft_crt_strength; hum_bar=draft_hum_bar;
+  crt_strength=draft_crt_strength; crt_settings=draft_crt_settings;
   return true;
  }
  void settings_window(SDL_Window *window) {
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x+vp->WorkSize.x*.5f,vp->WorkPos.y+vp->WorkSize.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
   ImGui::SetNextWindowSize(ImVec2(std::min(vp->WorkSize.x-24.f,ImGui::GetFontSize()*28),
-   std::min(vp->WorkSize.y-24.f,ImGui::GetFontSize()*23)),ImGuiCond_Appearing);
+   std::min(vp->WorkSize.y-24.f,ImGui::GetFontSize()*34)),ImGuiCond_Appearing);
   if(ImGui::BeginPopupModal("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings)) {
    const float footer=ImGui::GetFrameHeightWithSpacing()+ImGui::GetStyle().ItemSpacing.y;
    ImGui::BeginChild("Settings contents",ImVec2(0,-footer));
@@ -491,18 +527,35 @@ struct UI {
       }
       ImGui::EndCombo();
      }
-     ImGui::Spacing(); ImGui::TextUnformatted("CRT Effects Enabled"); ImGui::SetNextItemWidth(-1);
+     ImGui::EndTabItem();
+    }
+    if(ImGui::BeginTabItem("CRT effects")) {
+     ImGui::Spacing(); ImGui::TextUnformatted("Effects Enabled"); ImGui::SetNextItemWidth(-1);
      const char *effects[]={"Off","Game Window Only","Full"};
      ImGui::Combo("##CRT Effects",&draft_crt,effects,3);
-     ImGui::Spacing(); ImGui::TextUnformatted("CRT Effects Strength"); ImGui::SetNextItemWidth(-1);
+     ImGui::Spacing(); ImGui::TextUnformatted("Effect Strength"); ImGui::SetNextItemWidth(-1);
      const char *strengths[]={"Subtle","Classic","Deluxe","Zero Cool"};
-     ImGui::Combo("##CRT Effects Strength",&draft_crt_strength,strengths,4);
-     ImGui::Spacing(); ImGui::Checkbox("Hum Bar",&draft_hum_bar);
-     if(!settings_error.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",settings_error.c_str()); }
+     if(ImGui::BeginCombo("##CRT Effects Strength",draft_crt_strength<0?"Custom":strengths[draft_crt_strength])) {
+      for(int i=0;i<4;++i) if(ImGui::Selectable(strengths[i],draft_crt_strength==i)) {
+       draft_crt_strength=i; draft_crt_settings=CrtSettings(i);
+      }
+      ImGui::EndCombo();
+     }
+     ImGui::TextWrapped("Presets reset all effect sliders and switches.");
+     ImGui::Spacing(); ImGui::Separator();
+     for(int i=0;i<CrtPartCount;++i) {
+      auto &control=draft_crt_settings.parts[i];
+      ImGui::PushID(i); ImGui::Spacing();
+      if(ImGui::Checkbox(crt_labels[i],&control.enabled)) draft_crt_strength=-1;
+      ImGui::BeginDisabled(!control.enabled); ImGui::SetNextItemWidth(-1);
+      if(ImGui::SliderFloat("##Amount",&control.value,0.f,100.f,"%.0f%%",ImGuiSliderFlags_AlwaysClamp)) draft_crt_strength=-1;
+      ImGui::EndDisabled(); ImGui::PopID();
+     }
      ImGui::EndTabItem();
     }
     ImGui::EndTabBar();
    }
+   if(!settings_error.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",settings_error.c_str()); }
    ImGui::EndChild();
    if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
    ImGui::SameLine();
@@ -650,7 +703,7 @@ struct UI {
     draw->AddRect(p,ImVec2(p.x+cw,p.y+ch),IM_COL32(255,225,125,255),0,0,std::max(1.f,display_scale));
    }
   }
-  if(crt==1) crt_effect(draw,start,viewport,crt_strength,-1,hum_bar);
+  if(crt==1) crt_effect(draw,start,viewport,crt_settings);
   if(!ImGui::IsWindowFocused()) grid_focus=false;
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
@@ -983,7 +1036,7 @@ int main(int argc,char **argv) {
    if(e.type==SDL_EVENT_MOUSE_BUTTON_DOWN) { ui.grid_focus=false; ui.keys.clear(); }
    if(e.type==SDL_EVENT_MOUSE_MOTION && ui.crt!=0) {
     auto vp=ImGui::GetMainViewport();
-    CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_strength);
+    CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_settings);
     if(e.motion.x>=curve.pos.x && e.motion.x<=curve.pos.x+curve.size.x && e.motion.y>=curve.pos.y && e.motion.y<=curve.pos.y+curve.size.y) {
      auto p=curve.map(ImVec2(e.motion.x,e.motion.y),true); e.motion.x=p.x; e.motion.y=p.y;
     }
@@ -1014,14 +1067,14 @@ int main(int argc,char **argv) {
   if(ui.crt!=0 && SDL_GetMouseFocus()==window) {
    float x,y; SDL_GetMouseState(&x,&y);
    auto vp=ImGui::GetMainViewport();
-   CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_strength);
+   CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_settings);
    if(x>=curve.pos.x && x<=curve.pos.x+curve.size.x && y>=curve.pos.y && y<=curve.pos.y+curve.size.y) {
     auto p=curve.map(ImVec2(x,y),true); ImGui::GetIO().AddMousePosEvent(p.x,p.y);
    }
   }
   ImGui::NewFrame(); ui.draw(window);
   if(ui.crt==2) {
-   auto vp=ImGui::GetMainViewport(); crt_effect(ImGui::GetForegroundDrawList(),vp->Pos,vp->Size,ui.crt_strength,-1,ui.hum_bar);
+   auto vp=ImGui::GetMainViewport(); crt_effect(ImGui::GetForegroundDrawList(),vp->Pos,vp->Size,ui.crt_settings);
   }
   ImGui::Render();
   auto *render_data=ImGui::GetDrawData();
@@ -1032,10 +1085,10 @@ int main(int argc,char **argv) {
    crt_data.CmdListsCount=crt_data.TotalIdxCount=crt_data.TotalVtxCount=0;
    for(auto *list:render_data->CmdLists) {
     if(ui.crt==2 || list==ui.game_draw_list) {
-     auto glow=crt_phosphor(*list,ui.crt_strength);
+     auto glow=crt_phosphor(*list,ui.crt_settings);
      auto vp=ImGui::GetMainViewport();
-     CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_strength);
-     phosphor_lists.push_back(crt_curve(*glow,curve)); list=phosphor_lists.back().get();
+     CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_settings);
+     phosphor_lists.push_back(curve.amount>0?crt_curve(*glow,curve):std::move(glow)); list=phosphor_lists.back().get();
     }
     crt_data.AddDrawList(list);
    }
