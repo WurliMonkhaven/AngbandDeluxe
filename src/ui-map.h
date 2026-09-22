@@ -23,3 +23,16 @@ extern void print_rel(wchar_t c, uint8_t a, int y, int x);
 extern void prt_map(void);
 extern void display_map(int *cy, int *cx);
 extern void do_cmd_view_map(void);
+
+/* Optional presentation observer. Called only by an existing map draw; never
+ * performs a second map query or exposes engine pointers to a client. */
+struct map_visual {
+ int terrain_attr, trap_attr, object_attr, actor_attr;
+ wchar_t terrain_char, trap_char, object_char, actor_char;
+ int feature, lighting;
+ bool seen, hallucinated, player;
+};
+extern void (*map_visual_hook)(struct loc grid, const struct map_visual *visual);
+extern void (*map_visual_reset_hook)(void);
+extern void map_info_as_text(struct loc grid, struct grid_data *g, int *a,
+ wchar_t *c, int *ta, wchar_t *tc);

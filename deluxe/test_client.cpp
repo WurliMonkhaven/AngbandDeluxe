@@ -4,9 +4,58 @@
 #include <stdexcept>
 #include <chrono>
 static void check(bool value,const char *message) { if(!value) throw std::runtime_error(message); }
+static BackendReader::Batch read_test_frames(const std::string &wire) {
+ auto stream=SDL_IOFromConstMem(wire.data(),wire.size());
+ check(stream!=nullptr,"Test stream creation failed");
+ BackendReader::Batch result;
+ {
+  BackendReader reader(stream,nullptr);
+  const auto deadline=SDL_GetTicksNS()+2000000000ull;
+  do {
+   auto batch=reader.take();
+   for(auto &frame:batch.frames) result.frames.push_back(std::move(frame));
+   result.error+=batch.error; result.finished=batch.finished;
+   if(!result.finished) SDL_DelayNS(1000000);
+  } while(!result.finished && SDL_GetTicksNS()<deadline);
+ }
+ SDL_CloseIO(stream);
+ check(result.finished,"Background reader did not finish");
+ return result;
+}
 int main(int argc,char **argv) {
  try {
   check(argc==2,"Pass an unused settings-file path");
+  auto messages=read_test_frames("{\"seq\":1}\n{\"seq\":2}\n");
+  check(messages.error.empty() && messages.frames.size()==2 && messages.frames[0]["seq"]==1 && messages.frames[1]["seq"]==2,"Reader must preserve final message order at EOF");
+  check(!read_test_frames("{bad}\n").error.empty(),"Malformed frame must be reported");
+  check(!read_test_frames("{\"seq\":1}").error.empty(),"Incomplete final frame must be reported");
+  check(!read_test_frames(std::string(1048577,'x')).error.empty(),"Oversized frame must be rejected");
+  json view_state={{"phase","playing"},{"readiness","ready"},{"dungeon",{{"width",1},{"height",1},{"cells",json::array({json::array({json::array({46,1,0,0,0,0,64,1,1,0,1,0,1})})})}}}};
+  check(dungeon_view(view_state),"Semantic dungeon selection");
+  RenderGrid decoded;
+  decoded.update(view_state);
+  check(decoded.semantic && decoded.width==1 && decoded.height==1 && decoded.cells[0].glyph==64,"Actor must cover terrain");
+  view_state["dungeon"]["cells"][0][0][6]=32;
+  decoded.update(view_state);
+  check(decoded.cells[0].glyph==32,"Opaque blank overlay must hide terrain");
+  view_state["dungeon"]["cells"][0][0][6]=0;
+  decoded.update(view_state);
+  check(decoded.cells[0].glyph==46,"Absent actor must reveal terrain");
+  view_state["terminal"]=json::array({json::array({json::array({65,2}),json::array({66,3})})});
+  view_state["phase"]="store";
+  decoded.update(view_state);
+  check(!decoded.semantic && decoded.width==2 && decoded.cells[1].glyph==66,"Fallback must replace cached map");
+  decoded.update(json::object());
+  check(decoded.cells.empty() && decoded.width==0,"Empty state must clear cached map");
+  view_state["phase"]="playing";
+  view_state["phase"]="store"; check(!dungeon_view(view_state),"Store must use terminal fallback");
+  view_state["phase"]="playing"; view_state["readiness"]="awaiting_prompt";
+  check(!dungeon_view(view_state),"Target/prompt must use terminal fallback");
+  view_state["message_pending"]=true;
+  check(dungeon_view(view_state),"Message acknowledgement retains dungeon view");
+  view_state["message_pending"]=false;
+  view_state["readiness"]="ready"; view_state["dungeon"]["width"]=2;
+  check(!dungeon_view(view_state),"Incomplete viewport must use terminal fallback");
   for(int tube=0;tube<3;++tube) {
    CrtSettings preset; preset.tube(tube);
    check(!preset.parts[Hum].enabled && !preset.parts[Interference].enabled,"Realistic tubes should not include signal faults");

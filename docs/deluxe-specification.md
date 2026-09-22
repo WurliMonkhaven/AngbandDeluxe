@@ -4,7 +4,64 @@ Status: target design. A first Windows development build now implements a subset
 see [implementation status](../deluxe/README.md) and [development protocol 0.1](deluxe-protocol-0.1.md).
 Prepared 21 September 2026 from the project brief and the complete conversation
 "Enhanced Angband Client Search". The current brief takes precedence over earlier
-ideas in that conversation. Aesthetic overhaul is a later phase.
+ideas in that conversation. Updated 22 September 2026 to incorporate the subsequent
+implementation decisions below; these supersede conflicting original requirements.
+
+## Current decisions and delivery scope
+
+- Windows is the current implementation and validation target. macOS/Linux remain
+  long-term goals; their builds, packaging and native QA are explicitly deferred
+  and are not gates for the current milestone.
+- Native C/C++ with SDL3, SDL GPU and Dear ImGui is the implemented stack. Python
+  is build/test tooling only. Do not use desktop/computer-use automation for this
+  project; the user performs hands-on UI testing.
+- UI scale is 75–150%, with no High Contrast mode or separate glyph-size slider.
+  The complete current gameplay viewport always fits its available area, without
+  gameplay scrollbars. This does not imply displaying the entire dungeon level.
+- Normal play uses a semantic dungeon viewport with separate terrain, trap, item
+  and actor layers. The engine supplies the camera bounds and perceived visuals;
+  Deluxe owns rendering and the surrounding character UI. The renderer does not
+  crop the terminal or infer entities by parsing its text.
+- Capture existing presentation results during ordinary engine drawing. Do not
+  call map helpers again from API queries: memory updates and hallucination RNG
+  must occur exactly as they do during normal play. Cache invalidation must cover
+  level changes, camera changes and new characters. Repeated queries are pure.
+- Terminal fallback remains for birth, stores, targeting, character sheets,
+  knowledge screens, nested selections and post-death interactions. Transitions
+  preserve engine input contexts, cursor visibility and confirmations. Removing
+  the terminal sidebar from normal play must not remove its useful information:
+  rank, progression, resources, stats, armour, speed, conditions, tracked health,
+  light, terrain/traps underfoot, level feelings and pending activities belong in
+  Deluxe's information panel or existing inventory/equipment views.
+- Main menu contains Characters, an inline right-aligned New character button,
+  and save rename/delete actions. Ask for the save name when creating a character.
+  No title banner, explanatory boilerplate, messages or gameplay side panels.
+  Messages and side panels remain hidden throughout character creation.
+- Save and… offers continue, return to main menu, and quit. Normal completion of
+  death returns to the main menu after the engine's post-game flow. HP bars clamp
+  at zero and must never become indeterminate indicators. System notices use
+  the regular messages panel with a `[SYSTEM] ` prefix, not dismissible banners.
+- Character information stays fixed while the tabbed panel scrolls independently.
+  HP/SP/Food use red/blue/green bars; Food includes percentage and numeric value.
+  The messages panel has a draggable height divider and inline expandable search.
+  No redundant gameplay status strip or "click here for keyboard play" message.
+- Inspection includes full engine descriptions and applicable actions; boolean
+  flags use ticks/crosses. Empty inscriptions do not create blank tooltip lines.
+  Actual properties may be exposed and used, with no "show actual properties"
+  checkboxes or mandatory player-knowledge entitlement boundary.
+- Settings is a staged modal with Graphics, CRT effects and Animations tabs.
+  Cancel discards changes; Save and Close commits them. Fullscreen and UI scale
+  live under Graphics. CRT has scope, tube/strength presets, raster/mask choices
+  and independent component switches/sliders. CRT is already implemented and
+  accepted, not deferred work. Low Health Animation and Death Animation are
+  independent; death glitches end at the tombstone. Shader strength is invisible
+  at zero and intentionally strong at maximum, with moderate presets.
+- The red Dev tools menu contains an explicit damage dialog. Debug mutations are
+  separate from normal gameplay commands, validated at legal engine boundaries,
+  and use normal damage/death handling. They do not redefine game balance.
+- Cross-platform backend packages, alternate-variant conformance, complete native
+  birth/store/targeting flows, controller support and screen-reader validation
+  remain future work, not claims about the current prototype.
 
 ## 1. Product intent
 
@@ -87,10 +144,8 @@ rendering. Client production code must not include Angband engine headers or
 assume its inventory size, equipment slots, class list, stat count, depth units,
 spell system, damage formula or enum ordinals.
 
-A C++ desktop client using SDL3 is the preferred starting point, with a plain
-glyph renderer first. SDL GPU is a candidate for the later effects renderer;
-Dear ImGui is a candidate for the initial panels. These are implementation
-preferences subject to a small desktop/accessibility spike, not API dependencies.
+The implemented client uses C++, SDL3, SDL GPU and Dear ImGui, with semantic
+glyph rendering and terminal fallback. These are client choices, not API dependencies.
 SDL documents its GPU abstraction and Dear ImGui supplies SDL3/SDL GPU backends:
 [SDL GPU](https://wiki.libsdl.org/SDL3/CategoryGPU),
 [Dear ImGui backends](https://github.com/ocornut/imgui/blob/master/docs/BACKENDS.md).
@@ -162,7 +217,7 @@ is present. Disabled features have an understandable explanation.
 | Character creation | Data-driven race/class/stat selection, explanations, consequences and keyboard navigation | Uses existing birth commands, restrictions and random rolls; inspecting an option never rerolls |
 | Stores and other selections | Search/sort stock and options, clear quantities/prices, keyboard navigation | Engine validates price, stock and affordability at execution; stale selection cannot buy another object |
 | Map and minimap | Known-map view with optional stairs, objects, traps and creature layers | The initial known-map view uses observation data; actual-state data remains available for other presentation uses; level changes invalidate old data |
-| Accessibility | Scalable UI/fonts, high contrast, non-colour cues, reduced motion, remapping and visible keyboard focus | Core flow is keyboard complete and usable at 200% scaling; screen-reader feasibility is tested before claiming support |
+| Accessibility | Scalable UI/fonts (75–150%), non-colour cues, reduced motion, remapping and visible keyboard focus; no High Contrast mode | Core flow is keyboard complete and usable at all offered scales; screen-reader feasibility is tested before claiming support |
 | Saves and profiles | Character selection, backend/version labels, save metadata, settings profiles, optional captured thumbnails | Saves are routed only to compatible engines; import does not overwrite the original; sidecars cannot alter gameplay state |
 | Run history | Milestones, uniques, artifacts, depth progression, equipment changes and death/victory summary | Distinguish actual events from what the player knew; older runs may have incomplete history; sidecar loss does not prevent loading the native save |
 | Mouse/controller | Point/select/context actions and remappable controller navigation | Neither is required; focus and menu transitions cannot accidentally spend a turn |
@@ -179,9 +234,10 @@ existing commands with its existing stop conditions.
 
 ### Deferred presentation and optional extensions
 
-Particles, glows, lighting, CRT/scanlines, animated creatures, fancy transitions,
-spatial ambience, theme packs and new art belong to the aesthetic phase. Reserve
-semantic event support for them now; do not implement their effects first.
+GPU CRT effects and health/death glitches are implemented presentation features.
+Particles, animated creatures, broader lighting, spatial ambience, theme packs
+and new art remain optional future presentation work. Their hooks must preserve
+engine timing, input responsiveness and the existing semantic boundary.
 Cloud synchronization, deterministic replay, web/mobile clients and a general
 mod marketplace are separate future projects. Screen-reader support is a desired
 outcome, gated by real assistive-technology validation rather than a toolkit claim.
@@ -244,7 +300,7 @@ widgets must never derive their data by parsing those frames.
 ### M0: contract and feasibility
 
 Finalize the companion protocol design, field-level provenance and fixtures.
-Prototype process launch and one round-trip on all three operating systems.
+Validate process launch and round-trips on Windows now; defer macOS/Linux checks.
 Test UI scaling, keyboard focus, text input and assistive-technology options.
 Inventory helpers that need new pure accessors. Record a clean baseline build.
 
@@ -259,7 +315,8 @@ inventory/equipment, messages and known-monster inspection panels. Add basic
 palette search, context actions, scaling and keyboard configuration.
 
 Exit: create a character, enter town/dungeon, move, fight, use items, handle a
-prompt, save, close and reload through Deluxe on Windows/macOS/Linux. Demonstrate
+prompt, save, close and reload through Deluxe on Windows. macOS/Linux validation
+is deferred by the current brief. Demonstrate
 actual/known-state separation and parity for these flows. Label remaining fallback menus.
 
 ### M2: complete semantic QoL
@@ -276,7 +333,8 @@ are defects, not a reason to leave a button inert.
 ### M3: compatibility and distribution
 
 Publish the adapter guide and conformance suite; exercise the alternate mock
-backend. Package and smoke-test releases on Windows, macOS and Linux, with
+backend. Package and smoke-test Windows releases first; macOS/Linux packaging
+and validation are a later milestone. Exercise
 spaces/non-ASCII characters in installation and save paths. Test package upgrades,
 missing assets, incompatible saves and a backend crash. Retest classic front-ends.
 
@@ -309,8 +367,9 @@ in the original chat. Art direction is intentionally left open for the next brie
   request IDs, broken pipes, lost delta revisions and child termination.
 - **Compatibility:** unknown optional fields, absent capabilities, different
   equipment layouts and namespaced custom actions on the mock backend.
-- **Desktop QA:** complete keyboard and mouse flows on all three OSes; 200% UI
-  scaling, high contrast, reduced motion, focus restoration and controller input.
+- **Desktop QA:** user-performed Windows keyboard/mouse checks at 75–150% UI
+  scale, reduced motion and focus restoration. No computer-use automation.
+  macOS/Linux native QA and controller validation are deferred.
 - **Responsiveness:** on a declared reference machine, target cached UI response
   within 50 ms and local protocol overhead below 20 ms at the 95th percentile,
   excluding engine processing. Measure before fixing a release performance bar.

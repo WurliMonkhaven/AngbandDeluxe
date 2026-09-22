@@ -24,6 +24,9 @@
 #include "ui-event.h"
 #include "ui-term.h"
 
+/* True only while the normal message line waits for acknowledgement. */
+extern bool textui_message_pending;
+
 /**
  * Holds a generic command.  If hook is not NULL, that function
  * will be called.  Otherwise, if cmd is not CMD_NULL, that command

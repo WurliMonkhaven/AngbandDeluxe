@@ -161,3 +161,21 @@ The development wire contract is documented in
 Exact source commits are in the CMake files. Cousine is by Steve Matteson,
 digitized data copyright 2010 Google Corporation. The font remains in the fetched
 dependency source tree. Angband's existing licensing applies to this fork.
+
+
+## Semantic dungeon milestone (September 2026)
+
+Normal ready play now draws a dungeon-only semantic viewport. Terrain, traps,
+items and actors arrive as separate layers captured during existing engine
+drawing, with no extra map queries or gameplay RNG use. The full current engine
+viewport fits the game panel; the whole level is not squeezed onto the screen.
+Character rank, experience, light, floor state, pending activities, level
+feelings and tracked health are shown in the fixed character information panel.
+Birth, stores, targeting, character sheets and other nested interactions retain
+the complete terminal, including its cursor. Level changes invalidate cached
+visuals. The appearance remains glyph-based, ready for later rendering styles.
+
+Windows is the current target. macOS/Linux validation and packaging are deferred
+by the user; earlier cross-platform goals remain future work. Hands-on UI testing
+is user-performed, without computer-use automation. See the updated product
+specification for the authoritative scale, settings, menu and presentation decisions.

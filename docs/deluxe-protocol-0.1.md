@@ -50,6 +50,57 @@ Item records distinguish `actual` from `player_known`; monster HP and actual map
 data include hidden state. No entitlement or player-knowledge gate applies.
 The presentation decides which information to display.
 
+Normal ready play may additionally supply `dungeon` (capability
+`presentation.dungeon: 1`). It contains an opaque `level_id`, world-coordinate
+viewport origin `x,y`, `width,height`, and `cells` as height rows of width cells.
+Each compact cell is exactly:
+`[terrainGlyph, terrainColor, trapGlyph, trapColor, itemGlyph, itemColor,
+actorGlyph, actorColor, perceivedFeature, lighting, seen, hallucinated, isPlayer]`.
+Glyphs are Unicode codepoints; zero means an absent overlay. Layers are opaque
+glyph cells ordered terrain, trap, item, actor. Booleans in this compact format
+are 0/1. Visuals already reflect engine lighting, memory, piles, mimicry and
+hallucinations; do not reconstruct those rules from actual monster/item records.
+Actual semantic data remains available independently. This is a presentation
+snapshot, not stable item/monster identity or an action handle.
+
+The adapter observes normal engine map draws and stores only scalar results;
+`state.get` does not invoke drawing or use RNG. New levels clear the cache and
+change `level_id`; camera movement changes the viewport origin. Incomplete
+viewports and nested interactions omit `dungeon`, requiring terminal fallback.
+The client uses that fallback for targeting and preserves its cursor and controls.
+Ordinary message acknowledgement is an exception: `message_pending: true` may
+accompany `dungeon` with `readiness: "awaiting_prompt"`. Keep the dungeon visible
+and show a white-on-black `- more -` overlay
+at the bottom right of the game view, within the normal CRT effects pass.
+Acknowledgement uses the existing controls, `terminal.input` and the current
+input context. This flag comes from the engine's message pause, not terminal text;
+it does not permit gameplay commands while the engine is waiting.
+Do not infer semantic mode from terminal text or crop terminal cells for gameplay.
+
+### Transport and latency
+
+The native client drains stdout and stderr on dedicated readers, independent of
+display frames. On Windows these readers use blocking pipe reads with explicit
+shutdown cancellation; only stdin remains nonblocking. Complete JSON messages
+cross a bounded queue in arrival order. Parsing runs off the UI thread; applying
+state and rendering stay on the UI thread. Readers join before process handles
+or SDL are destroyed, including return-to-menu restarts. Process exit is handled
+only after queued final messages and EOF have been consumed.
+
+Performance checks must exercise the actual SDL transport at display cadence.
+A continuously reading Python harness measures engine work but misses small-pipe
+backpressure between display frames. The headless `deluxe-transport-tests` target
+accepts backend path, data path and a disposable user directory containing a
+`ProtocolTest` dungeon save. It measures redraw-to-received-state latency at
+60 Hz, checks for large stalls, then exercises close/restart and idle-reader
+cancellation. It does not measure physical display/presentation latency.
+
+Additional player fields supply `title`, `experience`, `max_experience`,
+`next_level_experience` (absolute XP threshold, zero at maximum level), `max_level`,
+`light`, `floor`, optional formatted `feeling`, `recall`, `descent`, `resting`,
+`running`, `repeat`, `study`, `extra_moves`, `unignoring`, `trap_detected` and
+optional `tracked_creature` with name, hp/max_hp and current visibility.
+
 The player record includes `food` (current nutrition) and `food_max` (the engine's
 maximum nutrition). Their ratio supplies the food bar's percentage; the client
 does not hardcode Angband's food capacity.

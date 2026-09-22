@@ -145,6 +145,56 @@ class Engine:
 
 
 class BackendTests(unittest.TestCase):
+    def assert_semantic_view(self, state):
+        view = state["dungeon"]
+        self.assertEqual(len(view["cells"]), view["height"])
+        self.assertLess(view["width"], len(state["terminal"][0]))
+        for y, row in enumerate(view["cells"]):
+            self.assertEqual(len(row), view["width"])
+            for x, cell in enumerate(row):
+                self.assertEqual(len(cell), 13)
+                top = cell[:2]
+                for layer in (2, 4, 6):
+                    if cell[layer]:
+                        top = cell[layer:layer+2]
+                # Compare against the classic UI only in this parity test.
+                # Production code never interprets or crops terminal cells.
+                self.assertEqual(top, state["terminal"][y+1][x+13], (x, y, cell))
+        player = state["player"]
+        cell = view["cells"][player["y"]-view["y"]][player["x"]-view["x"]]
+        self.assertTrue(cell[12])
+
+    def test_semantic_view_and_fallback(self):
+        e = self.engine
+        e.hello(); e.birth()
+        self.assert_semantic_view(e.state)
+        before = e.call("state.get")["result"]
+        for _ in range(5):
+            self.assertEqual(e.call("state.get")["result"], before)
+        for key in (ord('C'), ord('*')):
+            e.key(key)
+            self.assertNotIn("dungeon", e.state)
+            e.key("escape")
+            while e.state["readiness"] != "ready":
+                e.key("escape")
+            self.assert_semantic_view(e.state)
+
+    def test_message_acknowledgement_keeps_dungeon(self):
+        e = self.engine
+        e.hello(); e.birth()
+        before = e.state
+        e.call("debug.damage", {"amount": before["player"]["hp"] - 1})
+        e.next_state(before["revision"])
+        self.assertTrue(e.state.get("message_pending"), e.screen())
+        self.assertIn("dungeon", e.state)
+        self.assertEqual(e.state["readiness"], "awaiting_prompt")
+        for _ in range(10):
+            if not e.state.get("message_pending"):
+                break
+            e.key(32)
+        self.assertFalse(e.state.get("message_pending"))
+        self.assert_semantic_view(e.state)
+
     def setUp(self):
         self.test_root = ARGS.backend.parent / "test-runs"
         self.test_root.mkdir(exist_ok=True)
@@ -318,6 +368,8 @@ class BackendTests(unittest.TestCase):
         e = self.engine
         e.hello()
         e.birth()
+        self.assert_semantic_view(e.state)
+        town_level = e.state["dungeon"]["level_id"]
         catalog = e.call("catalog.get")["result"]["features"]
         floors = {f["id"] for f in catalog if f["name"] in
                   ("open floor", "open door", "broken door", "up staircase", "down staircase")}
@@ -325,6 +377,7 @@ class BackendTests(unittest.TestCase):
         # Navigate an ordinary new character through town using real movement.
         for _ in range(150):
             s = e.call("state.get")["result"]
+            self.assert_semantic_view(s)
             terrain = s["map"]["actual"]
             start = (s["player"]["x"], s["player"]["y"])
             if terrain[start[1]][start[0]] == stairs:
@@ -355,6 +408,8 @@ class BackendTests(unittest.TestCase):
             e.key("enter")
         dungeon = e.call("state.get")["result"]
         self.assertEqual(dungeon["player"]["depth"], 1)
+        self.assert_semantic_view(dungeon)
+        self.assertNotEqual(dungeon["dungeon"]["level_id"], town_level)
         self.assertTrue(any(i["location"] == "Floor" for i in dungeon["items"]))
         for item in dungeon["items"]:
             self.assertEqual(e.call("inspect.get", {"handle": item["id"]})["result"], item)
@@ -364,6 +419,8 @@ class BackendTests(unittest.TestCase):
         while e.state["readiness"] != "ready":
             e.key("enter")
         self.assertEqual(e.state["player"]["depth"], 0)
+        self.assert_semantic_view(e.state)
+        self.assertNotEqual(e.state["dungeon"]["level_id"], dungeon["dungeon"]["level_id"])
 
     def test_item_prompt_cancel_and_inscription(self):
         e = self.engine

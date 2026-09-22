@@ -5,6 +5,8 @@
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 #include "crt_renderer.h"
+#include "dungeon_view.h"
+#include "backend_reader.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
@@ -68,8 +70,10 @@ static ImU32 color(int index) {
  return IM_COL32(c[0],c[1],c[2],255);
 }
 struct Connection {
- SDL_Process *process = nullptr;
- std::string received, outgoing, diagnostic, menu_error;
+ RenderGrid game_grid;
+ std::unique_ptr<BackendReader> reader;
+ std::unique_ptr<SDL_Process,decltype(&SDL_DestroyProcess)> process{nullptr,SDL_DestroyProcess};
+ std::string outgoing, diagnostic, menu_error;
  std::deque<json> messages;
  json previous_messages = json::array();
  std::map<std::string,std::string> requests;
@@ -77,7 +81,16 @@ struct Connection {
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
  bool return_to_menu = false, restart_ready = false, close_confirmed = false;
  json state = json::object(), prompt = json::object(), pending_prompt = json::object(), commands = json::array(), saves = json::array(), catalog = json::object();
- ~Connection() { if (process) SDL_DestroyProcess(process); }
+ Connection()=default;
+ Connection(const Connection&)=delete;
+ Connection& operator=(const Connection&)=delete;
+ Connection(Connection&&)=default;
+ Connection& operator=(Connection&&)=default; // Reader joins before replacing its process.
+ void close_process() {
+  reader.reset(); // Join before SDL closes the worker's pipe handles.
+  process.reset();
+ }
+ ~Connection() { close_process(); }
  void notice(const std::string &text) {
   messages.push_front({{"text","[SYSTEM] " + text},{"count",1},{"system",true}});
   if(messages.size()>400) messages.pop_back();
@@ -122,8 +135,10 @@ struct Connection {
   SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_APP);
   SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_APP);
   SDL_SetBooleanProperty(properties, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
-  process = SDL_CreateProcessWithProperties(properties); SDL_DestroyProperties(properties);
+  process.reset(SDL_CreateProcessWithProperties(properties)); SDL_DestroyProperties(properties);
   if (!process) { menu_error=SDL_GetError(); notice(menu_error); return false; }
+  auto errors=static_cast<SDL_IOStream*>(SDL_GetPointerProperty(SDL_GetProcessProperties(process.get()),SDL_PROP_PROCESS_STDERR_POINTER,nullptr));
+  reader=std::make_unique<BackendReader>(SDL_GetProcessOutput(process.get()),errors);
   connected = true;
   send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",1048576}});
   return true;
@@ -131,7 +146,7 @@ struct Connection {
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
-   if (name == "state.changed") { state = std::move(j.at("data")); update_messages(state.at("messages")); busy = false; }
+   if (name == "state.changed") { state = std::move(j.at("data")); game_grid.update(state); update_messages(state.at("messages")); busy = false; }
    if (name == "prompt.requested") { prompt = j.at("data"); busy = false; }
    return;
   }
@@ -159,7 +174,7 @@ struct Connection {
  }
  void flush_input() {
   if(connected && !outgoing.empty()) {
-   const auto n=SDL_WriteIO(SDL_GetProcessInput(process),outgoing.data(),outgoing.size());
+   const auto n=SDL_WriteIO(SDL_GetProcessInput(process.get()),outgoing.data(),outgoing.size());
    outgoing.erase(0,n);
   }
  }
@@ -176,30 +191,17 @@ struct Connection {
  }
  void poll() {
   if (!connected) return;
-  // Observe termination BEFORE draining stdout, so the last state/close reply
-  // cannot arrive between the drain and our exit decision.
   int exit_code=0;
-  const bool exited=SDL_WaitProcess(process,false,&exit_code);
-  char buffer[16384]; size_t n;
-  auto err = static_cast<SDL_IOStream*>(SDL_GetPointerProperty(SDL_GetProcessProperties(process),SDL_PROP_PROCESS_STDERR_POINTER,nullptr));
-  if (err) while ((n = SDL_ReadIO(err,buffer,sizeof(buffer))) > 0) {
-   diagnostic.append(buffer,n); if (diagnostic.size() > 65536) diagnostic.erase(0,diagnostic.size()-65536);
-  }
-  auto output = SDL_GetProcessOutput(process);
-  size_t read = 0;
-  while (read < 4*1024*1024 && (n = SDL_ReadIO(output,buffer,sizeof(buffer))) > 0) {
-   read += n; received.append(buffer,n);
-   size_t end;
-   while ((end = received.find('\n')) != std::string::npos) {
-    if (end > 1048576) { notice("Backend frame too large"); connected = false; return; }
-    try { receive(json::parse(received.substr(0,end))); }
-    catch (const std::exception &e) { notice(std::string("Invalid backend message: ") + e.what()); connected = false; return; }
-    received.erase(0,end+1);
-   }
-   if (received.size() > 1048576) { notice("Backend frame too large"); connected = false; return; }
-  }
+  const bool exited=SDL_WaitProcess(process.get(),false,&exit_code);
+  auto batch=reader->take();
+  diagnostic+=batch.diagnostic;
+  if(diagnostic.size()>65536) diagnostic.erase(0,diagnostic.size()-65536);
+  try { for(auto &frame:batch.frames) receive(std::move(frame)); }
+  catch(const std::exception &e) { batch.error=e.what(); }
+  if(!batch.error.empty()) { notice("Invalid backend message: "+batch.error); connected=false; return; }
   if(!exited) flush_input();
-  else if(read<4*1024*1024) process_stopped(exit_code); // Drain capped output next frame first.
+  // EOF must be drained by the reader before interpreting the final game state.
+  else if(batch.finished) process_stopped(exit_code);
  }
  bool ready() const { return connected && !busy && prompt.empty() && state.value("readiness","") == "ready"; }
  bool key(const json &k) {
@@ -504,18 +506,17 @@ struct UI {
    ImGui::SetWindowFocus(); grid_focus=true; focus_requested=false;
   }
   if(ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) grid_focus=true;
-  const auto &rows=c.state["terminal"];
-  size_t columns=1;
-  for(const auto &row:rows) columns=std::max(columns,row.size());
+  const auto &grid=c.game_grid;
+  const size_t columns=std::max(size_t(1),grid.width);
   const auto start=ImGui::GetCursorScreenPos();
   const auto available=ImGui::GetContentRegionAvail();
   const ImVec2 viewport(std::max(1.f,available.x),std::max(1.f,available.y));
-  // Use the largest glyphs that keep every terminal row and column visible.
+  // Fit the complete semantic viewport (or fallback terminal) without scrolling.
   const float pixels=std::min(
    std::max(.01f,viewport.x-2)/(float(columns)*.60f),
-   std::max(.01f,viewport.y-2)/(float(std::max(size_t(1),rows.size()))*1.12f));
+   std::max(.01f,viewport.y-2)/(float(std::max(size_t(1),grid.height))*1.12f));
   const float cw=pixels*.60f, ch=pixels*1.12f;
-  const ImVec2 size(cw*float(columns),ch*float(rows.size()));
+  const ImVec2 size(cw*float(columns),ch*float(grid.height));
   const ImVec2 origin(start.x+(viewport.x-size.x)*.5f,start.y+(viewport.y-size.y)*.5f);
   ImGui::InvisibleButton("Dungeon keyboard surface",viewport,ImGuiButtonFlags_EnableNav);
   if (ImGui::IsItemClicked()) grid_focus = true;
@@ -523,18 +524,30 @@ struct UI {
   auto draw=ImGui::GetWindowDrawList();
   game_draw_list=draw; game_pos=ImGui::GetWindowPos(); game_size=ImGui::GetWindowSize();
   draw->AddRectFilled(start,ImVec2(start.x+viewport.x,start.y+viewport.y),IM_COL32(12,15,20,255));
-  for (size_t y=0;y<rows.size();++y) for(size_t x=0;x<rows[y].size();++x) {
-   unsigned glyph=rows[y][x][0].get<unsigned>(); int col=rows[y][x][1].get<int>();
-   if (glyph && glyph!=' ') draw->AddText(ImGui::GetFont(),pixels,
-    ImVec2(origin.x+float(x)*cw,origin.y+float(y)*ch),color(col),utf8(glyph).c_str());
+  for(size_t y=0;y<grid.height;++y) for(size_t x=0;x<grid.width;++x) {
+   const auto &cell=grid.cells[y*grid.width+x];
+   if(cell.glyph && cell.glyph!=' ') {
+    const ImVec2 at(origin.x+float(x)*cw,origin.y+float(y)*ch);
+    draw->AddText(ImGui::GetFont(),pixels,at,color(cell.color),utf8(cell.glyph).c_str());
+   }
   }
-  if(c.state.contains("cursor")) {
+  if(!grid.semantic && c.state.contains("cursor")) {
    const auto &cursor=c.state["cursor"];
    const int x=cursor.value("x",-1), y=cursor.value("y",-1);
-   if(cursor.value("visible",false) && x>=0 && y>=0 && size_t(y)<rows.size() && size_t(x)<columns) {
+   if(cursor.value("visible",false) && x>=0 && y>=0 && size_t(y)<grid.height && size_t(x)<columns) {
     const ImVec2 p(origin.x+x*cw,origin.y+y*ch);
     draw->AddRect(p,ImVec2(p.x+cw,p.y+ch),IM_COL32(255,225,125,255),0,0,std::max(1.f,display_scale));
    }
+  }
+
+  if(c.state.value("message_pending",false)) {
+   const char *label="- more -";
+   const ImVec2 text_size=ImGui::CalcTextSize(label);
+   const float padding=6.f*display_scale, inset=8.f*display_scale;
+   const ImVec2 end(start.x+viewport.x-inset,start.y+viewport.y-inset);
+   const ImVec2 at(end.x-text_size.x-2*padding,end.y-text_size.y-2*padding);
+   draw->AddRectFilled(at,end,IM_COL32(0,0,0,255));
+   draw->AddText(ImVec2(at.x+padding,at.y+padding),IM_COL32(255,255,255,255),label);
   }
 
   if(!ImGui::IsWindowFocused()) grid_focus=false;
@@ -545,6 +558,7 @@ struct UI {
   const auto &p=c.state["player"];
   ImGui::Text("%s",p.value("name","").c_str());
   ImGui::TextWrapped("%s %s · Level %d",p.value("race","").c_str(),p.value("class","").c_str(),p.value("level",0));
+  if(p.contains("title")) ImGui::TextWrapped("%s",display_label(p.value("title","")).c_str());
   auto bar=[&](const char *name,const char *cur,const char *max,ImVec4 fill) {
    char b[80]; int v=p.value(cur,0),m=p.value(max,0); SDL_snprintf(b,sizeof(b),"%s %d / %d",name,std::max(0,v),std::max(0,m));
    ImGui::PushStyleColor(ImGuiCol_PlotHistogram,fill);
@@ -564,6 +578,11 @@ struct UI {
   ImGui::PopStyleColor(2);
   ImGui::TextWrapped("Depth %d · Gold %d",p.value("depth",0),p.value("gold",0));
   ImGui::TextWrapped("Armour %d · Speed %+d",p.value("armour",0),p.value("speed",0));
+  if(p.contains("experience")) {
+   const int xp=p.value("experience",0),next=p.value("next_level_experience",0);
+   if(next>0) ImGui::TextWrapped("XP %d · Next level %d",xp,std::max(0,next-xp));
+   else ImGui::TextWrapped("XP %d · Maximum level",xp);
+  }
   static const char *stats[]={"STR","INT","WIS","DEX","CON"};
   if(p.contains("stats")) for(size_t i=0;i<p["stats"].size();++i) {
    int v=p["stats"][i];
@@ -576,7 +595,26 @@ struct UI {
   }
   for(const auto &s:p.value("statuses",json::array())) {
    if(s.value("label","")=="FOOD") continue;
-   ImGui::Text("%s (%d)",s.value("label","").c_str(),s.value("duration",0));
+   ImGui::TextWrapped("%s (%d)",display_label(s.value("label","")).c_str(),s.value("duration",0));
+  }
+  if(p.contains("floor")) ImGui::TextWrapped("Light %d · %s",p.value("light",0),display_label(p.value("floor","")).c_str());
+  if(p.contains("feeling")) ImGui::TextWrapped("Level feeling %s",p.value("feeling","").c_str());
+  if(p.value("trap_detected",false)) ImGui::TextUnformatted("Trap-detected area");
+  if(p.value("recall",0)) ImGui::TextUnformatted("Recall pending");
+  if(p.value("descent",0)) ImGui::TextUnformatted("Descent pending");
+  if(p.value("resting",0)) ImGui::TextUnformatted("Resting");
+  if(p.value("running",0)) ImGui::TextUnformatted("Running");
+  if(p.value("repeat",0)) ImGui::Text("Repeating: %d",p.value("repeat",0));
+  if(p.value("study",0)) ImGui::Text("Spells to learn: %d",p.value("study",0));
+  if(p.value("extra_moves",0)) ImGui::Text("Extra moves: %+d",p.value("extra_moves",0));
+  if(p.value("unignoring",false)) ImGui::TextUnformatted("Showing ignored items");
+  if(p.contains("tracked_creature")) {
+   const auto &m=p["tracked_creature"];
+   if(m.value("visible",false)) {
+    ImGui::TextWrapped("%s",m.value("name","").c_str());
+    char text[64]; SDL_snprintf(text,sizeof(text),"%d / %d",std::max(0,m.value("hp",0)),m.value("max_hp",0));
+    ImGui::ProgressBar(resource_fraction(m.value("hp",0),m.value("max_hp",0)),ImVec2(-1,0),text);
+   } else ImGui::TextUnformatted("Tracked creature: out of sight");
   }
  }
  void items() {
@@ -823,7 +861,7 @@ struct UI {
    if(ImGui::Button("Save and quit")) { c.save(true); ImGui::CloseCurrentPopup(); }
    ImGui::EndDisabled(); ImGui::SameLine();
    if(ImGui::Button("Continue playing")) { ImGui::CloseCurrentPopup(); focus_game(); }
-   if(!c.state.contains("player") || !c.connected) if(ImGui::Button("Close")) { c.closed=true; if(c.process) SDL_KillProcess(c.process,true); }
+   if(!c.state.contains("player") || !c.connected) if(ImGui::Button("Close")) { c.closed=true; if(c.process) SDL_KillProcess(c.process.get(),true); }
    ImGui::EndPopup();
   }
   prompts(); ImGui::End();
@@ -907,7 +945,7 @@ int main(int argc,char **argv) {
    crt_renderer.reset_history();
    health_glitch=HealthGlitch{};
    // A saved return-to-menu or normal post-game completion has exited cleanly.
-   SDL_DestroyProcess(connection.process); connection.process=nullptr;
+   connection.close_process();
    connection=Connection{};
    ui.grid_focus=ui.focus_requested=ui.return_from_prompt=false;
    ui.selected.clear(); ui.last_prompt.clear(); ui.keys.clear();
@@ -930,7 +968,7 @@ int main(int argc,char **argv) {
    }
    ImGui_ImplSDL3_ProcessEvent(&e);
    if(e.type==SDL_EVENT_QUIT) {
-    if(!connection.state.contains("terminal")) { connection.closed=true; if(connection.process) SDL_KillProcess(connection.process,true); }
+    if(!connection.state.contains("terminal")) { connection.closed=true; if(connection.process) SDL_KillProcess(connection.process.get(),true); }
     else ui.quit_dialog=true;
    }
    if(e.type==SDL_EVENT_KEY_DOWN && ui.owns_keyboard()) {
@@ -988,6 +1026,7 @@ int main(int argc,char **argv) {
   if(SDL_GetWindowFlags(window)&SDL_WINDOW_MINIMIZED) SDL_Delay(20);
  }
  SDL_WaitForGPUIdle(gpu); crt_renderer.shutdown(); ImGui_ImplSDLGPU3_Shutdown(); ImGui_ImplSDL3_Shutdown(); ImGui::DestroyContext();
+ connection.close_process();
  SDL_ReleaseWindowFromGPUDevice(gpu,window); SDL_DestroyGPUDevice(gpu); SDL_DestroyWindow(window); SDL_Quit(); return 0;
 }
 #endif

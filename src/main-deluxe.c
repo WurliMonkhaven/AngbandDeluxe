@@ -28,6 +28,9 @@
 #include "ui-input.h"
 #include "ui-object.h"
 #include "ui-keymap.h"
+#include "ui-map.h"
+#include "ui-output.h"
+#include "trap.h"
 #include "ui-term.h"
 #include "z-quark.h"
 #include <locale.h>
@@ -133,7 +136,27 @@ static cJSON *command_list(void)
  return a;
 }
 static cJSON *ints(const int *values, int count)
-{ return cJSON_CreateIntArray(values, count); }
+{
+ /* These presentation arrays are immutable and only serialized, never queried
+  * through cJSON. Encode integer tokens directly to avoid a heap node and
+  * floating-point formatting for every cell component. The wire schema stays
+  * an ordinary JSON array. Only engine integers enter this raw JSON buffer. */
+ char *buffer=mem_alloc((size_t)count*12+3), *out=buffer;
+ cJSON *result;
+ int i;
+ *out++='[';
+ for(i=0;i<count;++i) {
+  char digits[10]; int used=0;
+  uint32_t value=(uint32_t)values[i];
+  if(i) *out++=',';
+  if(values[i]<0) { *out++='-'; value=0u-value; }
+  do { digits[used++]=(char)('0'+value%10); value/=10; } while(value);
+  while(used) *out++=digits[--used];
+ }
+ *out++=']'; *out=0;
+ result=cJSON_CreateRaw(buffer); mem_free(buffer);
+ return result;
+}
 static bool cursed(const struct object *o)
 {
  int i; if (!o || !o->curses) return false;
@@ -255,6 +278,8 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  }
  return j;
 }
+#include "deluxe-view.h"
+
 static cJSON *capture(void)
 {
 #ifndef NDEBUG
@@ -298,6 +323,7 @@ static cJSON *capture(void)
   number(p, "sp", player->csp); number(p, "max_sp", player->msp); number(p, "level", player->lev);
   number(p, "food", player->timed[TMD_FOOD]); number(p, "food_max", PY_FOOD_MAX);
   number(p, "depth", player->depth); number(p, "gold", player->au);
+  deluxe_character_details(p);
   number(p, "speed", player->state.speed - 110); number(p, "armour", player->known_state.ac + player->known_state.to_a);
   number(p, "x", player->grid.x); number(p, "y", player->grid.y);
   cJSON_AddItemToObject(p, "stats", ints(player->known_state.stat_use, STAT_MAX));
@@ -310,6 +336,7 @@ static cJSON *capture(void)
    cJSON_AddItemToObject(p, "statuses", statuses);
   }
   cJSON_AddItemToObject(s, "player", p);
+  deluxe_capture_view(s);
   for (o = player->gear; o; o = o->next) {
    int slot = object_slot(player->body, o);
    const char *place = slot >= 0 && slot < player->body.count ? player->body.slots[slot].name :
@@ -322,16 +349,18 @@ static cJSON *capture(void)
   }
   cJSON_AddItemToObject(s, "slots", slots);
   for (y = 0; y < cave->height; ++y) {
-   cJSON *r = cJSON_CreateArray(), *k = cJSON_CreateArray(); char seen[512];
+   int actual_row[512], known_row[512]; char seen[512];
    for (x = 0; x < cave->width; ++x) {
     struct loc g = loc(x, y);
-    cJSON_AddItemToArray(r, cJSON_CreateNumber(square(cave, g)->feat));
-    cJSON_AddItemToArray(k, cJSON_CreateNumber(player->cave ? square(player->cave, g)->feat : 0));
+    actual_row[x] = square(cave, g)->feat;
+    known_row[x] = player->cave ? square(player->cave, g)->feat : 0;
     seen[x] = square_isseen(cave, g) ? '1' : '0';
     for (o = square_object(cave, g); o; o = o->next)
      cJSON_AddItemToArray(items, item_record(o, "Floor", ++index));
    }
-   seen[cave->width] = 0; cJSON_AddItemToArray(terrain, r); cJSON_AddItemToArray(known, k);
+   seen[cave->width] = 0;
+   cJSON_AddItemToArray(terrain, ints(actual_row,cave->width));
+   cJSON_AddItemToArray(known, ints(known_row,cave->width));
    cJSON_AddItemToArray(visible, cJSON_CreateString(seen));
   }
   cJSON_AddItemToObject(map, "actual", terrain); cJSON_AddItemToObject(map, "known", known);
@@ -368,7 +397,9 @@ static void publish(void)
  strnfmt(revision_text, sizeof(revision_text), "%lu", revision);
  strnfmt(context_text, sizeof(context_text), "%lu", context_id);
  cJSON_Delete(snapshot); snapshot = capture();
- event("state.changed", cJSON_Duplicate(snapshot, true));
+ /* send_json serializes synchronously. Borrow the immutable snapshot instead
+  * of allocating and freeing a second copy of every dungeon cell. */
+ event("state.changed", cJSON_CreateObjectReference(snapshot->child));
 }
 static bool input_available(void)
 {
@@ -474,12 +505,12 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"terminal.fallback\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
  if (streq(method, "commands.list")) response(id, command_list());
- else if (streq(method, "state.get")) response(id, snapshot ? cJSON_Duplicate(snapshot, true) : cJSON_CreateObject());
+ else if (streq(method, "state.get")) response(id, snapshot ? cJSON_CreateObjectReference(snapshot->child) : cJSON_CreateObject());
  else if (streq(method, "catalog.get")) {
   cJSON *out = cJSON_CreateObject(), *features = cJSON_CreateArray();
   if (initialized) for (i = 0; i < FEAT_MAX; ++i) {
@@ -665,6 +696,7 @@ int main(int argc, char **argv)
  while (launch_mode < 0) pump();
  init_display(); init_angband(); textui_init(); initialized = true;
  get_check_hook = check_hook; get_string_hook = string_hook; get_quantity_hook = quantity_hook;
+ map_visual_hook = deluxe_observe_cell; map_visual_reset_hook = deluxe_reset_view;
  original_get_item = get_item_hook; get_item_hook = item_hook;
  cmd_get_hook = get_command;
  event_add_handler(EVENT_ENTER_BIRTH, lifecycle, NULL);
@@ -674,5 +706,6 @@ int main(int argc, char **argv)
  play_game((enum game_mode_type)launch_mode);
  phase = "finished"; ready = false; publish(); complete();
  textui_cleanup(); cleanup_angband();
+ deluxe_reset_view();
  return 0;
 }

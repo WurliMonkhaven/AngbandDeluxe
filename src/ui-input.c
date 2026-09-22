@@ -385,6 +385,8 @@ ui_event inkey_m(void)
 /**
  * Flush
  */
+bool textui_message_pending;
+
 static void msg_flush(int x)
 {
 	uint8_t a = COLOUR_L_BLUE;
@@ -392,8 +394,11 @@ static void msg_flush(int x)
 	/* Pause for response */
 	Term_putstr(x, 0, -1, a, "-more-");
 
-	if ((!OPT(player, auto_more)) && !keymap_auto_more)
+	if ((!OPT(player, auto_more)) && !keymap_auto_more) {
+		textui_message_pending = true;
 		anykey();
+		textui_message_pending = false;
+	}
 
 	/* Clear the line */
 	Term_erase(0, 0, Term->wid);

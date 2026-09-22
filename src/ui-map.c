@@ -172,8 +172,7 @@ static void grid_get_attr(struct grid_data *g, int *a)
  * This will probably be done outside of the current text->graphics mappings
  * though.
  */
-void grid_data_as_text(struct grid_data *g, int *ap, wchar_t *cp, int *tap,
-					   wchar_t *tcp)
+static void grid_data_as_text_layers(struct grid_data *g, int *ap, wchar_t *cp, int *tap, wchar_t *tcp, struct map_visual *visual)
 {
 	struct feature *feat = &f_info[g->f_idx];
 
@@ -194,6 +193,8 @@ void grid_data_as_text(struct grid_data *g, int *ap, wchar_t *cp, int *tap,
 	    /* Change graphics to indicate visible traps, skip objects if a web */
 	    skip_objects = get_trap_graphics(cave, g, &a, &c);
 	}
+
+	if (visual && g->trap && !g->hallucinate) { visual->trap_attr=a; visual->trap_char=c; }
 
 	if (!skip_objects) {
 		/* If there's an object, deal with that. */
@@ -224,6 +225,8 @@ void grid_data_as_text(struct grid_data *g, int *ap, wchar_t *cp, int *tap,
 			}
 		}
 	}
+
+	if (visual && !skip_objects && (g->first_kind || g->unseen_money || g->unseen_object)) { visual->object_attr=a; visual->object_char=c; }
 
 	/* Handle monsters, the player and trap borders */
 	if (g->m_idx > 0) {
@@ -330,11 +333,33 @@ void grid_data_as_text(struct grid_data *g, int *ap, wchar_t *cp, int *tap,
 		c = monster_x_char[race->ridx];
 	}
 
+	if (visual) {
+        visual->terrain_attr=*tap; visual->terrain_char=*tcp;
+        visual->feature=g->f_idx; visual->lighting=g->lighting;
+        visual->seen=g->in_view; visual->hallucinated=g->hallucinate; visual->player=g->is_player;
+        if (g->is_player || (g->m_idx && (g->hallucinate || !monster_is_camouflaged(cave_monster(cave,g->m_idx))))) {
+            visual->actor_attr=a; visual->actor_char=c;
+        }
+    }
 	/* Result */
 	(*ap) = a;
 	(*cp) = c;
 }
 
+
+void (*map_visual_hook)(struct loc, const struct map_visual *);
+void (*map_visual_reset_hook)(void);
+void grid_data_as_text(struct grid_data *g, int *a, wchar_t *c, int *ta, wchar_t *tc)
+{
+ grid_data_as_text_layers(g,a,c,ta,tc,NULL);
+}
+void map_info_as_text(struct loc grid, struct grid_data *g, int *a, wchar_t *c, int *ta, wchar_t *tc)
+{
+ struct map_visual visual = {0};
+ map_info(grid,g);
+ grid_data_as_text_layers(g,a,c,ta,tc,map_visual_hook?&visual:NULL);
+ if(map_visual_hook) map_visual_hook(grid,&visual);
+}
 
 /**
  * Get dimensions of a small-scale map (i.e. display_map()'s result).
@@ -670,8 +695,7 @@ static void prt_map_aux(void)
 				}
 
 				/* Determine what is there */
-				map_info(loc(x, y), &g);
-				grid_data_as_text(&g, &a, &c, &ta, &tc);
+				map_info_as_text(loc(x, y), &g, &a, &c, &ta, &tc);
 				Term_queue_char(t, vx, vy, a, c, ta, tc);
 
 				if ((tile_width > 1) || (tile_height > 1))
@@ -731,8 +755,7 @@ void prt_map(void)
 			if (!square_in_bounds(cave, loc(x, y))) continue;
 
 			/* Determine what is there */
-			map_info(loc(x, y), &g);
-			grid_data_as_text(&g, &a, &c, &ta, &tc);
+			map_info_as_text(loc(x, y), &g, &a, &c, &ta, &tc);
 
 			/* Queue it */
 			Term_queue_char(Term, vx, vy, a, c, ta, tc);
@@ -821,8 +844,7 @@ void display_map(int *cy, int *cx)
 			if (tile_width > 1) col = col - (col % tile_width);
 
 			/* Get the attr/char at that map location */
-			map_info(loc(x, y), &g);
-			grid_data_as_text(&g, &a, &c, &ta, &tc);
+			map_info_as_text(loc(x, y), &g, &a, &c, &ta, &tc);
 
 			/* Get the priority of that attr/char */
 			tp = f_info[g.f_idx].priority;

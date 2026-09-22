@@ -1392,8 +1392,7 @@ static void update_maps(game_event_type type, game_event_data *data, void *user)
 
 
 		/* Redraw the grid spot */
-		map_info(data->point, &g);
-		grid_data_as_text(&g, &a, &c, &ta, &tc);
+		map_info_as_text(data->point, &g, &a, &c, &ta, &tc);
 		Term_queue_char(t, vx, vy, a, c, ta, tc);
 #ifdef MAP_DEBUG
 		/* Plot 'spot' updates in light green to make them visible */
@@ -2509,6 +2508,7 @@ static void new_level_display_update(game_event_type type,
 									 game_event_data *data, void *user)
 {
 	/* Enforce illegal panel */
+	if (map_visual_reset_hook) map_visual_reset_hook();
 	Term->offset_y = z_info->dungeon_hgt;
 	Term->offset_x = z_info->dungeon_wid;
 
