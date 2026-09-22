@@ -231,6 +231,99 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(e.state['turn'], turn)
         self.assert_semantic_view(e.state)
 
+    def test_walk_and_pickup(self):
+        self.walk_and_pickup(False)
+
+    def test_walk_and_pickup_interrupted(self):
+        self.walk_and_pickup(True)
+
+    def test_remembered_pickup(self):
+        self.walk_and_pickup(True, remembered=True)
+
+    def walk_and_pickup(self, interrupt, remembered=False):
+        e = self.engine
+        e.hello(); e.birth()
+        # Isolate route completion from random town residents, using Angband's
+        # existing wizard command only in this disposable test character.
+        e.key(1); e.key(ord('z'))
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.call('state.get')
+            if e.prompt:
+                prompt=e.prompt; e.prompt=None; old=e.state['revision']
+                value=True if prompt['type']=='confirmation' else 20
+                e.call('prompt.reply',{'prompt_id':prompt['prompt_id'],'value':value})
+                e.next_state(old)
+            else: e.key('enter')
+        item = next(o for o in e.state['items'] if o['location']=='Pack' and 'Potion' in o['label'])
+        kind = item['actual']['kind']
+        x,y = e.state['player']['x'],e.state['player']['y']
+        old=e.state['revision']
+        self.assertIn('result',e.call('command.execute',{'revision':old,'command':'core.drop','item':item['id']}))
+        e.next_state(old)
+        while e.state['readiness']!='ready':
+            e.call('state.get')
+            if e.prompt:
+                prompt=e.prompt; e.prompt=None; old=e.state['revision']
+                e.call('prompt.reply',{'prompt_id':prompt['prompt_id'],'value':1})
+                e.next_state(old)
+            else: e.key('enter')
+        floor=next((o for o in e.state['items'] if o['location']=='Floor' and o['actual']['kind']==kind),None)
+        self.assertIsNotNone(floor, (e.screen(),e.state['items']))
+        x,y=floor['x'],floor['y']
+        self.assertTrue(floor['can_pickup'])
+        catalog=e.call('catalog.get')['result']['features']
+        floors={f['id'] for f in catalog if f['name'] in ('open floor','up staircase','down staircase')}
+        terrain=e.state['map']['actual']
+        dx,dy,key=next((dx,dy,key) for dx,dy,key in ((1,0,'6'),(-1,0,'4'),(0,1,'2'),(0,-1,'8'))
+                       if all(terrain[y+dy*i][x+dx*i] in floors for i in range(1,4)))
+        for _ in range(3):
+            e.key(ord(key))
+            while e.state['readiness']!='ready': e.key('enter')
+        if remembered:
+            start=(e.state['player']['x'],e.state['player']['y'])
+            queue=deque([(start,[])]); visited={start}; route=None
+            while queue:
+                (cx,cy),path=queue.popleft()
+                if max(abs(cx-x),abs(cy-y))>21:
+                    route=path; break
+                for dx,dy,key in ((1,0,'6'),(-1,0,'4'),(0,1,'2'),(0,-1,'8')):
+                    point=(cx+dx,cy+dy)
+                    if point not in visited and 0<point[1]<len(terrain)-1 and 0<point[0]<len(terrain[0])-1 and terrain[point[1]][point[0]] in floors:
+                        visited.add(point); queue.append((point,path+[key]))
+            self.assertIsNotNone(route)
+            for key in route:
+                if e.state['map']['visible'][y][x]=='0': break
+                e.key(ord(key))
+                while e.state['readiness']!='ready': e.key('enter')
+            self.assertEqual(e.state['map']['visible'][y][x],'0')
+        self.assertEqual(e.call('dungeon.pickup',{'context':'old','x':x,'y':y})['error']['code'],'stale_revision')
+        self.assertEqual(e.call('dungeon.pickup',{'context':e.state['context'],'x':-1,'y':y})['error']['code'],'invalid_argument')
+        if interrupt:
+            old=e.state['revision']
+            context=e.state['context']
+            requests=[{'kind':'request','id':'pickup-batch','method':'dungeon.pickup','params':{'context':context,'x':x,'y':y}},
+                      {'kind':'request','id':'cancel-batch','method':'terminal.input','params':{'context':context,'key':'escape'}}]
+            for request in requests: request['params']['session_id']='session-1'
+            e.process.stdin.write(''.join(json.dumps(r)+'\n' for r in requests)); e.process.stdin.flush()
+            while 'cancel-batch' not in e.responses: e.receive()
+            self.assertIn('result',e.responses['pickup-batch'])
+            self.assertIn('result',e.responses['cancel-batch'])
+            e.next_state(old)
+            while e.state['readiness']!='ready': e.key('enter')
+            self.assertTrue(any(o['location']=='Floor' and o['actual']['kind']==kind for o in e.state['items']))
+            stopped=(e.state['player']['x'],e.state['player']['y'])
+            e.key(ord('5'))
+            while e.state['readiness']!='ready': e.key('enter')
+            self.assertEqual((e.state['player']['x'],e.state['player']['y']),stopped)
+            self.assertTrue(any(o['location']=='Floor' and o['actual']['kind']==kind for o in e.state['items']))
+            return
+        self.targeting('dungeon.pickup',x=x,y=y)
+        self.assertEqual(e.state['readiness'],'ready',e.screen())
+        self.assertEqual((e.state['player']['x'],e.state['player']['y']),(x,y),e.errors)
+        self.assertTrue(any(o['location']=='Pack' and o['actual']['kind']==kind for o in e.state['items']),(e.screen(),e.errors))
+        self.assertFalse(any(o['location']=='Floor' and o['x']==x and o['y']==y and o['actual']['kind']==kind for o in e.state['items']))
+
     def test_immediate_target(self):
         e = self.engine
         e.hello(); e.birth()

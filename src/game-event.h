@@ -66,6 +66,8 @@ typedef enum game_event_type
 	EVENT_STORECHANGED,	/* Triggered on a successful buy/retrieve or sell/drop */
 
 	EVENT_INPUT_FLUSH,
+	EVENT_AUTOPICKUP_BEGIN,
+	EVENT_AUTOPICKUP_END,
 	EVENT_MESSAGE_FLUSH,
 	EVENT_CHECK_INTERRUPT,
 	EVENT_REFRESH,

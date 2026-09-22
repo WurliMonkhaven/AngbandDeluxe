@@ -467,11 +467,13 @@ void do_cmd_pickup(struct command *cmd)
  */
 void do_cmd_autopickup(struct command *cmd)
 {
+	event_signal(EVENT_AUTOPICKUP_BEGIN);
 	/* Get the obvious things */
 	player->upkeep->energy_use = do_autopickup(player)
 		* z_info->move_energy / 10;
 	if (player->upkeep->energy_use > z_info->move_energy)
 		player->upkeep->energy_use = z_info->move_energy;
+	event_signal(EVENT_AUTOPICKUP_END);
 
 	/* Look at or feel what's left */
 	event_signal(EVENT_SEEFLOOR);

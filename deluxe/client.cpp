@@ -80,6 +80,7 @@ struct Connection {
  std::map<std::string,std::string> requests;
  unsigned long next = 0;
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
+ bool pickup_travel=false;
  bool return_to_menu = false, restart_ready = false, close_confirmed = false;
  json state = json::object(), prompt = json::object(), pending_prompt = json::object(), commands = json::array(), saves = json::array(), catalog = json::object();
  Connection()=default;
@@ -147,15 +148,15 @@ struct Connection {
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
-   if (name == "state.changed") { state = std::move(j.at("data")); game_grid.update(state); update_messages(state.at("messages")); busy = false; }
-   if (name == "prompt.requested") { prompt = j.at("data"); busy = false; }
+   if (name == "state.changed") { state = std::move(j.at("data")); game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
+   if (name == "prompt.requested") { prompt = j.at("data"); busy = false; pickup_travel=false; }
    return;
   }
   auto id = j.value("id",""); auto it = requests.find(id);
   if (it == requests.end()) return;
   auto method = it->second; requests.erase(it);
   if (j.contains("error")) {
-   const auto error=j["error"].value("message","Request failed"); notice(error); busy = false;
+   const auto error=j["error"].value("message","Request failed"); notice(error); busy = false; pickup_travel=false;
    if(!state.contains("terminal")) menu_error=error;
    if(method=="session.close") { close_requested=false; return_to_menu=false; }
    if(method == "prompt.reply") { prompt = pending_prompt; pending_prompt = json::object(); }
@@ -181,7 +182,7 @@ struct Connection {
   }
  }
  void process_stopped(int exit_code) {
-  connected=false; busy=false;
+  connected=false; busy=false; pickup_travel=false;
   // Death/post-game screens remain interactive until the engine reports that
   // play_game completed. A crash must not masquerade as a normal game ending.
   const bool finished=state.value("phase","")=="finished";
@@ -209,6 +210,10 @@ struct Connection {
  bool native_targeting() const { return capabilities.value("interaction.targeting",0)>0; }
  bool mouse_movement() const { return capabilities.value("interaction.mouse",0)>0; }
  bool key(const json &k) {
+  if(connected && busy && pickup_travel && prompt.empty() && k=="escape") {
+   send("terminal.input",{{"context",state.value("context","")},{"key","escape"}});
+   pickup_travel=false; return true;
+  }
   if (!connected || busy || !prompt.empty() || state.empty()) return false;
   send("terminal.input",{{"context",state.value("context","")},{"key",k}}); busy = true;
   return true;
@@ -216,6 +221,7 @@ struct Connection {
  void target(const std::string &method,json params=json::object()) {
   if(!connected || busy || !prompt.empty()) return;
   params["context"]=state.value("context",""); send(method,std::move(params)); busy=true;
+  pickup_travel=method=="dungeon.pickup";
  }
  void command(const std::string &id, const std::string &item = "") {
   if (!ready()) return;
@@ -627,6 +633,14 @@ struct UI {
     ImGui::BeginDisabled(!c.mouse_movement());
     choose("Move here","dungeon.click");
     ImGui::EndDisabled();
+    bool pickup=false;
+    if(c.capabilities.value("interaction.pickup",0)>0 && c.state.contains("dungeon")) {
+     const auto &view=c.state["dungeon"];
+     const int x=grid_menu_x-view.value("x",0), y=grid_menu_y-view.value("y",0);
+     if(x>=0 && y>=0 && x<view.value("width",0) && y<view.value("height",0))
+      pickup=view["cells"][y][x][4].get<int>()!=0;
+    }
+    if(pickup) choose("Pick up","dungeon.pickup");
     ImGui::Separator();
     choose("Look","targeting.begin",{{"mode","look"}});
     choose("Target","targeting.set");

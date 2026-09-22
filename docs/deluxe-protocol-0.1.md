@@ -201,3 +201,21 @@ interaction this validates the click, cancels Look, and dispatches the saved
 world coordinate/modifiers at the next normal command boundary. This avoids
 reinterpreting the tile after the camera recenters. Combat targeting, recall
 screens and unrelated prompts still reject movement.
+
+### Walk and pick up (`interaction.pickup: 1`)
+
+Floor item records expose `can_pickup` from engine visibility, ignore and
+carrying checks. `dungeon.pickup` accepts the latest `context` and integer world
+`x/y` during normal ready play. It validates an observed item (including memory or hallucination), approaches
+with engine pathfinding and a final walk, and issues normal pickup only after
+uninterrupted arrival on the same level. A failed route or interruption
+discards the intent. Ordinary automatic pickup may collect items on arrival.
+The action does not promise a specific item from a multiple-item pile; the
+engine retains its selection prompts. Escape may interrupt pending travel.
+
+The context-menu pickup attempt uses the semantic cell object layer, rather
+than actual floor item records or current visibility. Remembered/hallucinated
+objects therefore remain selectable even if no real object exists. Arrival
+checks the actual pile and carrying capacity; an empty destination ends quietly.
+`can_pickup` on actual item records remains a current-visibility/capacity check
+and does not determine whether a remembered pickup attempt is offered.

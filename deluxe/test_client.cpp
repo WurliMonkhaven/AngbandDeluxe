@@ -80,6 +80,12 @@ int main(int argc,char **argv) {
   check(!input.key("down"),"Game input must not leak into a confirmation");
   input.prompt=json::object();
   check(input.key("down"),"Input should resume after acknowledgement");
+  Connection pickup; pickup.connected=true; pickup.state={{"context","pickup-test"}};
+  pickup.target("dungeon.pickup",{{"x",4},{"y",5}});
+  check(pickup.busy && pickup.pickup_travel,"Pickup travel must be cancellable");
+  check(!pickup.key("up"),"Travel must not leak queued movement");
+  check(pickup.key("escape") && !pickup.pickup_travel,"Escape must interrupt busy pickup travel");
+  check(!pickup.key("escape"),"Only one interruption should be sent before acknowledgement");
   HealthGlitch health;
   json health_state={{"phase","playing"},{"player",{{"hp",30},{"hp_warning",30},{"death_pending",false}}}};
   check(health.update(health_state,1)==0,"HP at warning threshold should not glitch");

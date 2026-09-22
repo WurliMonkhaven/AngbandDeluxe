@@ -413,3 +413,13 @@ on a tile during Look exits Look and sends that click through the normal
 engine movement/attack handler, preserving its world location and modifiers.
 Combat targeting and aim prompts retain tile selection. Save and Close applies
 and persists the preference; Cancel discards it.
+
+Ground-item context menus offer Pick up for displayed items, including memory
+and hallucinations. The backend uses engine
+pathfinding to approach, a normal final walk, then ordinary pickup. Monsters,
+other interruptions, failed arrival, level changes or Escape cancel the intent;
+it never resumes later. Existing pickup capacity checks and pile prompts remain.
+
+Remembered pickup attempts do not require current sight or an actual object
+at the remembered location. If nothing remains on arrival (or the image was
+a hallucination), the trip simply ends without picking anything up.
