@@ -70,9 +70,12 @@ widgets. The top-left Save and... menu offers Save and continue, Save and return
 to main menu, and Save and quit. Returning to the menu starts a fresh backend only
 after the save succeeds. System notices appear in Messages with a [SYSTEM] prefix.
 Settings at the top right opens a tabbed window. Its Graphics tab contains
-fullscreen, UI scale choices from 75% to 150%, and CRT Effects (Off, Game Window
-Only, or Full). CRT adds static scanlines, soft edge shading, red/cyan colour
-fringing and a subtle phosphor glow around text and glyphs on the selected
+fullscreen, UI scale choices from 75% to 150%, and CRT Effects Enabled (Off, Game Window
+Only, or Full). CRT Effects Strength offers Subtle, Classic (the default), Deluxe,
+and Zero Cool. The presets increase scanline darkness, colour fringing, edge shading
+and phosphor glow, with closely spaced horizontal bloom and a soft luminance
+bar rolling every nine seconds. Glow stays within the text's vertical bounds and
+is capped relative to glyph width to preserve readability. CRT applies to text and glyphs on the selected
 surface. Save and Close applies and persists the changes; Cancel discards them.
 UI scale resizes text, controls and
 spacing together. Character information stays fixed while tab contents scroll.

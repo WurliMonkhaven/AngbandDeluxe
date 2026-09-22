@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -45,27 +46,53 @@ static ImU32 color(int index) {
  const auto &c = colors[std::max(0,index) % std::size(colors)];
  return IM_COL32(c[0],c[1],c[2],255);
 }
-// Static scanlines and a soft edge vignette, drawn above the phosphor glow.
-static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size) {
+struct CrtPreset {
+ int scan_alpha,edge_alpha,hum_alpha;
+ float fringe,fringe_alpha,glow_radius,glow_alpha,bloom_radius,bloom_alpha;
+};
+static const CrtPreset &crt_preset(int strength) {
+ static const CrtPreset presets[]={
+  {48,80,12, .20f,.16f,.45f,.09f,1.0f,.035f}, // Subtle
+  {62,80,18, .50f,.30f,.65f,.14f,1.5f,.055f}, // Classic
+  {86,105,26, .85f,.40f,.85f,.21f,2.0f,.085f}, // Deluxe
+  {110,125,38, 1.25f,.52f,1.0f,.32f,2.5f,.15f} // Zero Cool
+ };
+ return presets[std::clamp(strength,0,3)];
+}
+// Scanlines, edge shading and a slow, soft rolling hum bar above the glow.
+static void crt_effect(ImDrawList *draw, ImVec2 pos, ImVec2 size,int strength=1,double seconds=-1) {
  if(size.x<=0 || size.y<=0) return;
+ const auto &preset=crt_preset(strength);
  const ImVec2 end(pos.x+size.x,pos.y+size.y);
  draw->PushClipRect(pos,end,true);
  const float pixel=1.f/std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.y);
  for(float y=pos.y;y<end.y;y+=3.f*pixel)
-  draw->AddRectFilled(ImVec2(pos.x,y),ImVec2(end.x,y+pixel),IM_COL32(0,0,0,62));
+  draw->AddRectFilled(ImVec2(pos.x,y),ImVec2(end.x,std::min(end.y,y+pixel)),IM_COL32(0,0,0,preset.scan_alpha));
  const float edge=std::min(size.x,size.y)*.09f;
- const ImU32 dark=IM_COL32(0,8,5,80),clear=IM_COL32(0,8,5,0);
+ const ImU32 dark=IM_COL32(0,8,5,preset.edge_alpha),clear=IM_COL32(0,8,5,0);
  draw->AddRectFilledMultiColor(pos,ImVec2(pos.x+edge,end.y),dark,clear,clear,dark);
  draw->AddRectFilledMultiColor(ImVec2(end.x-edge,pos.y),end,clear,dark,dark,clear);
  draw->AddRectFilledMultiColor(pos,ImVec2(end.x,pos.y+edge),dark,dark,clear,clear);
  draw->AddRectFilledMultiColor(ImVec2(pos.x,end.y-edge),end,clear,clear,dark,dark);
+ const float center=float(std::fmod(seconds<0?ImGui::GetTime():seconds,9.0)/9.0);
+ auto hum=[&](float y) {
+  float distance=std::abs(y-center); distance=std::min(distance,1.f-distance);
+  // A luminance lift remains visible over dark, empty dungeon cells, unlike
+  // the previous near-transparent black bar. Gaussian edges avoid a hard seam.
+  return IM_COL32(90,120,110,int(preset.hum_alpha*std::exp(-distance*distance/.004f)));
+ };
+ for(int band=0;band<48;++band) {
+  const float top=band/48.f,bottom=(band+1)/48.f;
+  draw->AddRectFilledMultiColor(ImVec2(pos.x,pos.y+size.y*top),ImVec2(end.x,pos.y+size.y*bottom),hum(top),hum(top),hum(bottom),hum(bottom));
+ }
  draw->PopClipRect();
 }
 // Reuse the font's antialiased glyph coverage for a small phosphor halo and
 // red/cyan channel fringes. Keep the original sharp glyph on top. Solid UI
 // backgrounds are passed through, and original draw order/clip rectangles
 // preserve popup occlusion. No full-screen blur buffers or flicker are needed.
-static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source) {
+static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source,int strength=1) {
+ const auto &preset=crt_preset(strength);
  auto out=std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
  out->_ResetForNewFrame(); out->Flags=source.Flags;
  const float pixel=1.f/std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.y);
@@ -73,28 +100,45 @@ static std::unique_ptr<ImDrawList> crt_phosphor(const ImDrawList &source) {
   out->PushClipRect(ImVec2(cmd.ClipRect.x,cmd.ClipRect.y),ImVec2(cmd.ClipRect.z,cmd.ClipRect.w));
   out->PushTexture(cmd.TexRef);
   if(cmd.UserCallback) out->AddCallback(cmd.UserCallback,cmd.UserCallbackData);
-  else for(unsigned i=0;i+2<cmd.ElemCount;i+=3) {
-   ImDrawVert v[3];
-   for(int k=0;k<3;++k) v[k]=source.VtxBuffer[cmd.VtxOffset+source.IdxBuffer[cmd.IdxOffset+i+k]];
+  else for(unsigned i=0;i+2<cmd.ElemCount;) {
+   // Keep both triangles of a glyph together so all glow is beneath its sharp
+   // original. Per-triangle layering allowed the second halo to blur the first.
+   unsigned count=3;
+   const auto *indices=source.IdxBuffer.Data+cmd.IdxOffset+i;
+   if(i+5<cmd.ElemCount && indices[0]==indices[3] && indices[2]==indices[4]) count=6;
+   ImDrawVert v[6];
+   for(unsigned k=0;k<count;++k) v[k]=source.VtxBuffer[cmd.VtxOffset+indices[k]];
    bool font=false;
    for(const auto *texture:ImGui::GetIO().Fonts->TexList) if(cmd.TexRef._TexData==texture) font=true;
    const bool textured=v[0].uv.x!=v[1].uv.x || v[0].uv.y!=v[1].uv.y || v[0].uv.x!=v[2].uv.x || v[0].uv.y!=v[2].uv.y;
    auto emit=[&](float dx,float dy,float opacity,ImU32 channels) {
-    out->PrimReserve(3,3);
-    for(const auto &vertex:v) {
+    out->PrimReserve(count,count);
+    for(unsigned k=0;k<count;++k) {
+     const auto &vertex=v[k];
      const unsigned alpha=(vertex.col>>IM_COL32_A_SHIFT)&255;
      const ImU32 tint=(vertex.col&channels&~IM_COL32_A_MASK) | (ImU32(alpha*opacity)<<IM_COL32_A_SHIFT);
      out->PrimVtx(ImVec2(vertex.pos.x+dx*pixel,vertex.pos.y+dy*pixel),vertex.uv,tint);
     }
    };
    if(font && textured) {
-    // Low-opacity spread provides a soft halo; offsets stay small for legibility.
-    emit(-1.8f,0,.10f,IM_COL32_WHITE); emit(1.8f,0,.10f,IM_COL32_WHITE);
-    emit(0,-1.8f,.10f,IM_COL32_WHITE); emit(0,1.8f,.10f,IM_COL32_WHITE);
-    emit(-.85f,0,.38f,IM_COL32(255,0,0,255));
-    emit(.85f,0,.38f,IM_COL32(0,255,255,255));
+    // Closely spaced horizontal taps simulate phosphor bleed without creating
+    // vertically displaced letter copies. Cap spread relative to small glyphs.
+    float left=v[0].pos.x,right=left;
+    for(unsigned k=1;k<count;++k) { left=std::min(left,v[k].pos.x); right=std::max(right,v[k].pos.x); }
+    const float limit=std::max(.25f,(right-left)/pixel*.22f);
+    const float radius=std::min(preset.glow_radius,limit),bloom=std::min(preset.bloom_radius,limit);
+    emit(-radius,0,preset.glow_alpha,IM_COL32_WHITE); emit(radius,0,preset.glow_alpha,IM_COL32_WHITE);
+    for(int tap=1;tap<=3;++tap) {
+     const float distance=bloom*tap/3.f;
+     const float opacity=preset.bloom_alpha*std::exp(-float(tap*tap)/4.f);
+     emit(-distance,0,opacity,IM_COL32_WHITE); emit(distance,0,opacity,IM_COL32_WHITE);
+    }
+    const float fringe=std::min(preset.fringe,limit);
+    emit(-fringe,0,preset.fringe_alpha,IM_COL32(255,0,0,255));
+    emit(fringe,0,preset.fringe_alpha,IM_COL32(0,255,255,255));
    }
    emit(0,0,1.f,IM_COL32_WHITE);
+   i+=count;
   }
   out->PopTexture(); out->PopClipRect();
  }
@@ -277,6 +321,7 @@ struct UI {
  float scale = 1.0f, game_fraction = .72f;
  bool fullscreen=false, draft_fullscreen=false;
  int crt=0, draft_crt=0;
+ int crt_strength=1, draft_crt_strength=1;
  float draft_scale=1.f;
  std::string settings_error;
  ImDrawList *game_draw_list=nullptr;
@@ -299,37 +344,40 @@ struct UI {
    game_fraction=std::clamp(j.value("game_fraction",.72f),.2f,.9f);
    fullscreen=j.value("fullscreen",false);
    crt=std::clamp(j.value("crt",0),0,2);
+   crt_strength=std::clamp(j.value("crt_strength",1),0,3);
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect) {
+ bool write_settings(float zoom,bool full,int effect,int strength) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect}}.dump(2);
+  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
  void save_settings() {
-  if(!write_settings(scale,fullscreen,crt)) c.notice("Settings could not be saved.");
+  if(!write_settings(scale,fullscreen,crt,crt_strength)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
   draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
+  draft_crt_strength=crt_strength;
  }
  bool apply_settings(SDL_Window *window) {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
   scale=draft_scale; fullscreen=draft_fullscreen; crt=draft_crt;
+  crt_strength=draft_crt_strength;
   return true;
  }
  void settings_window(SDL_Window *window) {
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x+vp->WorkSize.x*.5f,vp->WorkPos.y+vp->WorkSize.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
   ImGui::SetNextWindowSize(ImVec2(std::min(vp->WorkSize.x-24.f,ImGui::GetFontSize()*28),
-   std::min(vp->WorkSize.y-24.f,ImGui::GetFontSize()*19)),ImGuiCond_Appearing);
+   std::min(vp->WorkSize.y-24.f,ImGui::GetFontSize()*23)),ImGuiCond_Appearing);
   if(ImGui::BeginPopupModal("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings)) {
    const float footer=ImGui::GetFrameHeightWithSpacing()+ImGui::GetStyle().ItemSpacing.y;
    ImGui::BeginChild("Settings contents",ImVec2(0,-footer));
@@ -345,9 +393,12 @@ struct UI {
       }
       ImGui::EndCombo();
      }
-     ImGui::Spacing(); ImGui::TextUnformatted("CRT Effects"); ImGui::SetNextItemWidth(-1);
+     ImGui::Spacing(); ImGui::TextUnformatted("CRT Effects Enabled"); ImGui::SetNextItemWidth(-1);
      const char *effects[]={"Off","Game Window Only","Full"};
      ImGui::Combo("##CRT Effects",&draft_crt,effects,3);
+     ImGui::Spacing(); ImGui::TextUnformatted("CRT Effects Strength"); ImGui::SetNextItemWidth(-1);
+     const char *strengths[]={"Subtle","Classic","Deluxe","Zero Cool"};
+     ImGui::Combo("##CRT Effects Strength",&draft_crt_strength,strengths,4);
      if(!settings_error.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",settings_error.c_str()); }
      ImGui::EndTabItem();
     }
@@ -500,7 +551,7 @@ struct UI {
     draw->AddRect(p,ImVec2(p.x+cw,p.y+ch),IM_COL32(255,225,125,255),0,0,std::max(1.f,display_scale));
    }
   }
-  if(crt==1) crt_effect(draw,start,viewport);
+  if(crt==1) crt_effect(draw,start,viewport,crt_strength);
   if(!ImGui::IsWindowFocused()) grid_focus=false;
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
@@ -855,7 +906,7 @@ int main(int argc,char **argv) {
   }
   ImGui_ImplSDLGPU3_NewFrame(); ImGui_ImplSDL3_NewFrame(); ImGui::NewFrame(); ui.draw(window);
   if(ui.crt==2) {
-   auto vp=ImGui::GetMainViewport(); crt_effect(ImGui::GetForegroundDrawList(),vp->Pos,vp->Size);
+   auto vp=ImGui::GetMainViewport(); crt_effect(ImGui::GetForegroundDrawList(),vp->Pos,vp->Size,ui.crt_strength);
   }
   ImGui::Render();
   auto *render_data=ImGui::GetDrawData();
@@ -866,7 +917,7 @@ int main(int argc,char **argv) {
    crt_data.CmdListsCount=crt_data.TotalIdxCount=crt_data.TotalVtxCount=0;
    for(auto *list:render_data->CmdLists) {
     if(ui.crt==2 || list==ui.game_draw_list) {
-     phosphor_lists.push_back(crt_phosphor(*list)); list=phosphor_lists.back().get();
+     phosphor_lists.push_back(crt_phosphor(*list,ui.crt_strength)); list=phosphor_lists.back().get();
     }
     crt_data.AddDrawList(list);
    }
