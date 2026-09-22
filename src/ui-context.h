@@ -28,6 +28,7 @@ int context_menu_cave(struct chunk *c, int y, int x, int adjacent, int mx,
 int context_menu_object(struct object *obj);
 int context_menu_command(int mx, int my);
 void textui_process_click(ui_event e);
+void textui_process_click_at(ui_event e, struct loc grid);
 struct cmd_info *textui_action_menu_choose(void);
 
 #endif /* UI_CONTEXT_H */

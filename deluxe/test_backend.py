@@ -51,7 +51,7 @@ class Engine:
         except queue.Empty:
             raise AssertionError("Backend timed out: " + "".join(self.errors))
         if j is None:
-            raise AssertionError("Backend exited: " + "".join(self.errors))
+            raise AssertionError(f"Backend exited ({self.process.wait(timeout=2)}): " + "".join(self.errors))
         if j.get("kind") == "event":
             if j["event"] == "state.changed":
                 self.state = j["data"]
@@ -171,13 +171,156 @@ class BackendTests(unittest.TestCase):
         before = e.call("state.get")["result"]
         for _ in range(5):
             self.assertEqual(e.call("state.get")["result"], before)
-        for key in (ord('C'), ord('*')):
+        for key in (ord('C'),):
             e.key(key)
             self.assertNotIn("dungeon", e.state)
             e.key("escape")
             while e.state["readiness"] != "ready":
                 e.key("escape")
             self.assert_semantic_view(e.state)
+
+    def targeting(self, method, **params):
+        e = self.engine
+        old = e.state['revision']
+        result = e.call(method, {'context': e.state['context'], **params})
+        self.assertIn('result', result)
+        return e.next_state(old)
+
+    def test_native_look_target_and_validation(self):
+        e = self.engine
+        e.hello(); e.birth()
+        turn = e.state['turn']
+        x, y = e.state['player']['x'], e.state['player']['y']
+        self.targeting('targeting.begin', mode='look', x=x, y=y)
+        self.assertIn('dungeon', e.state)
+        self.assertEqual(e.state['targeting']['mode'], 'look')
+        self.assertEqual((e.state['targeting']['x'], e.state['targeting']['y']), (x, y))
+        original = e.call('state.get')['result']
+        for _ in range(3):
+            self.assertEqual(e.call('state.get')['result'], original)
+        self.assertEqual(e.call('targeting.select', {'context':'old','x':x,'y':y})['error']['code'], 'stale_revision')
+        for bad in (-1, 0, 9999, 1.5):
+            self.assertEqual(e.call('targeting.select', {'context':e.state['context'],'x':bad,'y':y})['error']['code'], 'invalid_argument')
+        self.targeting('targeting.control', operation='free')
+        e.key('right')
+        self.assertEqual(e.state['targeting']['x'], x+1)
+        self.assertIn('dungeon', e.state)
+        self.targeting('targeting.select', x=x, y=y)
+        self.assertTrue(e.state['targeting']['can_confirm'])
+        self.targeting('targeting.control', operation='next')
+        self.assertIn([e.state['targeting']['x'],e.state['targeting']['y']], e.state['targeting']['candidates'])
+        self.targeting('targeting.control', operation='previous')
+        selected = (e.state['targeting']['x'], e.state['targeting']['y'])
+        e.key(ord('t'))
+        while e.state['readiness'] != 'ready': e.key('enter')
+        self.assertIn('selected_target', e.state)
+        self.assertEqual((e.state['selected_target']['x'], e.state['selected_target']['y']), selected)
+        self.targeting('targeting.begin', mode='look', x=x, y=y)
+        self.targeting('targeting.control', operation='next')
+        self.targeting('targeting.control', operation='previous')
+        self.targeting('targeting.control', operation='confirm')
+        while e.state['readiness'] != 'ready': e.key('enter')
+        self.assertEqual(e.state['turn'], turn)
+        e.key(ord('*'))
+        self.assertIn('dungeon', e.state)
+        self.assertEqual(e.state['targeting']['mode'], 'target')
+        self.assertIsInstance(e.state['targeting']['path'], list)
+        self.targeting('targeting.control', operation='cancel')
+        while e.state['readiness'] != 'ready': e.key('enter')
+        self.assertNotIn('targeting', e.state)
+        self.assertEqual(e.state['turn'], turn)
+        self.assert_semantic_view(e.state)
+
+    def test_immediate_target(self):
+        e = self.engine
+        e.hello(); e.birth()
+        x, y = e.state['player']['x'], e.state['player']['y']
+        turn = e.state['turn']
+        self.assertEqual(e.call('targeting.set', {'context':'old','x':x,'y':y})['error']['code'], 'stale_revision')
+        for params in ({}, {'x':-1,'y':y}, {'x':x+0.5,'y':y}):
+            self.assertEqual(e.call('targeting.set', {'context':e.state['context'],**params})['error']['code'], 'invalid_argument')
+        self.targeting('targeting.set', x=x+1, y=y)
+        self.assertNotIn('targeting', e.state)
+        while e.state['readiness'] != 'ready': e.key('enter')
+        self.assertEqual((e.state['selected_target']['x'],e.state['selected_target']['y']), (x+1,y))
+        self.assertEqual(e.state['turn'],turn)
+        self.assert_semantic_view(e.state)
+        self.targeting('targeting.begin', mode='look')
+        self.assertEqual(e.call('targeting.set', {'context':e.state['context'],'x':x,'y':y})['error']['code'], 'busy')
+
+    def test_native_mouse_walk_and_validation(self):
+        e = self.engine
+        e.hello(); e.birth()
+        x, y = e.state['player']['x'], e.state['player']['y']
+        self.assertEqual(e.call('dungeon.click', {'context':'old','x':x,'y':y})['error']['code'], 'stale_revision')
+        for bad in (-1, 0, 9999, 1.5):
+            self.assertEqual(e.call('dungeon.click', {'context':e.state['context'],'x':bad,'y':y})['error']['code'], 'invalid_argument')
+        catalog = e.call('catalog.get')['result']['features']
+        floors = {f['id'] for f in catalog if f['name'] in ('open floor', 'open door', 'broken door', 'up staircase', 'down staircase')}
+        cells = e.state['map']['actual']
+        # Birth starts on the town staircase, surrounded by walkable squares.
+        destination = next((x+dx,y+dy) for dx,dy in ((1,0),(-1,0),(0,1),(0,-1))
+                           if cells[y+dy][x+dx] in floors)
+        turn = e.state['turn']
+        self.targeting('dungeon.click', x=destination[0], y=destination[1])
+        while e.state['readiness'] != 'ready': e.key('enter')
+        self.assertEqual((e.state['player']['x'],e.state['player']['y']), destination)
+        self.assertGreater(e.state['turn'],turn)
+        self.assert_semantic_view(e.state)
+        self.targeting('targeting.begin', mode='look')
+        self.assertEqual(e.call('dungeon.click', {'context':e.state['context'],'x':x,'y':y})['error']['code'], 'busy')
+        turn = e.state['turn']
+        self.targeting('dungeon.click', x=x, y=y, exit_look=True)
+        while e.state['readiness'] != 'ready': e.key('enter')
+        self.assertNotIn('targeting', e.state)
+        self.assertEqual((e.state['player']['x'],e.state['player']['y']), (x,y))
+        self.assertGreater(e.state['turn'],turn)
+        self.assert_semantic_view(e.state)
+        self.targeting('targeting.begin', mode='target')
+        self.assertEqual(e.call('dungeon.click', {'context':e.state['context'],'x':x,'y':y,'exit_look':True})['error']['code'], 'busy')
+
+    def test_native_aim_cancel_preserves_item_and_turn(self):
+        e = self.engine
+        e.hello(); e.birth()
+        before=e.state
+        item=next(o for o in before['items'] if o['location']=='Pack')
+        e.call('command.execute', {'revision':before['revision'], 'command':'core.throw', 'item':item['id']})
+        e.next_state(before['revision'])
+        self.assertTrue(e.state.get('aiming'), e.screen())
+        self.assertIn('dungeon', e.state)
+        x,y=e.state['player']['x'],e.state['player']['y']
+        self.targeting('targeting.select', x=x+1,y=y)
+        self.assertIn('targeting', e.state)
+        self.assertIn('dungeon', e.state)
+        self.targeting('targeting.control', operation='cancel')
+        self.assertTrue(e.state.get('aiming'))
+        self.targeting('targeting.control', operation='cancel')
+        self.assertEqual(e.state['turn'], before['turn'])
+        self.assertEqual([(o['label'],o['quantity']) for o in e.state['items']], [(o['label'],o['quantity']) for o in before['items']])
+
+    def test_native_ranged_confirmation_uses_engine_action(self):
+        e = self.engine
+        e.hello(); e.birth()
+        before=e.state
+        item=next(o for o in before['items'] if o['location']=='Pack')
+        kind=item['actual']['kind']
+        e.call('command.execute', {'revision':before['revision'], 'command':'core.throw', 'item':item['id']})
+        e.next_state(before['revision'])
+        self.assertTrue(e.state.get('aiming'))
+        self.targeting('targeting.control', operation='target')
+        self.targeting('targeting.control', operation='player')
+        e.key('right')
+        self.assertTrue(e.state['targeting']['can_confirm'])
+        self.targeting('targeting.control', operation='confirm')
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.key('enter')
+        self.assertEqual(e.state['readiness'],'ready')
+        self.assertGreater(e.state['turn'],before['turn'])
+        remaining=sum(o['quantity'] for o in e.state['items'] if o['location']=='Pack' and o['actual']['kind']==kind)
+        self.assertEqual(remaining,item['quantity']-1)
+        self.assertNotIn('targeting',e.state)
+        self.assert_semantic_view(e.state)
 
     def test_message_acknowledgement_keeps_dungeon(self):
         e = self.engine
@@ -414,6 +557,21 @@ class BackendTests(unittest.TestCase):
         for item in dungeon["items"]:
             self.assertEqual(e.call("inspect.get", {"handle": item["id"]})["result"], item)
         self.assertEqual(e.call("state.get")["result"], dungeon)
+        # Look beyond the original viewport: camera movement and cancellation
+        # must stay semantic and must not move the player or advance the turn.
+        self.targeting('targeting.begin',mode='look')
+        far_x=len(dungeon['map']['actual'][0])-2
+        far_y=len(dungeon['map']['actual'])-2
+        self.targeting('targeting.select',x=far_x,y=far_y)
+        view=e.state['dungeon']
+        self.assertLessEqual(view['x'],far_x)
+        self.assertLess(far_x,view['x']+view['width'])
+        self.assertLessEqual(view['y'],far_y)
+        self.assertLess(far_y,view['y']+view['height'])
+        self.assertEqual((e.state['targeting']['x'],e.state['targeting']['y']),(far_x,far_y))
+        self.targeting('targeting.control',operation='cancel')
+        self.assertEqual(e.state['turn'],dungeon['turn'])
+        self.assert_semantic_view(e.state)
         # The return stairs also exercise the '<' codepoint and another level change.
         e.key(ord("<"))
         while e.state["readiness"] != "ready":
@@ -473,6 +631,25 @@ class BackendTests(unittest.TestCase):
             engine.next_state(None)
             while engine.state["readiness"] != "ready":
                 engine.key("enter")
+            # Exercise the native targeting controls and the equivalent keys
+            # from identical saves before comparing gameplay/RNG outcomes.
+            for operation, key in [('begin',ord('l')),('free',ord('o')),('player',ord('p'))]:
+                if semantic:
+                    old=engine.state['revision']
+                    method='targeting.begin' if operation=='begin' else 'targeting.control'
+                    engine.call(method, {'context':engine.state['context'],'mode':'look','operation':operation})
+                    engine.next_state(old)
+                else:
+                    engine.key(key)
+                self.assertIn('dungeon', engine.state)
+            engine.key('right')
+            if semantic:
+                old=engine.state['revision']
+                engine.call('targeting.control', {'context':engine.state['context'],'operation':'confirm'})
+                engine.next_state(old)
+            else:
+                engine.key(ord('t'))
+            while engine.state['readiness'] != 'ready': engine.key('enter')
             for _ in range(5):
                 if semantic:
                     state = engine.call("state.get")["result"]

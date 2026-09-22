@@ -6,6 +6,22 @@ static bool *deluxe_cells_valid;
 static int deluxe_width, deluxe_height;
 static unsigned long deluxe_level;
 
+/* Looking may cycle over terrain/items as well as monsters. Confirm those as
+ * locations using the engine's existing free-cursor controls. Kill targeting
+ * retains its ordinary monster eligibility checks. */
+static bool deluxe_look_location(void)
+{
+ return target_ui_current && (target_ui_current->mode&TARGET_LOOK) &&
+  target_ui_current->interesting && !target_ui_current->can_confirm &&
+  square_in_bounds_fully(cave,target_ui_current->grid);
+}
+static void deluxe_target_key(int key)
+{
+ if(!screen_save_depth && deluxe_look_location() &&
+    (key=='t' || key=='5' || key=='0' || key=='.')) Term_keypress('o',0);
+ Term_keypress(key,0);
+}
+
 static void deluxe_reset_view(void)
 {
  mem_free(deluxe_cells); mem_free(deluxe_cells_valid);
@@ -28,8 +44,9 @@ static void deluxe_capture_view(cJSON *state_record)
 {
  int x, y, width, height;
  cJSON *view, *rows;
- /* Nested screens and targeting own the full terminal. No guesses from glyphs. */
- if ((!ready && !textui_message_pending) || active_prompt || screen_save_depth || !streq(phase,"playing") || !deluxe_cells) return;
+ /* Native targeting/aiming share the dungeon; nested recall screens still own
+  * the terminal. Presentation mode never depends on parsing terminal text. */
+ if ((!ready && !textui_message_pending && !target_ui_current && !textui_aiming) || active_prompt || screen_save_depth || !streq(phase,"playing") || !deluxe_cells) return;
  width = MIN(SCREEN_WID, cave->width - terminal.offset_x);
  height = MIN(SCREEN_HGT, cave->height - terminal.offset_y);
  if (width < 1 || height < 1 || terminal.offset_x < 0 || terminal.offset_y < 0) return;
@@ -51,6 +68,24 @@ static void deluxe_capture_view(cJSON *state_record)
   cJSON_AddItemToArray(rows,row);
  }
  cJSON_AddItemToObject(view,"cells",rows); cJSON_AddItemToObject(state_record,"dungeon",view);
+ if (target_ui_current) {
+  const struct target_ui_state *t=target_ui_current;
+  cJSON *selection=cJSON_CreateObject(), *candidates=cJSON_CreateArray(), *path=cJSON_CreateArray();
+  int i;
+  string(selection,"mode",(t->mode&TARGET_KILL)?"target":"look");
+  number(selection,"x",t->grid.x); number(selection,"y",t->grid.y);
+  json_bool(selection,"interesting",t->interesting); json_bool(selection,"can_confirm",t->can_confirm || deluxe_look_location());
+  for(i=0;i<t->candidates->n;++i) {
+   int xy[2]={t->candidates->pts[i].x,t->candidates->pts[i].y};
+   cJSON_AddItemToArray(candidates,ints(xy,2));
+  }
+  if(t->mode&TARGET_KILL) for(i=0;i<t->path_length;++i) {
+   int xy[2]={t->path[i].x,t->path[i].y}; cJSON_AddItemToArray(path,ints(xy,2));
+  }
+  cJSON_AddItemToObject(selection,"candidates",candidates); cJSON_AddItemToObject(selection,"path",path);
+  cJSON_AddItemToObject(state_record,"targeting",selection);
+ }
+ json_bool(state_record,"aiming",textui_aiming);
 }
 static void deluxe_character_details(cJSON *p)
 {

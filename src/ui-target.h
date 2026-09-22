@@ -21,6 +21,20 @@
 #define UI_TARGET_H
 
 #include "ui-event.h"
+#include "z-type.h"
+
+struct point_set;
+/* Valid only while the original target loop awaits input. */
+struct target_ui_state {
+	struct loc grid;
+	int mode;
+	bool interesting, can_confirm;
+	const struct point_set *candidates;
+	const struct loc *path;
+	int path_length;
+};
+extern const struct target_ui_state *target_ui_current;
+bool target_ui_select(struct loc grid);
 
 /**
  * Convert a "key event" into a "location" (Y)

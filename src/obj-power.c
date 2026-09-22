@@ -1159,7 +1159,10 @@ int object_value_real(const struct object *obj, int qty)
 			}
 		} else if (power < 0) {
 			if (a > 0) {
-				if (power > INT_MIN && power >= (INT_MIN / (-power) + b) / a) {
+				/* Keep the overflow guard itself in wide arithmetic. Some
+				 * Windows optimizers rewrite division by -power using power,
+				 * which can otherwise trap on INT_MIN / -1. */
+				if (power > INT_MIN && power >= ((int64_t)INT_MIN / -(int64_t)power + b) / a) {
 					value = -power * (power * a - b);
 				} else {
 					value = INT_MIN;

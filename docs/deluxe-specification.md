@@ -26,13 +26,24 @@ implementation decisions below; these supersede conflicting original requirement
   call map helpers again from API queries: memory updates and hallucination RNG
   must occur exactly as they do during normal play. Cache invalidation must cover
   level changes, camera changes and new characters. Repeated queries are pure.
-- Terminal fallback remains for birth, stores, targeting, character sheets,
+- Terminal fallback remains for birth, stores, dedicated recall screens, character sheets,
   knowledge screens, nested selections and post-death interactions. Transitions
   preserve engine input contexts, cursor visibility and confirmations. Removing
   the terminal sidebar from normal play must not remove its useful information:
   rank, progression, resources, stats, armour, speed, conditions, tracked health,
   light, terrain/traps underfoot, level feelings and pending activities belong in
   Deluxe's information panel or existing inventory/equipment views.
+- Native look/target interactions use the engine's existing cursor, candidate
+  cycling, free movement, camera and projection path. Hover inspects a tile;
+  normal left-click uses Angband mouse movement (including adjacent melee).
+  Right-click opens Move here / Look / Target actions; Target immediately
+  selects an eligible monster or the clicked location without opening a mode; during targeting,
+  left-click relocates the cursor without confirming. The Look / Target tab offers confirmation, cancellation and cycling.
+  Aim-direction prompts also retain the dungeon, with keyboard direction input
+  or click-to-target. Engine checks and confirmations remain authoritative;
+  projection paths are not promises of damage, hit chance or spell area effects.
+  Dedicated monster/object recall may still use terminal fallback. Inspection
+  reads existing snapshots and does not issue gameplay commands on hover.
 - Main menu contains Characters, an inline right-aligned New character button,
   and save rename/delete actions. Ask for the save name when creating a character.
   No title banner, explanatory boilerplate, messages or gameplay side panels.
@@ -60,7 +71,7 @@ implementation decisions below; these supersede conflicting original requirement
   separate from normal gameplay commands, validated at legal engine boundaries,
   and use normal damage/death handling. They do not redefine game balance.
 - Cross-platform backend packages, alternate-variant conformance, complete native
-  birth/store/targeting flows, controller support and screen-reader validation
+  birth/store flows, advanced spell-area previews, controller support and screen-reader validation
   remain future work, not claims about the current prototype.
 
 ## 1. Product intent
@@ -388,3 +399,17 @@ support and packaging/signing tooling. None requires a change to game balance.
 
 The protocol and backend compatibility details are specified in
 [the companion API design](deluxe-api.md).
+
+### Gameplay preferences
+
+Settings includes a Gameplay tab with Proceed with click (default off).
+When enabled, a left-click in the game view acknowledges a pending - more -
+message. The same click never also moves or targets. Other prompts and UI
+controls are unaffected. The option is persisted only on Save and Close;
+Cancel discards the draft.
+
+Gameplay also offers Click exits look (default off). When enabled, a left-click
+on a tile during Look exits Look and sends that click through the normal
+engine movement/attack handler, preserving its world location and modifiers.
+Combat targeting and aim prompts retain tile selection. Save and Close applies
+and persists the preference; Cancel discards it.

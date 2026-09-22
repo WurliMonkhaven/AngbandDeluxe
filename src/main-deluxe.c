@@ -22,6 +22,7 @@
 #include "player-util.h"
 #include "player-timed.h"
 #include "ui-command.h"
+#include "ui-context.h"
 #include "ui-display.h"
 #include "ui-game.h"
 #include "ui-init.h"
@@ -29,6 +30,8 @@
 #include "ui-object.h"
 #include "ui-keymap.h"
 #include "ui-map.h"
+#include "ui-target.h"
+#include "target.h"
 #include "ui-output.h"
 #include "trap.h"
 #include "ui-term.h"
@@ -36,6 +39,9 @@
 #include <locale.h>
 #ifdef WINDOWS
 #include <windows.h>
+
+
+
 #else
 #include <sys/select.h>
 #include <unistd.h>
@@ -50,6 +56,12 @@ static unsigned long revision, sequence, context_id;
 static char revision_text[32], context_text[32];
 static const char *phase = "launcher";
 static int debug_damage;
+static int native_target_mode;
+static bool native_target_immediate;
+static struct loc native_target_grid;
+static bool click_after_look;
+static struct loc look_click_grid;
+static int look_click_mods;
 static char action[80];
 static cJSON *snapshot, *reply_value, *active_prompt;
 static cJSON *next_choices;
@@ -326,6 +338,13 @@ static cJSON *capture(void)
   deluxe_character_details(p);
   number(p, "speed", player->state.speed - 110); number(p, "armour", player->known_state.ac + player->known_state.to_a);
   number(p, "x", player->grid.x); number(p, "y", player->grid.y);
+  if(target_is_set()) {
+   struct loc grid; cJSON *selection=cJSON_CreateObject(); target_get(&grid);
+   number(selection,"x",grid.x); number(selection,"y",grid.y);
+   struct monster *tracked=target_get_monster();
+   json_bool(selection,"monster",tracked && tracked->race);
+   cJSON_AddItemToObject(s,"selected_target",selection);
+  }
   cJSON_AddItemToObject(p, "stats", ints(player->known_state.stat_use, STAT_MAX));
   cJSON_AddItemToObject(p, "actual_stats", ints(player->state.stat_use, STAT_MAX));
   { cJSON *statuses = cJSON_CreateArray();
@@ -374,6 +393,7 @@ static cJSON *capture(void)
    number(j, "hp", m->hp); number(j, "max_hp", m->maxhp);
    number(j, "glyph", m->race->d_char); number(j, "color", m->race->d_attr);
    json_bool(j, "visible", monster_is_visible(m)); json_bool(j, "asleep", m->m_timed[MON_TMD_SLEEP] > 0);
+   { char description[160]=""; look_mon_desc(description,sizeof(description),i); string(j,"condition",description); }
    cJSON_AddItemToArray(monsters, j);
   }
  }
@@ -505,7 +525,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -573,6 +593,68 @@ static void pump(void)
    (streq(type, "quantity") && cJSON_IsNumber(v) && v->valuedouble == v->valueint && v->valueint >= 0 && v->valueint <= num(active_prompt, "maximum", 0))))
    error(id, "invalid_argument", "Invalid prompt value.");
   else { reply_value = cJSON_Duplicate(v, true); response(id, cJSON_CreateObject()); }
+ } else if (streq(method,"dungeon.click")) {
+  bool exit_look=cJSON_IsTrue(cJSON_GetObjectItem(p,"exit_look")) && target_ui_current && (target_ui_current->mode&TARGET_LOOK);
+  cJSON *jx=cJSON_GetObjectItem(p,"x"), *jy=cJSON_GetObjectItem(p,"y");
+  struct loc grid=loc(num(p,"x",-1),num(p,"y",-1));
+  if(active_prompt || !streq(str(p,"context"),context_text)) error(id,"stale_revision","Input context changed.");
+  else if((!ready && !exit_look) || !character_generated || !streq(phase,"playing") || screen_save_depth || !cJSON_GetObjectItem(snapshot,"dungeon") || textui_message_pending)
+   error(id,"busy","Return to normal play before moving.");
+  else if(!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) || jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint || !square_in_bounds_fully(cave,grid) ||
+          grid.x<terminal.offset_x || grid.y<terminal.offset_y || grid.x>=terminal.offset_x+SCREEN_WID || grid.y>=terminal.offset_y+SCREEN_HGT)
+   error(id,"invalid_argument","Select an interior tile in the current viewport.");
+  else if(!OPT(player,mouse_movement)) error(id,"invalid_argument","Mouse movement is disabled in Angband's interface options.");
+  else {
+   int mods=(cJSON_IsTrue(cJSON_GetObjectItem(p,"shift"))?KC_MOD_SHIFT:0) |
+    (cJSON_IsTrue(cJSON_GetObjectItem(p,"control"))?KC_MOD_CONTROL:0) |
+    (cJSON_IsTrue(cJSON_GetObjectItem(p,"alt"))?KC_MOD_ALT:0);
+   if(exit_look) {
+    click_after_look=true; look_click_grid=grid; look_click_mods=mods;
+    Term_keypress(ESCAPE,0);
+   } else Term_mousepress(COL_MAP+(grid.x-terminal.offset_x)*tile_width,ROW_MAP+(grid.y-terminal.offset_y)*tile_height,(char)(1|(mods<<4)));
+   response(id,cJSON_CreateObject());
+  }
+ } else if (streq(method, "targeting.set") || streq(method, "targeting.begin") || streq(method, "targeting.select") || streq(method, "targeting.control")) {
+  const char *operation=str(p,"operation");
+  bool immediate=streq(method,"targeting.set");
+  bool begin=immediate || streq(method,"targeting.begin"), select=streq(method,"targeting.select");
+  cJSON *jx=cJSON_GetObjectItem(p,"x"), *jy=cJSON_GetObjectItem(p,"y");
+  struct loc grid=loc(num(p,"x",-1),num(p,"y",-1));
+  if(active_prompt || !streq(str(p,"context"),context_text)) error(id,"stale_revision","Input context changed.");
+  else if(!character_generated || !streq(phase,"playing") || screen_save_depth || !cJSON_GetObjectItem(snapshot,"dungeon"))
+   error(id,"busy","Return to the dungeon view first.");
+  else if(begin && (!ready || target_ui_current || textui_aiming)) error(id,"busy","Finish the current interaction first.");
+  else if(!begin && !target_ui_current && !textui_aiming) error(id,"busy","No targeting interaction is active.");
+  else if((immediate || select || jx || jy) && (!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) || jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint || !square_in_bounds_fully(cave,grid)))
+   error(id,"invalid_argument","Select an interior dungeon tile.");
+  else if(begin) {
+   const char *mode=immediate?"target":str(p,"mode");
+   if(!streq(mode,"look") && !streq(mode,"target")) error(id,"invalid_argument","Unknown targeting mode.");
+   else {
+    native_target_mode=streq(mode,"look")?TARGET_LOOK:TARGET_KILL;
+    native_target_immediate=immediate;
+    native_target_grid=jx?grid:loc(-1,-1);
+    ready=false;
+    /* Wake the command boundary without interpreting a rebindable play key. */
+    Term_keypress(ESCAPE,0); response(id,cJSON_CreateObject());
+   }
+  } else if(select) {
+   if(target_ui_current) { target_ui_select(grid); response(id,cJSON_CreateObject()); }
+   else {
+    /* The engine's aim-direction handler already accepts a mouse location. */
+    if(grid.x<terminal.offset_x || grid.y<terminal.offset_y || grid.x>=terminal.offset_x+SCREEN_WID || grid.y>=terminal.offset_y+SCREEN_HGT)
+     error(id,"invalid_argument","Select a tile in the current viewport.");
+    else { Term_mousepress(COL_MAP+grid.x-terminal.offset_x,ROW_MAP+grid.y-terminal.offset_y,1); response(id,cJSON_CreateObject()); }
+   }
+  } else {
+   int key=streq(operation,"cancel")?ESCAPE:streq(operation,"next")?'+':streq(operation,"previous")?'-':
+    streq(operation,"free")?'o':streq(operation,"interesting")?'m':streq(operation,"player")?'p':
+    streq(operation,"confirm")?'t':streq(operation,"recall")?'r':streq(operation,"target")?'*':0;
+   if(!key) error(id,"invalid_argument","Unknown targeting operation.");
+   else if(textui_aiming && key!=ESCAPE && key!='*') error(id,"invalid_argument","Choose a direction or enter targeting first.");
+   else if(key=='t' && !target_ui_current->can_confirm && !deluxe_look_location()) error(id,"invalid_argument","This selection cannot be confirmed.");
+   else { deluxe_target_key(key); response(id,cJSON_CreateObject()); }
+  }
  } else if (streq(method, "terminal.input")) {
   int key = num(p, "key", -1);
   const char *name = str(p, "key");
@@ -586,7 +668,7 @@ static void pump(void)
   else if (streq(name, "right")) key = ARROW_RIGHT;
   if (active_prompt || !streq(str(p, "context"), context_text)) error(id, "stale_revision", "Input context changed.");
   else if (key < 1 || key > 0x10ffff) error(id, "invalid_argument", "Invalid key.");
-  else { Term_keypress(key, 0); response(id, cJSON_CreateObject()); }
+  else { deluxe_target_key(key); response(id, cJSON_CreateObject()); }
  } else if (streq(method, "command.execute")) {
   if (!ready || active_prompt) error(id, "busy", "Finish the current prompt first.");
   else if (!streq(str(p, "revision"), revision_text)) error(id, "stale_revision", "State changed; choose again.");
@@ -654,8 +736,26 @@ static errr get_command(cmd_context context)
 {
  if (context != CTX_GAME) return textui_get_cmd(context);
  phase = "playing"; ready = true;
+ if(click_after_look) {
+  ui_event click={0}; click.type=EVT_MOUSE; click.mouse.button=1; click.mouse.mods=look_click_mods;
+  click_after_look=false; ready=false;
+  textui_process_click_at(click,look_click_grid);
+  return 0;
+ }
  {
   errr result = textui_get_cmd(context);
+  if(native_target_mode) {
+   const int mode=native_target_mode; native_target_mode=0;
+   if(native_target_immediate) {
+    struct monster *mon=square_monster(cave,native_target_grid);
+    native_target_immediate=false;
+    if(target_able(mon)) target_set_monster(mon);
+    else target_set_location(native_target_grid.y,native_target_grid.x);
+    msg("Target Selected.");
+   }
+   else if(target_set_interactive(mode,native_target_grid.x,native_target_grid.y,true)) msg("Target Selected.");
+   else if(mode&TARGET_KILL) msg("Target Aborted.");
+  }
   if (debug_damage) {
    int damage = debug_damage; debug_damage = 0; ready = false;
    take_hit(player, damage, "Deluxe developer tools");

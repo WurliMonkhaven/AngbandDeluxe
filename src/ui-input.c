@@ -1610,6 +1610,8 @@ static bool textui_get_rep_dir(int *dp, bool allow_5)
  * Note that "Force Target", if set, will pre-empt user interaction,
  * if there is a usable target already set.
  */
+bool textui_aiming;
+
 static bool textui_get_aim_dir(int *dp)
 {
 	/* Global direction */
@@ -1639,7 +1641,10 @@ static bool textui_get_aim_dir(int *dp)
 			p = "Direction ('5' for target, '*' or <click> to re-target, Escape to cancel)? ";
 
 		/* Get a command (or Cancel) */
-		if (!get_com_ex(p, &ke)) break;
+		textui_aiming = true;
+		bool got_direction = get_com_ex(p, &ke);
+		textui_aiming = false;
+		if (!got_direction) break;
 
 		if (ke.type == EVT_MOUSE) {
 			if (ke.mouse.button == 1) {

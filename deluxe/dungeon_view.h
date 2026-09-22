@@ -6,7 +6,7 @@
 // A separate semantic presentation stream, not a crop or interpretation of
 // terminal text. Unavailable/unsupported views deliberately use terminal fallback.
 inline const nlohmann::json *dungeon_view(const nlohmann::json &state) {
- if(state.value("phase","")!="playing" || (state.value("readiness","")!="ready" && !state.value("message_pending",false))) return nullptr;
+ if(state.value("phase","")!="playing" || (state.value("readiness","")!="ready" && !state.value("message_pending",false) && !state.contains("targeting") && !state.value("aiming",false))) return nullptr;
  auto it=state.find("dungeon");
  if(it==state.end() || !it->is_object() || !it->contains("cells")) return nullptr;
  const auto &cells=it->at("cells");
@@ -44,3 +44,9 @@ struct RenderGrid {
   }
  }
 };
+
+inline bool grid_cell_at(float x,float y,float cw,float ch,size_t width,size_t height,int &column,int &row) {
+ if(cw<=0 || ch<=0 || x<0 || y<0 || x>=cw*width || y>=ch*height) return false;
+ column=int(x/cw); row=int(y/ch);
+ return true;
+}

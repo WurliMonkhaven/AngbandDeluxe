@@ -76,6 +76,7 @@ struct Connection {
  std::string outgoing, diagnostic, menu_error;
  std::deque<json> messages;
  json previous_messages = json::array();
+ json capabilities = json::object();
  std::map<std::string,std::string> requests;
  unsigned long next = 0;
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
@@ -162,6 +163,7 @@ struct Connection {
   }
   const auto &result = j.at("result");
   if (method == "hello") {
+   capabilities=result.value("capabilities",json::object());
    negotiated = true; send("saves.list"); send("commands.list");
   } else if (method == "saves.list") { saves = result; busy=false; }
   else if (method == "saves.rename" || method == "saves.delete") { menu_error.clear(); send("saves.list"); }
@@ -204,10 +206,16 @@ struct Connection {
   else if(batch.finished) process_stopped(exit_code);
  }
  bool ready() const { return connected && !busy && prompt.empty() && state.value("readiness","") == "ready"; }
+ bool native_targeting() const { return capabilities.value("interaction.targeting",0)>0; }
+ bool mouse_movement() const { return capabilities.value("interaction.mouse",0)>0; }
  bool key(const json &k) {
   if (!connected || busy || !prompt.empty() || state.empty()) return false;
   send("terminal.input",{{"context",state.value("context","")},{"key",k}}); busy = true;
   return true;
+ }
+ void target(const std::string &method,json params=json::object()) {
+  if(!connected || busy || !prompt.empty()) return;
+  params["context"]=state.value("context",""); send(method,std::move(params)); busy=true;
  }
  void command(const std::string &id, const std::string &item = "") {
   if (!ready()) return;
@@ -270,6 +278,11 @@ struct UI {
  bool grid_focus = false, focus_requested = false, window_active = true;
  bool return_from_prompt = false;
  bool message_search_open = false;
+ bool targeting_was_active=false;
+ bool proceed_with_click=false, draft_proceed_with_click=false;
+ bool click_exits_look=false, draft_click_exits_look=false;
+ int grid_menu_x=0,grid_menu_y=0;
+ std::string grid_menu_context;
  float display_scale = 1.f;
  ImGuiStyle base_style;
  char item_filter[128]{}, message_filter[128]{}, command_filter[128]{}, save_name[65] = "Adventurer";
@@ -283,6 +296,8 @@ struct UI {
    scale=std::clamp(j.value("scale",1.f),0.75f,1.5f);
    game_fraction=std::clamp(j.value("game_fraction",.72f),.2f,.9f);
    fullscreen=j.value("fullscreen",false);
+   proceed_with_click=j.value("proceed_with_click",false);
+   click_exits_look=j.value("click_exits_look",false);
    low_animation=j.value("low_health_animation",true); death_animation=j.value("death_animation",true);
    crt=std::clamp(j.value("crt",0),0,2);
    crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
@@ -292,17 +307,19 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"low_health_animation",low},{"death_animation",death}}.dump(2);
+  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
  void save_settings() {
-  if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation)) c.notice("Settings could not be saved.");
+  if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
+  draft_proceed_with_click=proceed_with_click;
+  draft_click_exits_look=click_exits_look;
   draft_low_animation=low_animation; draft_death_animation=death_animation;
   draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
   draft_crt_strength=crt_strength; draft_crt_settings=crt_settings;
@@ -311,11 +328,13 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
   low_animation=draft_low_animation; death_animation=draft_death_animation;
+  proceed_with_click=draft_proceed_with_click;
+  click_exits_look=draft_click_exits_look;
   scale=draft_scale; fullscreen=draft_fullscreen; crt=draft_crt;
   crt_strength=draft_crt_strength; crt_settings=draft_crt_settings;
   return true;
@@ -340,6 +359,12 @@ struct UI {
       }
       ImGui::EndCombo();
      }
+     ImGui::EndTabItem();
+    }
+    if(ImGui::BeginTabItem("Gameplay")) {
+     ImGui::Spacing(); ImGui::Checkbox("Proceed with click",&draft_proceed_with_click);
+     ImGui::TextWrapped("Left-click the game view to continue at - more -.");
+     ImGui::Spacing(); ImGui::Checkbox("Click exits look",&draft_click_exits_look);
      ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("Animations")) {
@@ -403,7 +428,16 @@ struct UI {
   }
  }
  void focus_game() { focus_requested=true; keys.clear(); }
- void execute(const std::string &id,const std::string &item="") { c.command(id,item); focus_game(); }
+ bool proceed_click() {
+  if(!proceed_with_click || !c.state.value("message_pending",false)) return false;
+  if(!c.key(32)) return false;
+  focus_game(); return true;
+ }
+ void execute(const std::string &id,const std::string &item="") {
+  if(c.native_targeting() && (id=="core.look" || id=="core.target")) c.target("targeting.begin",{{"mode",id=="core.look"?"look":"target"}});
+  else c.command(id,item);
+  focus_game();
+ }
  bool owns_keyboard() const {
   return c.state.contains("terminal") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
    && !quit_dialog && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId);
@@ -520,6 +554,7 @@ struct UI {
   const ImVec2 origin(start.x+(viewport.x-size.x)*.5f,start.y+(viewport.y-size.y)*.5f);
   ImGui::InvisibleButton("Dungeon keyboard surface",viewport,ImGuiButtonFlags_EnableNav);
   if (ImGui::IsItemClicked()) grid_focus = true;
+  if(ImGui::IsItemClicked()) proceed_click();
   if(ImGui::IsItemFocused()) grid_focus=true;
   auto draw=ImGui::GetWindowDrawList();
   game_draw_list=draw; game_pos=ImGui::GetWindowPos(); game_size=ImGui::GetWindowSize();
@@ -530,6 +565,74 @@ struct UI {
     const ImVec2 at(origin.x+float(x)*cw,origin.y+float(y)*ch);
     draw->AddText(ImGui::GetFont(),pixels,at,color(cell.color),utf8(cell.glyph).c_str());
    }
+  }
+  if(grid.semantic) {
+   const auto &view=c.state["dungeon"];
+   const int ox=view.value("x",0),oy=view.value("y",0);
+   auto outline=[&](int x,int y,ImU32 ink,float thickness) {
+    x-=ox; y-=oy;
+    if(x<0 || y<0 || size_t(x)>=grid.width || size_t(y)>=grid.height) return;
+    const ImVec2 at(origin.x+x*cw,origin.y+y*ch);
+    draw->AddRect(at,ImVec2(at.x+cw,at.y+ch),ink,0,0,thickness);
+   };
+   if(c.state.contains("targeting")) {
+    const auto &t=c.state["targeting"];
+    for(const auto &point:t["path"]) {
+     const int x=point[0].get<int>()-ox,y=point[1].get<int>()-oy;
+     if(x>=0 && y>=0 && size_t(x)<grid.width && size_t(y)<grid.height)
+      draw->AddCircleFilled(ImVec2(origin.x+(x+.5f)*cw,origin.y+(y+.5f)*ch),std::max(1.f,display_scale),IM_COL32(240,205,100,190));
+    }
+    outline(t.value("x",0),t.value("y",0),IM_COL32(255,225,125,255),2.f*display_scale);
+   } else if(c.state.contains("selected_target")) {
+    const auto &t=c.state["selected_target"];
+    outline(t.value("x",0),t.value("y",0),IM_COL32(210,175,85,200),display_scale);
+   }
+   int x,y;
+   const auto mouse=ImGui::GetMousePos();
+   if(ImGui::IsItemHovered() && grid_cell_at(mouse.x-origin.x,mouse.y-origin.y,cw,ch,grid.width,grid.height,x,y)) {
+    x+=ox; y+=oy;
+    outline(x,y,IM_COL32(140,185,220,190),display_scale);
+    ImGui::BeginTooltip(); ImGui::PushTextWrapPos(ImGui::GetFontSize()*26);
+    tile_details(x,y,false); ImGui::PopTextWrapPos(); ImGui::EndTooltip();
+    if(ImGui::IsMouseClicked(0) && c.native_targeting() && !c.busy && !c.state.value("message_pending",false)) {
+     const bool active=c.state.contains("targeting") || c.state.value("aiming",false);
+     if(active || (c.ready() && c.mouse_movement())) {
+      const auto &io=ImGui::GetIO();
+      const bool exit_look=click_exits_look && c.state.contains("targeting") && c.state["targeting"].value("mode","")=="look";
+      c.target(active && !exit_look?"targeting.select":"dungeon.click",{{"x",x},{"y",y},{"exit_look",exit_look},{"shift",io.KeyShift},{"control",io.KeyCtrl},{"alt",io.KeyAlt}});
+      focus_game();
+     }
+    }
+    if(ImGui::IsMouseClicked(1) && c.native_targeting() && !c.state.value("message_pending",false)) {
+     grid_menu_x=x; grid_menu_y=y; grid_menu_context=c.state.value("context","");
+     keys.clear(); ImGui::OpenPopup("Dungeon actions");
+    }
+   }
+  }
+  if(ImGui::BeginPopup("Dungeon actions")) {
+   const bool active=c.state.contains("targeting") || c.state.value("aiming",false);
+   const bool usable=!c.busy && grid_menu_context==c.state.value("context","") && c.state.contains("dungeon") && !c.state.value("message_pending",false);
+   auto choose=[&](const char *label,const char *method,json extra=json::object()) {
+    if(ImGui::MenuItem(label)) {
+     extra["x"]=grid_menu_x; extra["y"]=grid_menu_y;
+     c.target(method,std::move(extra)); focus_game();
+    }
+   };
+   ImGui::BeginDisabled(!usable);
+   if(active) {
+    choose("Select tile","targeting.select");
+    if(ImGui::MenuItem("Cancel")) { c.target("targeting.control",{{"operation","cancel"}}); focus_game(); }
+   } else {
+    ImGui::BeginDisabled(!c.ready());
+    ImGui::BeginDisabled(!c.mouse_movement());
+    choose("Move here","dungeon.click");
+    ImGui::EndDisabled();
+    ImGui::Separator();
+    choose("Look","targeting.begin",{{"mode","look"}});
+    choose("Target","targeting.set");
+    ImGui::EndDisabled();
+   }
+   ImGui::EndDisabled(); ImGui::EndPopup();
   }
   if(!grid.semantic && c.state.contains("cursor")) {
    const auto &cursor=c.state["cursor"];
@@ -616,6 +719,53 @@ struct UI {
     ImGui::ProgressBar(resource_fraction(m.value("hp",0),m.value("max_hp",0)),ImVec2(-1,0),text);
    } else ImGui::TextUnformatted("Tracked creature: out of sight");
   }
+ }
+ void tile_details(int x,int y,bool full) {
+  ImGui::Text("Tile %d, %d",x,y);
+  const auto &view=c.state["dungeon"];
+  const int vx=x-view.value("x",0),vy=y-view.value("y",0);
+  if(vx>=0 && vy>=0 && vx<view.value("width",0) && vy<view.value("height",0)) {
+   const int feature=view["cells"][vy][vx][8];
+   if(c.catalog.contains("features") && feature>=0 && size_t(feature)<c.catalog["features"].size())
+    ImGui::TextWrapped("%s",display_label(c.catalog["features"][feature].value("name","Unknown terrain")).c_str());
+   if(view["cells"][vy][vx][11].get<int>()) ImGui::TextUnformatted("Hallucinating");
+  }
+  if(c.state.contains("player") && c.state["player"].value("x",-1)==x && c.state["player"].value("y",-1)==y)
+   ImGui::TextUnformatted(c.state["player"].value("name","You").c_str());
+  if(c.state.contains("monsters")) for(const auto &m:c.state["monsters"]) {
+   if(m.value("x",-1)!=x || m.value("y",-1)!=y || !m.value("visible",false)) continue;
+   ImGui::TextWrapped("%s",display_label(m.value("name","")).c_str());
+   ImGui::Text("HP %d / %d",m.value("hp",0),m.value("max_hp",0));
+   if(m.contains("condition")) ImGui::TextWrapped("%s",display_label(m.value("condition","")).c_str());
+   else if(m.value("asleep",false)) ImGui::TextUnformatted("Asleep");
+  }
+  if(c.state.contains("items")) for(const auto &o:c.state["items"]) {
+   if(o.value("location","")!="Floor" || o.value("x",-1)!=x || o.value("y",-1)!=y) continue;
+   ImGui::TextWrapped("%s",o.value("label","").c_str());
+   if(full) ImGui::TextWrapped("%s",o.value("description","").c_str());
+  }
+ }
+ void targeting_panel() {
+  const bool aiming=c.state.value("aiming",false);
+  auto action=[&](const char *label,const char *operation) {
+   if(ImGui::Button(label)) { c.target("targeting.control",{{"operation",operation}}); focus_game(); }
+  };
+  ImGui::BeginDisabled(c.busy);
+  if(aiming) {
+   ImGui::TextWrapped("Choose a direction, or click a tile to aim. Escape cancels.");
+   action("Choose target","target"); ImGui::SameLine(); action("Cancel","cancel");
+  } else {
+   const auto &t=c.state["targeting"];
+   ImGui::TextUnformatted(t.value("mode","")=="look"?"Looking":"Targeting");
+   ImGui::TextUnformatted(t.value("interesting",false)?"Interesting tiles":"Free cursor");
+   ImGui::BeginDisabled(!t.value("can_confirm",false)); action("Set target [t]","confirm"); ImGui::EndDisabled();
+   ImGui::SameLine(); action("Cancel [Esc]","cancel");
+   action("Previous [-]","previous"); ImGui::SameLine(); action("Next [+]","next");
+   action("Free [o]","free"); ImGui::SameLine(); action("Interesting [m]","interesting");
+   ImGui::TextWrapped("Directions move the cursor. Click selects a tile; t confirms. r opens recall.");
+   ImGui::Separator(); tile_details(t.value("x",0),t.value("y",0),true);
+  }
+  ImGui::EndDisabled();
  }
  void items() {
   ImGui::InputTextWithHint("##items","Search items",item_filter,sizeof(item_filter));
@@ -837,7 +987,11 @@ struct UI {
    character();
    ImGui::Dummy(ImVec2(0,ImGui::GetTextLineHeight()*.45f));
    ImGui::Separator();
+   const bool targeting_active=c.state.contains("targeting") || c.state.value("aiming",false);
    if(ImGui::BeginTabBar("panels")) {
+    if(targeting_active && ImGui::BeginTabItem("Look / Target",nullptr,targeting_was_active?ImGuiTabItemFlags_None:ImGuiTabItemFlags_SetSelected)) {
+     ImGui::BeginChild("Target content"); targeting_panel(); ImGui::EndChild(); ImGui::EndTabItem();
+    }
     if(ImGui::BeginTabItem("Items")) { ImGui::BeginChild("Item content"); items(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(ImGui::BeginTabItem("Creatures")) { ImGui::BeginChild("Creature content"); creatures(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(ImGui::BeginTabItem("Map")) { ImGui::BeginChild("Map content"); minimap(); ImGui::EndChild(); ImGui::EndTabItem(); }
@@ -852,6 +1006,7 @@ struct UI {
     }
     ImGui::EndTabBar();
    }
+   targeting_was_active=targeting_active;
    ImGui::EndChild(); ImGui::EndTable();
   }
   if(quit_dialog) { ImGui::OpenPopup("Close game"); quit_dialog=false; }

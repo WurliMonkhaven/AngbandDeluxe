@@ -26,6 +26,7 @@
 
 /* True only while the normal message line waits for acknowledgement. */
 extern bool textui_message_pending;
+extern bool textui_aiming;
 
 /**
  * Holds a generic command.  If hook is not NULL, that function

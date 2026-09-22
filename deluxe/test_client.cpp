@@ -51,6 +51,15 @@ int main(int argc,char **argv) {
   view_state["phase"]="store"; check(!dungeon_view(view_state),"Store must use terminal fallback");
   view_state["phase"]="playing"; view_state["readiness"]="awaiting_prompt";
   check(!dungeon_view(view_state),"Target/prompt must use terminal fallback");
+  view_state["targeting"]={{"mode","look"}};
+  check(dungeon_view(view_state),"Native targeting keeps the dungeon view");
+  view_state.erase("targeting"); view_state["aiming"]=true;
+  check(dungeon_view(view_state),"Native aim-direction prompt keeps the dungeon view");
+  view_state["aiming"]=false;
+  int tile_x=-1,tile_y=-1;
+  check(grid_cell_at(15,25,10,20,4,3,tile_x,tile_y) && tile_x==1 && tile_y==1,"Tile hit test must use fitted cell dimensions");
+  check(!grid_cell_at(-1,5,10,20,4,3,tile_x,tile_y),"Letterbox must not select a tile");
+  check(!grid_cell_at(40,5,10,20,4,3,tile_x,tile_y),"Right edge is outside the map");
   view_state["message_pending"]=true;
   check(dungeon_view(view_state),"Message acknowledgement retains dungeon view");
   view_state["message_pending"]=false;
@@ -114,17 +123,36 @@ int main(int argc,char **argv) {
   const fs::path path=argv[1];
   check(!fs::exists(path) && !fs::exists(path.string()+".tmp"),"Test file already exists");
   Connection connection; UI ui{connection}; ui.settings_path=path.string();
+  connection.connected=true; connection.state={{"context","more-test"},{"message_pending",true}};
+  check(!ui.proceed_click(),"Click acknowledgement must default off");
+  ui.proceed_with_click=true;
+  check(ui.proceed_click() && connection.busy,"Enabled click must acknowledge more");
+  const auto more_wire=connection.outgoing;
+  check(!ui.proceed_click() && connection.outgoing==more_wire,"Busy click must not queue another action");
+  connection.busy=false; connection.state["message_pending"]=false;
+  check(!ui.proceed_click() && connection.outgoing==more_wire,"Click must not acknowledge other prompts");
+  connection.state["message_pending"]=true; connection.prompt={{"prompt_id","test"}};
+  check(!ui.proceed_click(),"Structured prompts must not be dismissed by click");
+  connection.prompt=json::object();
   // Legacy preferences acquire sensible defaults.
   { std::ofstream out(path); out<<R"({"scale":1.25,"game_fraction":0.65})"; }
   ui.load_settings(); check(ui.scale==1.25f && !ui.fullscreen && ui.crt==0,"Legacy settings");
   check(ui.crt_strength==1,"Existing settings should default to Classic");
   ui.begin_settings(); ui.draft_scale=1.5f; ui.draft_crt=2; ui.draft_fullscreen=true;
+  check(!ui.proceed_with_click,"Legacy settings must default click acknowledgement off");
+  check(!ui.click_exits_look,"Legacy settings must default click exits look off");
+  ui.draft_click_exits_look=true;
+  check(!ui.click_exits_look,"Look click draft applied immediately");
+  ui.draft_proceed_with_click=true;
+  check(!ui.proceed_with_click,"Gameplay draft must not apply immediately");
   ui.draft_low_animation=false; ui.draft_death_animation=false;
   check(ui.low_animation && ui.death_animation,"Animation drafts applied immediately");
   ui.draft_crt_strength=3; ui.draft_crt_settings.parts[Hum].enabled=true;
   check(!ui.crt_settings.parts[Hum].enabled,"Hum bar draft applied immediately");
   check(ui.scale==1.25f && ui.crt==0 && !ui.fullscreen,"Draft changed live settings");
   ui.begin_settings(); // Reopening after Cancel discards the draft.
+  check(!ui.draft_proceed_with_click,"Cancelled gameplay draft retained");
+  check(!ui.draft_click_exits_look,"Cancelled look click draft retained");
   check(ui.draft_low_animation && ui.draft_death_animation,"Cancelled animation draft retained");
   check(ui.draft_scale==1.25f && ui.draft_crt==0 && !ui.draft_fullscreen,"Draft was retained");
   check(ui.draft_crt_strength==1 && ui.crt_strength==1,"Cancelled strength was applied");
@@ -132,8 +160,12 @@ int main(int argc,char **argv) {
   ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_crt_settings.parts[Hum].enabled=true;
   ui.draft_crt_settings.raster_lines=720; ui.draft_crt_settings.mask=2; ui.draft_crt_settings.tube_preset=-1;
   ui.draft_low_animation=false; ui.draft_death_animation=true;
+  ui.draft_click_exits_look=true;
+  ui.draft_proceed_with_click=true;
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
+  check(loaded.proceed_with_click,"Gameplay option did not persist");
+  check(loaded.click_exits_look,"Click exits look did not persist");
   check(loaded.crt_settings.raster_lines==720 && loaded.crt_settings.mask==2,"Staged raster/mask settings did not persist");
   check(!loaded.low_animation && loaded.death_animation,"Independent animation switches did not persist");
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");

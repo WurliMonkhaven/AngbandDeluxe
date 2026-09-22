@@ -67,7 +67,8 @@ The adapter observes normal engine map draws and stores only scalar results;
 `state.get` does not invoke drawing or use RNG. New levels clear the cache and
 change `level_id`; camera movement changes the viewport origin. Incomplete
 viewports and nested interactions omit `dungeon`, requiring terminal fallback.
-The client uses that fallback for targeting and preserves its cursor and controls.
+Native looking, targeting and aim-direction prompts retain `dungeon`; dedicated
+recall screens still use terminal fallback and preserve their original controls.
 Ordinary message acknowledgement is an exception: `message_pending: true` may
 accompany `dungeon` with `readiness: "awaiting_prompt"`. Keep the dungeon visible
 and show a white-on-black `- more -` overlay
@@ -142,3 +143,61 @@ Snapshots are captured on the engine thread and served from a cache. Object
 descriptions use local metadata copies to avoid changing seen-state. Debug builds
 assert that capture preserves the engine RNG state. This is not yet the complete
 read-purity and gameplay-parity coverage required by the v1 specification.
+
+
+### Native look and targeting (`interaction.targeting: 1`)
+
+An active `targeting` snapshot contains `mode` (`look` or `target`), cursor `x/y`,
+`interesting`, `can_confirm`, `candidates` and `path`. Point arrays contain world
+`[x,y]` coordinates. These values come from the running engine targeting loop;
+`path` is its projection path, not a client recomputation or an area/damage
+prediction. `aiming: true` identifies the engine's direction prompt. Both are
+compatible with `readiness: "awaiting_prompt"` and native dungeon presentation.
+Optional `selected_target` records the established target's world position and
+whether it is a monster. Monster records additionally include `condition` text.
+
+All requests below require the latest snapshot's `context`. They reject
+stale contexts, unrelated prompts and nested terminal screens:
+
+- `targeting.begin`: `mode: "look" | "target"`, optionally integer `x/y`. Starts
+  from normal play; coordinates must be interior dungeon tiles.
+- `targeting.select`: integer world `x/y`. Relocates an active cursor without
+  confirming. The engine updates its camera and interesting/free selection mode.
+  During an aim-direction prompt, a visible-viewport coordinate opens targeting
+  through the original engine mouse handler.
+- `targeting.control`: `operation` is `confirm`, `cancel`, `next`, `previous`,
+  `free`, `interesting`, `player`, `recall` or `target`. These feed the original
+  engine controls. During an aim-direction prompt only `cancel` and `target`
+  are accepted here; direction/current-target keys use `terminal.input`.
+
+Look mode allows confirmation of cycled terrain/item locations through the
+engine's free-location controls, for both keyboard and API confirmation.
+Combat targeting retains the engine's eligibility checks.
+Free location targeting remains allowed where the original engine permits it,
+including locations that cannot be hit; the engine still decides the action's
+range, obstruction and outcome. Cancelling a ranged target returns to its parent
+prompt as usual. API queries/hover inspection do not move the cursor or consume
+turns. Ordinary keyboard bindings continue to work, including Escape, t, +/- and
+free/interesting mode; nested recall screens keep their original controls.
+
+### Mouse movement (`interaction.mouse: 1`)
+
+`dungeon.click` requires the latest `context` and integer world `x/y` within
+the current viewport. Optional boolean `shift`, `control` and `alt` preserve
+Angband mouse modifiers. Accepted only during normal ready play, it honors
+the engine mouse-movement option and feeds an ordinary left click to Angband:
+adjacent movement/melee, distant pathfinding, and clicking the player retain
+the original rules. Active looking/aiming instead uses `targeting.select`.
+
+`targeting.set` takes `context` and integer world `x/y` during normal ready
+play. It immediately selects a targetable monster at that position, otherwise
+a location, through the engine target setters. It consumes no turn and never
+enters the interactive targeting loop. Invalid coordinates, stale contexts
+and requests during another interaction are rejected. Combat range and
+obstruction checks still apply when an action uses the target.
+
+`dungeon.click` optionally accepts `exit_look: true`. During a native Look
+interaction this validates the click, cancels Look, and dispatches the saved
+world coordinate/modifiers at the next normal command boundary. This avoids
+reinterpreting the tile after the camera recenters. Combat targeting, recall
+screens and unrelated prompts still reject movement.
