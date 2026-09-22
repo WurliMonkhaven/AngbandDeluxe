@@ -7,6 +7,32 @@ static void check(bool value,const char *message) { if(!value) throw std::runtim
 int main(int argc,char **argv) {
  try {
   check(argc==2,"Pass an unused settings-file path");
+  Connection input; input.connected=true; input.state={{"readiness","ready"},{"context","input-test"}};
+  check(input.key("up"),"Ready input should be dispatched");
+  const auto queued_input=input.outgoing;
+  check(!input.key("down") && input.outgoing==queued_input,"Busy input must stay with the UI until accepted");
+  input.busy=false; input.prompt={{"prompt_id","confirm"}};
+  check(!input.key("down"),"Game input must not leak into a confirmation");
+  input.prompt=json::object();
+  check(input.key("down"),"Input should resume after acknowledgement");
+  HealthGlitch health;
+  json health_state={{"phase","playing"},{"player",{{"hp",30},{"hp_warning",30},{"death_pending",false}}}};
+  check(health.update(health_state,1)==0,"HP at warning threshold should not glitch");
+  health_state["player"]["hp"]=29;
+  const float mild=health.update(health_state,2);
+  health_state["player"]["hp"]=0;
+  check(mild>0 && mild<health.update(health_state,3),"Low HP glitch severity");
+  health_state["player"]["hp"]=-10;
+  check(health.update(health_state,4)<=.3f,"Bloodlust negative HP must not imply death");
+  health_state["player"]["death_pending"]=true;
+  check(health.update(health_state,5)==1 && health.update(health_state,6)<1,"Fatal burst should settle quickly");
+  health_state["phase"]="dead";
+  check(health.update(health_state,7)==0,"Tombstone must stop health glitches");
+  health_state["phase"]="playing"; health_state["player"]["death_pending"]=false;
+  health_state["player"]["hp_warning"]=0;
+  check(health.update(health_state,8)==0,"Disabled HP warning must suppress low-health glitches");
+  health_state["player"]["hp_warning"]=30; health_state["player"]["hp"]=40;
+  check(health.update(health_state,9)==0,"Healing must stop health glitches");
   check(resource_fraction(-10,20)==0 && resource_fraction(0,20)==0,"Dead HP must be empty, not an indeterminate progress bar");
   check(resource_fraction(10,20)==.5f && resource_fraction(30,20)==1,"Resource bar bounds");
   check(resource_fraction(10,0)==0 && resource_fraction(10,-1)==0,"Invalid resource maximum");

@@ -54,6 +54,13 @@ The player record includes `food` (current nutrition) and `food_max` (the engine
 maximum nutrition). Their ratio supplies the food bar's percentage; the client
 does not hardcode Angband's food capacity.
 
+`player.hp_warning` is the configured low-HP threshold in hitpoints, using
+Angband's integer rounding; the warning applies strictly below it (zero disables
+it). `player.death_pending` covers confirmed death and acknowledgement of the
+fatal message, which precedes the engine's dead flag. Negative HP alone does not
+imply death (bloodlust). Phase `dead` begins at the tombstone/retirement screen;
+`finished` marks completion of the post-game interaction.
+
 Item and monster IDs are **snapshot-scoped** and expire on the next revision.
 Inspecting a stale ID fails. Select current records before issuing an action.
 Item actions still apply the engine's item tester, accessibility constraints and

@@ -108,6 +108,20 @@ int main(int argc,char **argv) {
   check(pixel(original,48,40)>250 && pixel(original,210,104,1)<3,"Offscreen source pattern");
   frame.scope=2; auto plain=render(true);
   check(pixel(plain,48,40)>250 && pixel(plain,48,88)<3 && pixel(plain,210,104)>250,"Shader orientation/pass-through");
+  frame.health_glitch=1;
+  bool glitched=false;
+  for(int i=0;i<6;++i) {
+   frame.seconds=i/12.; auto disturbed=render(true);
+   glitched=glitched || disturbed!=plain;
+  }
+  check(glitched,"Health glitch did not alter GPU output");
+  frame.scope=0; check(render(true)==original,"CRT Off must suppress health glitches");
+  frame.scope=1; frame.game_pos=ImVec2(0,0); frame.game_size=ImVec2(128,128); frame.seconds=0;
+  auto health_scoped=render(true,true);
+  check(pixel(health_scoped,210,104)==pixel(original,210,104),"Health glitch escaped game-only scope");
+  check(pixel(health_scoped,48,40,1)>250 && pixel(health_scoped,48,40)<3,"Health glitch touched popup overlay");
+  frame.scope=2; frame.health_glitch=0;
+  check(render(true)==plain,"Health glitch failed to stop");
   frame.settings.parts[Glow]={true,100}; auto glow=render(true);
   check(pixel(glow,58,40)>pixel(plain,58,40)+5,"GPU glow outside bright pixels");
   check(pixel(glow,96,88,1)>pixel(plain,96,88,1)+35,"Phosphor core is not luminous");

@@ -384,6 +384,7 @@ void death_screen(void)
 	}
 
 	/* Tombstone/retiring */
+	event_signal(EVENT_ENTER_DEATH);
 	display_exit_screen();
 
 	/* Flush all input and output */

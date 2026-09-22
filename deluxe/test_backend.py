@@ -245,6 +245,8 @@ class BackendTests(unittest.TestCase):
         e.birth()
         initial = e.call("state.get")["result"]
         self.assertIn("player", initial)
+        self.assertEqual(initial["player"]["hp_warning"], initial["player"]["max_hp"] * 3 // 10)
+        self.assertFalse(initial["player"]["death_pending"])
         self.assertGreater(initial["player"]["food_max"], 0)
         self.assertGreater(initial["player"]["food"], 0)
         self.assertLessEqual(initial["player"]["food"], initial["player"]["food_max"])

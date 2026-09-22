@@ -37,6 +37,10 @@ glyphs, builds scanline geometry, or subdivides/warps triangles on the CPU.
    to fit SDR rather than clipping each channel and bleaching their hue.
    Blur targets use 16-bit floating point to preserve the faint halo falloff;
    the scene, history and final output remain in the window's normal format.
+   A client-supplied health intensity adds intermittent horizontal line slips
+   and colour separation in the same scope. The engine supplies its warning
+   threshold and death status; the client ramps a fatal burst down and disables
+   it at the tombstone. This adds no render pass or texture allocation.
 4. Blend previous output for brief, frame-rate-independent ghosting. Two
    full-resolution history textures alternate so a pass never samples its own
    render target. The CPU supplies elapsed time; the GPU blends the images.

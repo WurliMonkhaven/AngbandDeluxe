@@ -136,6 +136,7 @@ void CrtRenderer::render(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *destination,U
  u.viewport[3]=history_valid_?crt_persistence_alpha(settings.level(Ghost),frame.seconds-last_time_):0;
  u.effects[0]=settings.level(Scanlines); u.effects[1]=settings.level(Glow); u.effects[2]=settings.level(Bloom); u.effects[3]=settings.level(Fringe);
  u.shape[0]=settings.level(Edges); u.shape[1]=.018f*settings.level(Barrel); u.shape[2]=settings.level(Hum);
+ u.shape[3]=std::clamp(frame.health_glitch,0.f,1.f);
  auto blur=[&](int first,float radius,float threshold) {
   BlurUniforms b{}; std::copy(std::begin(u.region),std::end(u.region),b.region);
   const unsigned factor=first==1?2:4;

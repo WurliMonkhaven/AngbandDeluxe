@@ -9,6 +9,7 @@ struct CrtFrame {
  ImDrawList *game=nullptr;
  ImVec2 game_pos{},game_size{};
  double seconds=0;
+ float health_glitch=0; // Visual intensity only; gameplay remains in the engine.
  float ui_scale=1;
  std::string session;
 };

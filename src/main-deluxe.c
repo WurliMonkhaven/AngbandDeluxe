@@ -288,6 +288,11 @@ static cJSON *capture(void)
   cJSON *visible = cJSON_CreateArray();
   string(p, "name", player->full_name); string(p, "race", player->race->name);
   string(p, "class", player->class->name); number(p, "hp", player->chp); number(p, "max_hp", player->mhp);
+  number(p, "hp_warning", player->mhp * player->opts.hitpoint_warn / 10);
+  /* The fatal message is flushed for acknowledgement before is_dead is set.
+   * Negative HP alone is insufficient: bloodlust can keep the player alive. */
+  json_bool(p, "death_pending", player->is_dead ||
+   (player->chp < 0 && messages_num() > 0 && message_type(0) == MSG_DEATH));
   number(p, "sp", player->csp); number(p, "max_sp", player->msp); number(p, "level", player->lev);
   number(p, "food", player->timed[TMD_FOOD]); number(p, "food_max", PY_FOOD_MAX);
   number(p, "depth", player->depth); number(p, "gold", player->au);

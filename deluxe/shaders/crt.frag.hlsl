@@ -10,7 +10,7 @@ cbuffer Crt : register(b0, space3) {
     float4 region;      // UV origin.xy, size.xy
     float4 viewport;    // pixel size.xy, time, history retention
     float4 effects;     // scanlines, glow, bloom, chromatic aberration
-    float4 shape;       // vignette, barrel coefficient, hum, unused
+    float4 shape;       // vignette, barrel coefficient, hum, health glitch
 };
 float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
     float3 untouched = scene.SampleLevel(scene_sampler, uv, 0).rgb;
@@ -28,14 +28,23 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
     float2 source = region.xy + local * region.zw;
     float2 edge_pixels = min(local, 1 - local) * region.zw * viewport.xy;
     float coverage = saturate(min(edge_pixels.x, edge_pixels.y) + 0.5);
+    // Short, irregular line slips, rather than whole-screen flashes. Severity
+    // increases both displacement and burst duration, keeping low HP readable.
+    float tick = floor(viewport.z * 12);
+    float band = floor(local.y * 38);
+    float noise = frac(sin(band * 127.1 + tick * 311.7) * 43758.5453);
+    float burst = step(frac(viewport.z * 1.5), 0.10 + shape.w * 0.32);
+    float glitch = shape.w * burst * step(0.76 - shape.w * 0.18, noise);
+    source.x += (noise - 0.5) * 18 * glitch / viewport.x;
     source = clamp(source, region.xy + 0.5 / viewport.xy, region.xy + region.zw - 0.5 / viewport.xy);
     float3 c = scene.SampleLevel(scene_sampler, source, 0).rgb;
-    if (effects.w > 0) {
-        float2 offset = float2(1.6 * effects.w / viewport.x, 0);
+    if (effects.w > 0 || glitch > 0) {
+        float2 offset = float2((1.6 * effects.w + 3 * glitch) / viewport.x, 0);
         float3 fringe = float3(scene.SampleLevel(scene_sampler, clamp(source + offset, region.xy, region.xy + region.zw), 0).r,
             c.g, scene.SampleLevel(scene_sampler, clamp(source - offset, region.xy, region.xy + region.zw), 0).b);
-        c = lerp(c, fringe, 0.65 * effects.w);
+        c = lerp(c, fringe, saturate(0.65 * effects.w + glitch));
     }
+    c *= 1 - 0.18 * glitch;
     // Work in approximate linear light, matching the blur's gamma-2 decode.
     // Drive luminous phosphors harder without lifting unlit screen/backgrounds.
     float excitation = smoothstep(0.08, 0.45, max(c.r, max(c.g, c.b)));

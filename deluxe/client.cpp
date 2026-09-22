@@ -23,6 +23,21 @@ namespace fs = std::filesystem;
 static float resource_fraction(int value,int maximum) {
  return maximum>0?std::clamp(float(value)/float(maximum),0.f,1.f):0.f;
 }
+struct HealthGlitch {
+ double death_started=-1;
+ float update(const json &state,double seconds) {
+  const auto phase=state.value("phase","");
+  if((phase!="playing" && phase!="store") || !state.contains("player")) { death_started=-1; return 0; }
+  const auto &p=state["player"];
+  if(p.value("death_pending",false)) {
+   if(death_started<0) death_started=seconds;
+   return .45f+.55f*float(std::exp(-std::max(0.,seconds-death_started)/.7));
+  }
+  death_started=-1;
+  const int warning=p.value("hp_warning",0), hp=p.value("hp",0);
+  return warning>0 && hp<warning ? .12f+.18f*(1-resource_fraction(hp,warning)) : 0;
+ }
+};
 
 static bool matches(std::string text, std::string term) {
  auto lower = [](unsigned char c) { return static_cast<char>(std::tolower(c)); };
@@ -186,9 +201,10 @@ struct Connection {
   else if(read<4*1024*1024) process_stopped(exit_code); // Drain capped output next frame first.
  }
  bool ready() const { return connected && !busy && prompt.empty() && state.value("readiness","") == "ready"; }
- void key(const json &k) {
-  if (!connected || busy || !prompt.empty() || state.empty()) return;
+ bool key(const json &k) {
+  if (!connected || busy || !prompt.empty() || state.empty()) return false;
   send("terminal.input",{{"context",state.value("context","")},{"key",k}}); busy = true;
+  return true;
  }
  void command(const std::string &id, const std::string &item = "") {
   if (!ready()) return;
@@ -756,8 +772,18 @@ struct UI {
    ImGui::EndPopup();
   }
   prompts(); ImGui::End();
-  if(owns_keyboard() && !ImGui::GetIO().WantTextInput && !keys.empty()) c.key(keys.front());
-  keys.clear();
+  dispatch_keys();
+ }
+ void dispatch_keys() {
+  if(!owns_keyboard() || ImGui::GetIO().WantTextInput || !c.prompt.empty() || !c.connected) { keys.clear(); return; }
+  // Keep short bursts while a game turn is in flight, instead of discarding
+  // actual presses. Never allow a long movement backlog or spill into prompts.
+  if(keys.size()>4) keys.resize(4);
+  if(!keys.empty() && c.key(keys.front())) {
+   keys.erase(keys.begin());
+   if(c.state.value("readiness","")!="ready") keys.clear();
+   c.flush_input();
+  }
  }
 };
 
@@ -775,6 +801,7 @@ int main(int argc,char **argv) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Angband Deluxe",SDL_GetError(),window); return 1;
  }
  SDL_SetGPUSwapchainParameters(gpu,window,SDL_GPU_SWAPCHAINCOMPOSITION_SDR,SDL_GPU_PRESENTMODE_VSYNC);
+ SDL_SetGPUAllowedFramesInFlight(gpu,1); // Bound presentation latency; still paced by vsync.
  IMGUI_CHECKVERSION(); ImGui::CreateContext();
  auto &io=ImGui::GetIO(); io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad;
  io.Fonts->AddFontFromFileTTF(DELUXE_FONT_FILE,18.f);
@@ -808,13 +835,22 @@ int main(int argc,char **argv) {
  std::string ini=(fs::path(user)/"layout.ini").string(); io.IniFilename=ini.c_str();
  connection.start(backend,data,user);
  SDL_StartTextInput(window);
+ HealthGlitch health_glitch;
+ auto poll_backend=[&] {
+  const auto phase=connection.state.value("phase","");
+  const auto readiness=connection.state.value("readiness","");
+  connection.poll();
+  if(phase!=connection.state.value("phase","") || readiness!=connection.state.value("readiness","") || !connection.prompt.empty())
+   ui.keys.clear(); // Buffered movement must not answer a newly opened menu/prompt.
+ };
  while(!connection.closed) {
   // Pace first: sampling input and ImGui's clock before a blocking presentation
   // wait produces stale, uneven animation times even when GPU work is fast.
   if(!SDL_WaitForGPUSwapchain(gpu,window)) break;
-  connection.poll();
+  poll_backend();
   if(connection.restart_ready) {
    crt_renderer.reset_history();
+   health_glitch=HealthGlitch{};
    // A saved return-to-menu or normal post-game completion has exited cleanly.
    SDL_DestroyProcess(connection.process); connection.process=nullptr;
    connection=Connection{};
@@ -859,6 +895,10 @@ int main(int argc,char **argv) {
     const char *p=e.text.text; while(*p) ui.keys.push_back(SDL_StepUTF8(&p,nullptr));
    }
   }
+  // Give the engine the key before constructing this frame, so its work can
+  // overlap UI rendering rather than starting only after it has finished.
+  ui.dispatch_keys();
+  poll_backend();
   ImGui_ImplSDLGPU3_NewFrame(); ImGui_ImplSDL3_NewFrame();
   if(ui.crt!=0 && crt_renderer.ready() && SDL_GetMouseFocus()==window) {
    float x,y; SDL_GetMouseState(&x,&y);
@@ -883,6 +923,7 @@ int main(int argc,char **argv) {
    frame.scope=ui.crt; frame.settings=ui.crt_settings;
    frame.game=ui.game_draw_list; frame.game_pos=ui.game_pos; frame.game_size=ui.game_size;
    frame.seconds=double(SDL_GetTicksNS())/1e9; frame.ui_scale=ui.scale*ui.display_scale; frame.session=connection.state.value("phase","");
+   frame.health_glitch=health_glitch.update(connection.state,frame.seconds);
    crt_renderer.render(cmd,surface,surface_width,surface_height,render_data,frame);
    if(renderer_error!=crt_renderer.error()) {
     renderer_error=crt_renderer.error(); if(!renderer_error.empty()) connection.notice(renderer_error);
