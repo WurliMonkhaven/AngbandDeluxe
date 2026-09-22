@@ -7,6 +7,26 @@ static void check(bool value,const char *message) { if(!value) throw std::runtim
 int main(int argc,char **argv) {
  try {
   check(argc==2,"Pass an unused settings-file path");
+  check(resource_fraction(-10,20)==0 && resource_fraction(0,20)==0,"Dead HP must be empty, not an indeterminate progress bar");
+  check(resource_fraction(10,20)==.5f && resource_fraction(30,20)==1,"Resource bar bounds");
+  check(resource_fraction(10,0)==0 && resource_fraction(10,-1)==0,"Invalid resource maximum");
+  Connection death; death.connected=true;
+  auto state_event=[](const char *phase) { return json{{"kind","event"},{"event","state.changed"},
+   {"data",{{"phase",phase},{"messages",json::array()},{"terminal",json::object()}}}}; };
+  death.receive(state_event("dead"));
+  check(death.connected && !death.restart_ready,"Tombstone must remain interactive");
+  death.receive(state_event("finished"));
+  check(!death.restart_ready,"Wait for engine cleanup before returning to menu");
+  death.process_stopped(0);
+  check(death.restart_ready && !death.closed && !death.connected && death.messages.empty(),"Normal death should return to launcher without backend-stopped notice");
+  Connection crash; crash.receive(state_event("dead")); crash.process_stopped(1);
+  check(!crash.restart_ready && !crash.messages.empty(),"Death-screen crash must remain visible");
+  Connection incomplete; incomplete.receive(state_event("playing")); incomplete.process_stopped(0);
+  check(!incomplete.restart_ready && !incomplete.messages.empty(),"Unannounced exit must remain visible");
+  Connection menu; menu.close_confirmed=true; menu.return_to_menu=true; menu.process_stopped(0);
+  check(menu.restart_ready && !menu.closed,"Save and return to menu regression");
+  Connection quit; quit.close_confirmed=true; quit.closed=true; quit.process_stopped(0);
+  check(quit.closed && !quit.restart_ready,"Save and quit must not relaunch");
   const fs::path path=argv[1];
   check(!fs::exists(path) && !fs::exists(path.string()+".tmp"),"Test file already exists");
   Connection connection; UI ui{connection}; ui.settings_path=path.string();
@@ -62,7 +82,7 @@ int main(int argc,char **argv) {
   }
   check(crt_persistence_alpha(0,.016)==0 && crt_persistence_alpha(1,.31)==0,"Disabled or stale history survives");
   fs::remove(path);
-  std::cout<<"Graphics settings and CRT input/decay checks passed\n";
+  std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";
   return 0;
  } catch(const std::exception &e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

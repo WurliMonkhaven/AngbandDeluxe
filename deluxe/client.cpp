@@ -20,6 +20,10 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
+static float resource_fraction(int value,int maximum) {
+ return maximum>0?std::clamp(float(value)/float(maximum),0.f,1.f):0.f;
+}
+
 static bool matches(std::string text, std::string term) {
  auto lower = [](unsigned char c) { return static_cast<char>(std::tolower(c)); };
  std::transform(text.begin(), text.end(), text.begin(), lower);
@@ -143,8 +147,23 @@ struct Connection {
    outgoing.erase(0,n);
   }
  }
+ void process_stopped(int exit_code) {
+  connected=false; busy=false;
+  // Death/post-game screens remain interactive until the engine reports that
+  // play_game completed. A crash must not masquerade as a normal game ending.
+  const bool finished=state.value("phase","")=="finished";
+  if(exit_code==0 && !closed && ((close_confirmed && return_to_menu) || finished)) restart_ready=true;
+  else if(!closed) {
+   notice("Backend stopped (" + std::to_string(exit_code) + "). " + diagnostic);
+   if(!state.contains("terminal")) menu_error="Backend stopped. Restart Deluxe to try again.";
+  }
+ }
  void poll() {
   if (!connected) return;
+  // Observe termination BEFORE draining stdout, so the last state/close reply
+  // cannot arrive between the drain and our exit decision.
+  int exit_code=0;
+  const bool exited=SDL_WaitProcess(process,false,&exit_code);
   char buffer[16384]; size_t n;
   auto err = static_cast<SDL_IOStream*>(SDL_GetPointerProperty(SDL_GetProcessProperties(process),SDL_PROP_PROCESS_STDERR_POINTER,nullptr));
   if (err) while ((n = SDL_ReadIO(err,buffer,sizeof(buffer))) > 0) {
@@ -163,13 +182,8 @@ struct Connection {
    }
    if (received.size() > 1048576) { notice("Backend frame too large"); connected = false; return; }
   }
-  flush_input();
-  int exit_code;
-  if (SDL_WaitProcess(process,false,&exit_code)) {
-   connected = false; busy = false;
-   if(close_confirmed && return_to_menu && exit_code==0) restart_ready=true;
-   else if (!closed) { notice("Backend stopped (" + std::to_string(exit_code) + "). " + diagnostic); if(!state.contains("terminal")) menu_error="Backend stopped. Restart Deluxe to try again."; }
-  }
+  if(!exited) flush_input();
+  else if(read<4*1024*1024) process_stopped(exit_code); // Drain capped output next frame first.
  }
  bool ready() const { return connected && !busy && prompt.empty() && state.value("readiness","") == "ready"; }
  void key(const json &k) {
@@ -488,10 +502,10 @@ struct UI {
   ImGui::Text("%s",p.value("name","").c_str());
   ImGui::TextWrapped("%s %s · Level %d",p.value("race","").c_str(),p.value("class","").c_str(),p.value("level",0));
   auto bar=[&](const char *name,const char *cur,const char *max,ImVec4 fill) {
-   char b[80]; int v=p.value(cur,0),m=p.value(max,0); SDL_snprintf(b,sizeof(b),"%s %d / %d",name,v,m);
+   char b[80]; int v=p.value(cur,0),m=p.value(max,0); SDL_snprintf(b,sizeof(b),"%s %d / %d",name,std::max(0,v),std::max(0,m));
    ImGui::PushStyleColor(ImGuiCol_PlotHistogram,fill);
    ImGui::PushStyleColor(ImGuiCol_FrameBg,ImVec4(fill.x*.3f,fill.y*.3f,fill.z*.3f,1));
-   ImGui::ProgressBar(m?float(v)/m:0,ImVec2(-1,0),b);
+   ImGui::ProgressBar(resource_fraction(v,m),ImVec2(-1,0),b);
    ImGui::PopStyleColor(2);
   };
   bar("HP","hp","max_hp",ImVec4(.68f,.16f,.20f,1));
@@ -801,13 +815,14 @@ int main(int argc,char **argv) {
   connection.poll();
   if(connection.restart_ready) {
    crt_renderer.reset_history();
-   // session.close has acknowledged a successful save and the child has exited.
+   // A saved return-to-menu or normal post-game completion has exited cleanly.
    SDL_DestroyProcess(connection.process); connection.process=nullptr;
    connection=Connection{};
    ui.grid_focus=ui.focus_requested=ui.return_from_prompt=false;
    ui.selected.clear(); ui.last_prompt.clear(); ui.keys.clear();
    ui.item_filter[0]=ui.command_filter[0]=ui.message_filter[0]=0;
    ui.message_search_open=false;
+   ui.quit_dialog=false;
    connection.start(backend,data,user);
   }
   ui.prepare_frame(window); SDL_Event e;
