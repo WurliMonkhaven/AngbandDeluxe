@@ -554,6 +554,10 @@ class BackendTests(unittest.TestCase):
         self.assertIsNotNone(floor, (e.screen(),e.state['items']))
         x,y=floor['x'],floor['y']
         self.assertTrue(floor['can_pickup'])
+        observed = [o for o in e.state['dungeon']['items'] if (o['x'],o['y'])==(x,y)]
+        self.assertTrue(observed, "Dropped items must have semantic hover labels")
+        self.assertTrue(any('Potion' in o['label'] for o in observed))
+
         catalog=e.call('catalog.get')['result']['features']
         floors={f['id'] for f in catalog if f['name'] in ('open floor','up staircase','down staircase')}
         terrain=e.state['map']['actual']
@@ -579,6 +583,11 @@ class BackendTests(unittest.TestCase):
                 e.key(ord(key))
                 while e.state['readiness']!='ready': e.key('enter')
             self.assertEqual(e.state['map']['visible'][y][x],'0')
+            view=e.state['dungeon']
+            if view['x']<=x<view['x']+view['width'] and view['y']<=y<view['y']+view['height']:
+                self.assertTrue(any(o['x']==x and o['y']==y and 'Potion' in o['label'] for o in view['items']),
+                                "Unseen remembered piles must retain their labels")
+
         snapshot = e.call('state.get')['result']
         for _ in range(3):
             preview = e.call('dungeon.route', {'context': snapshot['context'], 'x': x, 'y': y})['result']
@@ -685,6 +694,72 @@ class BackendTests(unittest.TestCase):
         self.assert_semantic_view(e.state)
         self.targeting('targeting.begin', mode='target')
         self.assertEqual(e.call('dungeon.click', {'context':e.state['context'],'x':x,'y':y,'exit_look':True})['error']['code'], 'busy')
+
+    def test_confused_mouse_walk(self):
+        e = self.engine
+        e.hello(); e.birth()
+        old = e.state['revision']
+        self.assertIn('result', e.call('debug.status', {'effect': 'CONFUSED', 'amount': 100}))
+        e.next_state(old)
+        while e.state['readiness'] != 'ready': e.key('enter')
+        # Both direct clicks and clicks exiting look must provide a direction;
+        # the engine then randomizes that direction using its normal rules.
+        for exit_look in (False, True):
+            if exit_look:
+                self.targeting('targeting.begin', mode='look')
+            p = e.state['player']
+            turn = e.state['turn']
+            self.targeting('dungeon.click', x=p['x']+1, y=p['y'], exit_look=exit_look)
+            self.assertFalse(e.state.get('direction_prompt'), e.screen())
+            self.assertNotIn('targeting', e.state)
+            self.assertFalse(e.state.get('aiming'), e.screen())
+            while e.state['readiness'] != 'ready': e.key('enter')
+            self.assertGreater(e.state['turn'], turn)
+            self.assert_semantic_view(e.state)
+
+    def test_mouse_disarms_gas_trap(self):
+        e = self.engine
+        e.hello(); e.birth()
+
+        def settle(value=None):
+            for _ in range(30):
+                if e.state['readiness'] == 'ready': return
+                e.call('state.get')
+                if e.prompt:
+                    p = e.prompt; e.prompt = None
+                    old = e.state['revision']
+                    e.call('prompt.reply', {'prompt_id': p['prompt_id'],
+                           'value': True if p['type'] == 'confirmation' else value})
+                    e.next_state(old)
+                else:
+                    e.key('enter')
+            self.fail('Trap fixture did not settle')
+
+        def wizard(key, value=None):
+            e.key(1); e.key(ord(key)); settle(value)
+
+        e.key(ord('>')); settle()
+        self.assertEqual(e.state['player']['depth'], 1)
+        wizard('z')
+        floors = {f['id'] for f in e.call('catalog.get')['result']['features']
+                  if f['name'] == 'open floor'}
+        p = e.state['player']; origin = (p['x'], p['y'])
+        cells = e.state['map']['actual']
+        occupied = {(o['x'], o['y']) for o in e.state['items'] if o['location'] == 'Floor'}
+        trap_pos = next((p['x']+dx, p['y']+dy)
+                        for dx,dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1))
+                        if cells[p['y']+dy][p['x']+dx] in floors
+                        and (p['x']+dx, p['y']+dy) not in occupied)
+        self.targeting('dungeon.click', x=trap_pos[0], y=trap_pos[1]); settle()
+        wizard('T', 'gas trap')
+        wizard('d')
+        self.targeting('dungeon.click', x=origin[0], y=origin[1]); settle()
+        self.targeting('dungeon.click', x=trap_pos[0], y=trap_pos[1])
+        # A disarm attempt stays beside the trap, whether it succeeds, safely
+        # fails, or sets it off. Walking into it would move onto its square.
+        self.assertEqual((e.state['player']['x'], e.state['player']['y']), origin)
+        text = '\n'.join(m['text'] for m in e.state['messages']).lower()
+        self.assertTrue('disarm' in text or 'set off the gas trap' in text, text)
 
     def test_quick_targeting_throw(self):
         e=self.engine

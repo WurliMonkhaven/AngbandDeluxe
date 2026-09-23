@@ -1054,6 +1054,9 @@ void textui_process_click_at(ui_event e, struct loc grid)
 	} else if (e.mouse.button == 1) {
 		if (player->timed[TMD_CONFUSED]) {
 			cmdq_push(CMD_WALK);
+			/* Supply the intended step; walking applies confusion itself. */
+			cmd_set_arg_direction(cmdq_peek(), "direction",
+					motion_dir(player->grid, loc(x, y)));
 		} else {
 			if (e.mouse.mods & KC_MOD_SHIFT) {
 				/* shift-click - run */

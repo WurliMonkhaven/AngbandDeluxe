@@ -760,3 +760,12 @@ Settings / Audio provides an enabled switch plus master, gameplay and interface 
 
 
 The active audio palette is Soft Circuit (sound studies 04): understated contact clicks and muted grainy buzzes, with softer attacks and reduced bass and peak levels. UI, target and shutdown use treatment A; potion, melee and spell cues rotate A/B. Build staging replaces the previous samples with these approved files while preserving event mappings and saved volume preferences.
+
+
+### Delayed dungeon hover cards
+
+Hovering the same dungeon tile for 550 ms opens a compact, non-interactive tooltip. Creature/player identity, condition, a small HP bar and active player statuses are grouped above terrain and up to five observed ground-item labels. Unseen locations/items are marked as remembered. Hallucinated appearances are labelled as unreliable. Larger piles direct the player to Look. Tooltip windows wrap text and use the normal cursor/viewport-aware positioning.
+
+Changing tiles or input context restarts the delay. Clicking/holding a mouse button, opening a popup, losing focus, targeting, look mode, direction prompts and message pauses suppress the tooltip. Hovering does not send commands or change the engine's tracked creature. Cached tooltip contents are rebuilt only for a new hover context.
+
+The semantic dungeon record now includes a sparse items list (x, y, label, quantity, color), derived from the player's remembered object piles. Description formatting operates on copied records to preserve read-only behaviour. This presentation data supplements, rather than restricts, the existing actual-world API.

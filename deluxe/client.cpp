@@ -401,6 +401,7 @@ static void properties(const json &value) {
 #include "map_overview.h"
 #include "dev_status_dialog.h"
 #include "dungeon_feedback.h"
+#include "dungeon_tooltip.h"
 #include "birth_panel.h"
 #include "quickbar.h"
 #include "spell_panel.h"
@@ -459,6 +460,7 @@ struct UI {
  bool click_exits_look=false, draft_click_exits_look=false;
  bool quick_targeting=false, draft_quick_targeting=false;
  bool select_creatures_tab=false;
+ DungeonTooltip dungeon_tooltip;
  int grid_menu_x=0,grid_menu_y=0;
  std::string grid_menu_context;
  float display_scale = 1.f;
@@ -874,15 +876,12 @@ struct UI {
     const auto &t=c.state["selected_target"];
     outline(t.value("x",0),t.value("y",0),IM_COL32(210,175,85,200),display_scale);
    }
+   const bool tooltip_allowed=hovered && c.ready() && window_active && !c.state.contains("targeting") &&
+    !c.state.value("aiming",false) && !c.state.value("direction_prompt",false) && !c.state.value("message_pending",false) &&
+    !ImGui::IsAnyMouseDown() && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
+   if(dungeon_tooltip.dwell(tooltip_allowed,c.state.value("context",""),x,y,ImGui::GetTime())) dungeon_tooltip.draw(c.state,c.catalog);
    if(hovered && !c.state.value("message_pending",false)) {
     if(!mouse_target) outline(x,y,IM_COL32(140,185,220,190),display_scale);
-    ImGui::BeginTooltip(); ImGui::PushTextWrapPos(ImGui::GetFontSize()*26);
-    tile_details(x,y,false);
-    if(routing && c.route.value("context","")==c.state.value("context","") && c.route.value("x",-1)==x && c.route.value("y",-1)==y) {
-     if(c.route.value("reachable",false)) ImGui::TextDisabled("Route: %d steps. Travel may stop for events.",int(c.route.at("path").size()));
-     else ImGui::TextDisabled("No walking route found.");
-    }
-    ImGui::PopTextWrapPos(); ImGui::EndTooltip();
     if(ImGui::IsMouseClicked(0) && c.native_targeting() && !c.busy && !c.state.value("message_pending",false)) {
      const bool active=c.state.contains("targeting") || c.state.value("aiming",false) || c.state.value("direction_prompt",false);
      if(active || (c.ready() && c.mouse_movement())) {
@@ -946,6 +945,7 @@ struct UI {
    }
    ImGui::EndDisabled(); ImGui::EndPopup();
   }
+  if(!grid.semantic) dungeon_tooltip.reset();
   if(!grid.semantic && c.state.contains("cursor")) {
    const auto &cursor=c.state["cursor"];
    const int x=cursor.value("x",-1), y=cursor.value("y",-1);
@@ -1586,7 +1586,7 @@ int main(int argc,char **argv) {
    connection.close_process();
    connection=Connection{};
    connection.replay_save=ui.pending_replay; ui.pending_replay.clear();
-   ui.birth_panel.initialized=false;
+   ui.birth_panel.initialized=false; ui.dungeon_tooltip.reset();
    ui.grid_focus=ui.return_from_prompt=false;
    ui.focus_requested=!connection.replay_save.empty();
    ui.selected.clear(); ui.last_prompt.clear(); ui.keys.clear();

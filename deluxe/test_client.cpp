@@ -698,6 +698,32 @@ int main(int argc,char **argv) {
    if(request.second=="session.replay") replay_sent=true;
   }
   check(replay_sent && replay.character_save=="Hero" && replay.busy,"Handshake must resume the completed save through replay");
+  DungeonTooltip hover;
+  check(!hover.dwell(true,"first",5,6,1),"Tooltip must not appear immediately");
+  check(!hover.dwell(true,"first",5,6,1.5),"Tooltip dwell delay");
+  check(hover.dwell(true,"first",5,6,1.6),"Stationary hover should show tooltip");
+  check(!hover.dwell(true,"next",5,6,2),"State changes must restart tooltip dwell");
+  check(!hover.dwell(false,"next",5,6,3),"Clicks, prompts and targeting must dismiss tooltip");
+  check(!hover.dwell(true,"next",6,6,4),"Moving tiles must restart tooltip dwell");
+  json hover_state={{"dungeon",{{"x",5},{"y",6},{"width",1},{"height",1},
+    {"cells",json::array({json::array({json::array({46,1,0,0,63,1,0,0,1,0,0,0,0})})})},
+    {"items",json::array({{{"x",5},{"y",6},{"label","a remembered Scroll"},{"color",1}}})}}},
+    {"items",json::array({{{"x",5},{"y",6},{"label","Live unseen replacement"}}})},
+    {"monsters",json::array({{{"x",5},{"y",6},{"name","hidden creature"},{"visible",false}}})}};
+  json hover_catalog={{"features",json::array({{{"id",1},{"name","open floor"}}})}};
+  auto remembered= DungeonTooltip::describe_tile(hover_state,hover_catalog,5,6);
+  check(!remembered.contains("name") && remembered["items"][0]["label"]=="a remembered Scroll" && !remembered["seen"].get<bool>(),"Tooltip must describe memory rather than live hidden entities");
+  hover_state["monsters"][0]={{"x",5},{"y",6},{"name","sleepy orc"},{"visible",true},{"hp",3},{"max_hp",8},{"condition","asleep"}};
+  auto creature= DungeonTooltip::describe_tile(hover_state,hover_catalog,5,6);
+  check(creature["name"]=="Sleepy orc" && creature["subtitle"]=="Asleep" && creature["hp"]==3,"Creature tooltip details");
+  for(int i=0;i<2;++i) {
+   ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(i?320.f:900.f,650)); ImGui::Begin("Dungeon hover host");
+   hover.x=5; hover.y=6; hover.content=nullptr; hover.draw(hover_state,hover_catalog);
+   ImGui::End(); ImGui::Render();
+  }
+  hover_state["dungeon"]["cells"][0][0][11]=1;
+  auto hallucination=DungeonTooltip::describe_tile(hover_state,hover_catalog,5,6);
+  check(hallucination.value("hallucinating",false) && !hallucination.contains("name") && hallucination["items"].empty(),"Hallucination should not turn an appearance into a definite identification");
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";

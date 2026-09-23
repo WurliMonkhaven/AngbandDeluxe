@@ -43,7 +43,7 @@ static void deluxe_observe_cell(struct loc grid, const struct map_visual *v)
 static void deluxe_capture_view(cJSON *state_record)
 {
  int x, y, width, height;
- cJSON *view, *rows;
+ cJSON *view, *rows, *observed_items;
  /* Native targeting/aiming share the dungeon; nested recall screens still own
   * the terminal. Presentation mode never depends on parsing terminal text. */
  if ((!ready && !native_prompt && !textui_message_pending && !target_ui_current && !textui_aiming && !textui_direction && !item_choice_objects && !spell_selection) || (active_prompt && !native_prompt) || screen_save_depth || !streq(phase,"playing") || !deluxe_cells) return;
@@ -52,7 +52,7 @@ static void deluxe_capture_view(cJSON *state_record)
  if (width < 1 || height < 1 || terminal.offset_x < 0 || terminal.offset_y < 0) return;
  for (y=0;y<height;++y) for (x=0;x<width;++x)
   if (!deluxe_cells_valid[(y+terminal.offset_y)*deluxe_width+x+terminal.offset_x]) return;
- view=cJSON_CreateObject(); rows=cJSON_CreateArray();
+ view=cJSON_CreateObject(); rows=cJSON_CreateArray(); observed_items=cJSON_CreateArray();
  json_bool(state_record,"message_pending",textui_message_pending);
  json_bool(state_record,"spell_selection",spell_selection);
  json_bool(state_record,"native_prompt",native_prompt);
@@ -66,9 +66,27 @@ static void deluxe_capture_view(cJSON *state_record)
     v->object_char,v->object_attr,v->actor_char,v->actor_attr,
     v->feature,v->lighting,v->seen,v->hallucinated,v->player};
    cJSON_AddItemToArray(row,ints(cell,13));
+   /* Describe remembered piles, not live-world objects at these coordinates.
+    * Copies keep object_desc's everseen bookkeeping out of read-only capture. */
+   if(v->object_char && !v->hallucinated && player->cave) {
+    struct loc grid=loc(x+terminal.offset_x,y+terminal.offset_y);
+    const struct object *o;
+    for(o=square_object(player->cave,grid);o;o=o->next) {
+     struct object copy=*o; char label[512]; cJSON *entry;
+     if(o->kind!=unknown_item_kind && o->kind!=unknown_gold_kind && ignore_known_item_ok(player,o)) continue;
+     if(o->kind==unknown_item_kind) my_strcpy(label,"An unknown item",sizeof(label));
+     else if(o->kind==unknown_gold_kind) my_strcpy(label,"Unknown treasure",sizeof(label));
+     else { copy.known=&copy; describe(&copy,false,label,sizeof(label),0); }
+     entry=cJSON_CreateObject(); number(entry,"x",grid.x); number(entry,"y",grid.y);
+     string(entry,"label",label); number(entry,"quantity",o->number);
+     number(entry,"color",o->kind->base ? o->kind->base->attr : COLOUR_WHITE);
+     cJSON_AddItemToArray(observed_items,entry);
+    }
+   }
   }
   cJSON_AddItemToArray(rows,row);
  }
+ cJSON_AddItemToObject(view,"items",observed_items);
  cJSON_AddItemToObject(view,"cells",rows); cJSON_AddItemToObject(state_record,"dungeon",view);
  if (target_ui_current) {
   const struct target_ui_state *t=target_ui_current;
