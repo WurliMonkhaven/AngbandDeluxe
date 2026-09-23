@@ -35,6 +35,10 @@ typedef enum {
 } oinfo_detail_t;
 
 
+typedef void (*object_info_section_cb)(void *user, const char *id, const char *title,
+ const wchar_t *text, size_t length);
+textblock *object_info_sections(const struct object *obj, oinfo_detail_t mode,
+ object_info_section_cb emit, void *user);
 textblock *object_info(const struct object *obj, oinfo_detail_t mode);
 textblock *object_info_ego(struct ego_item *ego);
 void object_info_spoil(ang_file *f, const struct object *obj, int wrap);

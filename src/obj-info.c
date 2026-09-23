@@ -2312,7 +2312,19 @@ static bool describe_ego(textblock *tb, const struct ego_item *ego)
 /**
  * Output object information
  */
-static textblock *object_info_out(const struct object *obj, int mode)
+/* Section boundaries are emitted during the same calculation as legacy text. */
+static void info_section(textblock *tb, size_t *start, const char *id,
+ const char *title, object_info_section_cb emit, void *user)
+{
+ const wchar_t *text;
+ size_t end;
+ if (!emit) return;
+ text = textblock_text(tb); end = wcslen(text);
+ if (end > *start) emit(user, id, title, text + *start, end - *start);
+ *start = end;
+}
+
+static textblock *object_info_out_sections(const struct object *obj, int mode, object_info_section_cb emit, void *user)
 {
 	bitflag flags[OF_SIZE];
 	struct element_info el_info[ELEM_MAX];
@@ -2322,12 +2334,14 @@ static textblock *object_info_out(const struct object *obj, int mode)
 	bool subjective = mode & OINFO_SUBJ ? true : false;
 	bool ego = mode & OINFO_EGO ? true : false;
 	textblock *tb = textblock_new();
+ size_t section_start = 0;
 
 	assert(obj->known);
 
 	/* Unaware objects get simple descriptions */
 	if (obj->kind != obj->known->kind) {
 		textblock_append(tb, "\n\nYou do not know what this is.\n");
+		info_section(tb,&section_start,"knowledge","Identification",emit,user);
 		return tb;
 	}
 
@@ -2345,14 +2359,19 @@ static textblock *object_info_out(const struct object *obj, int mode)
 		something = true;
 	}
 
+ info_section(tb,&section_start,"lore","Origin & lore",emit,user);
 	if (describe_curses(tb, obj, flags)) something = true;
+ info_section(tb,&section_start,"curses","Curses",emit,user);
 	if (describe_stats(tb, obj, mode)) something = true;
 	if (describe_slays(tb, obj)) something = true;
 	if (describe_brands(tb, obj)) something = true;
+ info_section(tb,&section_start,"bonuses","Bonuses & damage",emit,user);
 	if (describe_elements(tb, el_info)) something = true;
 	if (describe_protects(tb, flags)) something = true;
+ info_section(tb,&section_start,"resistances","Resistances & protection",emit,user);
 	if (describe_ignores(tb, el_info)) something = true;
 	if (describe_hates(tb, el_info)) something = true;
+ info_section(tb,&section_start,"durability","Durability",emit,user);
 	if (describe_sustains(tb, flags)) something = true;
 	if (describe_misc_magic(tb, flags)) something = true;
 	if (describe_light(tb, obj, mode)) something = true;
@@ -2360,6 +2379,7 @@ static textblock *object_info_out(const struct object *obj, int mode)
 	if (ego && describe_ego(tb, obj->ego)) something = true;
 	if (something) textblock_append(tb, "\n");
 
+ info_section(tb,&section_start,"abilities","Abilities",emit,user);
 	/* Skip all the very specific information where we are giving general
 	   ego knowledge rather than for a single item - abilities can vary */
 	if (!ego) {
@@ -2368,19 +2388,34 @@ static textblock *object_info_out(const struct object *obj, int mode)
 			textblock_append(tb, "\n");
 		}
 
+ info_section(tb,&section_start,"use","Use & activation",emit,user);
 		if (subjective && describe_combat(tb, obj)) {
 			something = true;
 			textblock_append(tb, "\n");
 		}
 
+ info_section(tb,&section_start,"combat","Combat",emit,user);
 		if (!terse && subjective && describe_digger(tb, obj)) something = true;
 	}
 
+ info_section(tb,&section_start,"digging","Digging",emit,user);
 	/* Don't append anything in terse (for chararacter dump) */
 	if (!something && !terse)
 		textblock_append(tb, "\n\nThis item does not seem to possess any special abilities.");
 
+ info_section(tb,&section_start,"notes","Notes",emit,user);
 	return tb;
+}
+
+static textblock *object_info_out(const struct object *obj, int mode)
+{
+ return object_info_out_sections(obj,mode,NULL,NULL);
+}
+
+textblock *object_info_sections(const struct object *obj, oinfo_detail_t mode,
+ object_info_section_cb emit, void *user)
+{
+ return object_info_out_sections(obj,mode | OINFO_SUBJ,emit,user);
 }
 
 

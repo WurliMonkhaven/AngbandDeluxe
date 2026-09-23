@@ -287,6 +287,7 @@ static void properties(const json &value) {
 #include "character_overview.h"
 #include "character_sheet.h"
 #include "spell_panel.h"
+#include "item_description.h"
 #include "store_panel.h"
 struct UI {
  Connection &c;
@@ -882,7 +883,7 @@ struct UI {
    }
    ImGui::PopStyleVar();
    const auto description=o.value("description","");
-   if(!description.empty()) { ImGui::Spacing(); ImGui::SeparatorText("Description"); ImGui::TextWrapped("%s",description.c_str()); }
+   if(!description.empty()) { ImGui::Spacing(); ItemDescription::draw(o); }
   }
  }
  void creatures() {

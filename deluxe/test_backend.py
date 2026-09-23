@@ -671,6 +671,14 @@ class BackendTests(unittest.TestCase):
         self.assertIn("When quaffed", potion["description"])
         weapon = next(i for i in initial["items"] if i["location"] == "weapon")
         self.assertIn("Combat info", weapon["description"])
+        sections = {s["id"]: s["text"] for s in weapon["description_sections"]}
+        self.assertIn("Combat info", sections["combat"])
+        self.assertIn("An inheritance from your family", sections["lore"])
+        for section in weapon["description_sections"]:
+            self.assertIn(section["text"], weapon["description"])
+        self.assertTrue(any("When quaffed" in s["text"] and s["id"] == "use"
+                            for s in potion["description_sections"]))
+
         for _ in range(10):
             self.assertEqual(e.call("state.get")["result"], initial)
         stale = e.call("command.execute", {"revision": "0", "command": "core.hold"})

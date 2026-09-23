@@ -215,6 +215,26 @@ static void describe(const struct object *obj, bool actual, char *buf, size_t n,
 }
 /* Use the same prose as classic inspection. Its hypothetical equipment/state
  * swaps are restored synchronously, and calc_bonuses uses update=false. */
+static void inspection_section(void *user, const char *id, const char *title,
+ const wchar_t *wide, size_t length)
+{
+ size_t i, used=0;
+ char *text;
+ cJSON *row;
+ while(length && (*wide==' ' || *wide=='\n' || *wide=='\r' || *wide=='\t')) { ++wide; --length; }
+ while(length && (wide[length-1]==' ' || wide[length-1]=='\n' || wide[length-1]=='\r')) --length;
+ if(!length) return;
+ text=mem_alloc(length*4+1);
+ for(i=0;i<length;++i) {
+  uint32_t code=(uint32_t)wide[i];
+  if(code>=0xd800 && code<=0xdbff && i+1<length && wide[i+1]>=0xdc00 && wide[i+1]<=0xdfff)
+   code=0x10000+((code-0xd800)<<10)+wide[++i]-0xdc00;
+  used+=utf32_to_utf8(text+used,length*4+1-used,&code,1,NULL);
+ }
+ text[used]=0; row=cJSON_CreateObject();
+ string(row,"id",id); string(row,"title",title); string(row,"text",text);
+ cJSON_AddItemToArray((cJSON *)user,row); mem_free(text);
+}
 static void inspection_description(cJSON *record, const struct object *obj)
 {
  textblock *tb;
@@ -238,7 +258,11 @@ static void inspection_description(cJSON *record, const struct object *obj)
  /* effect_describe rolls dice to obtain their components. Those incidental
   * rolls must not consume gameplay entropy when building a read-only view. */
  memcpy(rng_state, STATE, sizeof(rng_state));
- tb = object_info(obj, OINFO_NONE);
+ {
+  cJSON *sections=cJSON_CreateArray();
+  cJSON_AddItemToObject(record,"description_sections",sections);
+  tb = object_info_sections(obj, OINFO_NONE, inspection_section, sections);
+ }
  memcpy(STATE, rng_state, sizeof(rng_state));
  state_i = rng_index; Rand_value = rng_value; Rand_quick = rng_quick;
  wide = textblock_text(tb); length = wcslen(wide);

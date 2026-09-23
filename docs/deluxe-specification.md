@@ -515,3 +515,8 @@ The fixed sidebar overview groups character identity and resources, dungeon cont
 ### Native character sheet
 
 Details and the Character command open a read-only native modal with Overview, Combat & skills, Resistances & abilities, and Background tabs. The existing keyboard terminal sheet remains available. The engine exposes player.character_sheet containing grouped label/value/color rows shared with its original character screen, stat breakdowns, known effective resistance levels and ability descriptions, and background history. No terminal scraping or client combat calculations are used. Closing with Escape, Close, or the window close control returns focus to the game; browsing sends no gameplay command. This supersedes the interim Details button opening the original sheet.
+
+
+### Structured inspection descriptions
+
+Items retain their legacy description and also expose description_sections with stable id, title, and text fields. Sections are emitted directly by the engine description generators in the same calculation: origin/lore, curses, bonuses/damage, resistances/protection, durability, abilities, use/activation, combat, digging, and notes. Empty sections are omitted. Inventory and store inspection use collapsible headings, initially expanding gameplay effects and combat while collapsing lore, durability and digging. Numeric combat breakdowns within these sections remain engine-authored prose; the client does not parse or recalculate them.

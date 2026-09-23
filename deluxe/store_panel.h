@@ -73,7 +73,7 @@ struct StorePanel {
    ImGui::TextWrapped("%s",selected->value("label","").c_str());
    ImGui::PopStyleColor();
    ImGui::Separator();
-   ImGui::TextWrapped("%s",selected->value("description","").c_str());
+   ImGui::PushID("Selected description"); ItemDescription::draw(*selected); ImGui::PopID();
    if(selected->contains("spells")) {
     if(ImGui::Button("Browse spells")) { browsed_spell.clear(); ImGui::OpenPopup("Book spells"); }
     ImGui::SetNextWindowSize(ImVec2(std::min(ImGui::GetMainViewport()->WorkSize.x-24,ImGui::GetFontSize()*48),0),ImGuiCond_Always);
@@ -95,7 +95,7 @@ struct StorePanel {
     ImGui::PushStyleColor(ImGuiCol_Text,color(equipped->value("name_color",1)));
     ImGui::TextWrapped("%s — %s",display_label(equipped->value("location","")).c_str(),equipped->value("label","").c_str());
     ImGui::PopStyleColor();
-    ImGui::TextWrapped("%s",equipped->value("description","").c_str());
+    ImGui::PushID(equipped->value("id","").c_str()); ItemDescription::draw(*equipped); ImGui::PopID();
    }
   } else ImGui::TextDisabled("Select an item to inspect it.");
   ImGui::EndChild(); ImGui::EndChild(); ImGui::PopID();
