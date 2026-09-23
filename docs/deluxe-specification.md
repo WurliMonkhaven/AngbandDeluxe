@@ -630,3 +630,34 @@ continues only when Proceed with click is enabled. No messages are auto-skipped.
 
 The ribbon fades to 6% opacity while hovered and never captures clicks.
 Underlying dungeon interactions and Proceed with click retain their normal rules.
+
+
+## Native knowledge browser (September 2026)
+
+Knowledge opens immediately left of Settings during play. Its modal browser has
+Creatures, Items, Artifacts and Terrain tabs, case-insensitive search, category
+filters, coloured entry names and independently scrolling list/detail panes.
+Recall is grouped into collapsible sections, with creature sighting/kill counts.
+Close and Escape restore game focus. The native Commands entry also opens it;
+backends without the knowledge capability retain the classic command.
+
+The optional knowledge:1 capability supplies knowledge.list({category}) and
+knowledge.get({category,id}). Lists return category and entries with numeric id,
+name, group and color. Details return those fields plus stats (label/value) and
+description_sections (id/title/text). IDs are engine/session-local. Unknown
+categories, unavailable IDs and noninteger IDs are rejected; queries require
+a character in the playing phase. Queries neither spend turns nor change
+tracking, gear or random-number state. They are requested only while browsing,
+never added to movement snapshots. Stale selection replies are discarded and
+read-only replies cannot release an outstanding gameplay command.
+
+This browser presents discovered monster lore, item-type recall (including
+unidentified flavours), seen artifacts and terrain definitions. Descriptions
+come from the engine's lore and object-info routines, not scraped terminal text.
+These presentation choices do not restrict the API's broader ability to expose
+actual or hidden properties. macOS/Linux packaging remains deferred.
+
+Knowledge records also include known (boolean). The Known only checkbox defaults
+to enabled and hides unidentified item types; disabling it includes their
+flavours. Item names include their type (e.g. Bronze Ring). Item colours use
+Angband display attributes, with black replaced by readable white.

@@ -376,6 +376,30 @@ int main(int argc,char **argv) {
    check(creator.restart_ready,"Cancelled birth must return to main menu without backend stopped error");
   }
   {
+   Connection knowledge; knowledge.connected=true; knowledge.busy=true;
+   KnowledgeBrowser browser; browser.open(knowledge);
+   const auto old=knowledge.knowledge_list_request;
+   browser.load(knowledge,"terrain");
+   const auto current=knowledge.knowledge_list_request;
+   knowledge.receive({{"id",old},{"result",{{"entries",json::array()}}}});
+   check(knowledge.knowledge_list.is_null(),"Stale knowledge listings must not replace the selected category");
+   knowledge.receive({{"id",current},{"result",{{"entries",json::array({{{"id",1},{"name","Floor"},{"group","Terrain"}}})}}}});
+   check(knowledge.busy && !knowledge.knowledge_list.is_null(),"Knowledge replies must not release an active game command");
+   browser.select(knowledge,1); const auto detail=knowledge.knowledge_detail_request;
+   browser.select(knowledge,2);
+   knowledge.receive({{"id",detail},{"result",{{"name","Old selection"}}}});
+   check(knowledge.knowledge_detail.is_null(),"Stale knowledge details must not replace a newer selection");
+   check(KnowledgeBrowser::matches("Potion of Speed","SPEED"),"Knowledge search must ignore case");
+   browser.category="creatures";
+   knowledge.knowledge_list={{"entries",json::array({{{"id",1},{"name","Merchant"},{"group","People"}}})}};
+   browser.selected=1;
+   knowledge.knowledge_detail={{"name","Merchant"},{"group","People"},{"stats",json::array({{{"label","Sightings"},{"value",2}}})},{"description_sections",json::array({{{"title","Description"},{"text","A merchant wanders the town."}}})}};
+   for(int frame=0;frame<3;++frame) {
+    ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(frame==0?540:1000,650)); ImGui::Begin("Knowledge test");
+    browser.contents(knowledge); ImGui::End(); ImGui::Render();
+   }
+  }
+  {
    Connection feedback; feedback.connected=true; feedback.state={{"context","view-1"},{"readiness","ready"},{"phase","playing"},{"dungeon",{{"level_id","1"}}}};
    feedback.capabilities["interaction.route"]=1;
    feedback.route_sent=SDL_GetTicksNS()-120000001;

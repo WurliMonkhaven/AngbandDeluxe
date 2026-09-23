@@ -171,6 +171,63 @@ class BackendTests(unittest.TestCase):
         cell = view["cells"][player["y"]-view["y"]][player["x"]-view["x"]]
         self.assertTrue(cell[12])
 
+    def test_native_knowledge(self):
+        e = self.engine
+        e.hello()
+        self.assertEqual(e.call("knowledge.list", {"category": "items"})["error"]["code"], "wrong_phase")
+        e.birth()
+        before = e.call("state.get")["result"]
+        counts = {}
+        for category in ("creatures", "items", "artifacts", "terrain"):
+            listing = e.call("knowledge.list", {"category": category})["result"]
+            self.assertEqual(listing["category"], category)
+            entries = listing["entries"]
+            counts[category] = len(entries)
+            self.assertEqual(len({row["id"] for row in entries}), len(entries))
+            for entry in entries:
+                self.assertTrue(entry["name"])
+                self.assertIsInstance(entry["known"], bool)
+                if category == "items":
+                    self.assertNotEqual(entry["color"], 0, "Item names must remain readable")
+                    if entry["group"] in ("potion", "ring", "wand", "rod", "scroll", "amulet"):
+                        self.assertIn(entry["group"], entry["name"].lower())
+                detail = e.call("knowledge.get", {"category": category, "id": entry["id"]})["result"]
+                self.assertEqual(detail["name"], entry["name"])
+                self.assertIsInstance(detail["stats"], list)
+                self.assertIsInstance(detail["description_sections"], list)
+                for section in detail["description_sections"]:
+                    self.assertTrue(section["title"])
+                    self.assertTrue(section["text"].strip())
+            for bad in (-1, 999999, 1.5, "1"):
+                self.assertEqual(e.call("knowledge.get", {"category": category, "id": bad})["error"]["code"], "invalid_argument")
+        self.assertGreater(counts["items"], 10)
+        self.assertGreater(counts["terrain"], 10)
+        self.assertEqual(e.call("knowledge.list", {"category": "invalid"})["error"]["code"], "invalid_argument")
+        self.assertEqual(e.call("state.get")["result"], before, "Browsing must not change turns, tracking, gear or gameplay state")
+
+    def test_knowledge_artifact_recall(self):
+        e = self.engine
+        e.hello(); e.birth()
+        # Wizard mode is confined to this disposable character, exposing all
+        # artifact templates so their descriptions can be exercised.
+        e.key(23)
+        for _ in range(20):
+            e.state = e.call("state.get")["result"]
+            if e.prompt:
+                prompt = e.prompt; e.prompt = None; old = e.state["revision"]
+                e.call("prompt.reply", {"prompt_id": prompt["prompt_id"], "value": True})
+                e.next_state(old)
+            elif e.state["readiness"] != "ready":
+                e.key("enter")
+            else:
+                break
+        entries = e.call("knowledge.list", {"category": "artifacts"})["result"]["entries"]
+        self.assertGreater(len(entries), 20)
+        for entry in entries:
+            detail = e.call("knowledge.get", {"category": "artifacts", "id": entry["id"]})["result"]
+            self.assertTrue(detail["description_sections"], entry)
+        self.assertEqual(e.call("knowledge.list", {"category": "artifacts"})["result"]["entries"], entries)
+
     def test_semantic_view_and_fallback(self):
         e = self.engine
         e.hello(); e.birth()
@@ -1250,6 +1307,9 @@ class BackendTests(unittest.TestCase):
             branch.hello(); branch.call('session.load',{'save':'ProtocolTest'}); branch.next_state(None)
             while branch.state['readiness']!='ready': branch.key('enter')
             if browse:
+                for category in ('creatures','items','artifacts','terrain'):
+                    for entry in branch.call('knowledge.list',{'category':category})['result']['entries']:
+                        self.assertIn('result',branch.call('knowledge.get',{'category':category,'id':entry['id']}))
                 for _ in range(3): self.spell_command('core.browse'); self.store_reply(None)
                 for item in branch.state['items']:
                     if item.get('comparison_available'):

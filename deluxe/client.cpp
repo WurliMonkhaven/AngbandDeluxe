@@ -90,6 +90,8 @@ struct Connection {
  json capabilities = json::object();
  json comparisons = json::object();
  json item_rules=nullptr;
+ json knowledge_list=nullptr,knowledge_detail=nullptr;
+ std::string knowledge_list_request,knowledge_detail_request;
  json route=json::object(), travel=json::object();
  std::string route_request;
  Uint64 route_sent=0;
@@ -185,6 +187,16 @@ struct Connection {
   auto id = j.value("id",""); auto it = requests.find(id);
   if (it == requests.end()) return;
   auto method = it->second; requests.erase(it);
+  if(method=="knowledge.list" || method=="knowledge.get") {
+   auto &pending=method=="knowledge.list"?knowledge_list_request:knowledge_detail_request;
+   if(id==pending) {
+    auto &result=method=="knowledge.list"?knowledge_list:knowledge_detail;
+    result=j.contains("error")?json{{"error",j["error"].value("message","Knowledge unavailable.")}}:j["result"];
+    if(result.contains("entries")) std::sort(result["entries"].begin(),result["entries"].end(),[](const json &a,const json &b) { return a.value("name","")<b.value("name",""); });
+    pending.clear();
+   }
+   return; // Read-only replies never release the engine command lock.
+  }
   if(method=="dungeon.route") {
    route_request.clear();
    if(!j.contains("error") && j["result"].value("context","")==state.value("context","")) route=j["result"];
@@ -329,6 +341,7 @@ static void properties(const json &value) {
 }
 #include "character_overview.h"
 #include "character_sheet.h"
+#include "knowledge_browser.h"
 #include "dungeon_feedback.h"
 #include "birth_panel.h"
 #include "quickbar.h"
@@ -345,6 +358,7 @@ struct UI {
  bool quickbar_held[10]{};
  char quickbar_text=0;
  bool open_character_sheet=false;
+ KnowledgeBrowser knowledge_browser;
  bool inscription_edit=false;
  ItemRules item_rules_panel;
  StorePanel store_panel;
@@ -563,6 +577,7 @@ struct UI {
   focus_game(); return true;
  }
  void execute(const std::string &id,const std::string &item="") {
+  if(id=="core.knowledge" && c.capabilities.value("knowledge",0)>0 && c.state.value("phase","")=="playing") { keys.clear(); knowledge_browser.open(c); return; }
   if(id=="core.inscribe" && c.ready()) inscription_edit=true;
   if(id=="core.character" && c.state.contains("player") && c.state["player"].contains("character_sheet")) { keys.clear(); open_character_sheet=true; return; }
   if(c.native_targeting() && (id=="core.look" || id=="core.target")) c.target("targeting.begin",{{"mode",id=="core.look"?"look":"target"}});
@@ -1144,8 +1159,9 @@ struct UI {
    ImGui::SameLine();
   }
   const float settings_width=ImGui::CalcTextSize("Settings").x+2*ImGui::GetStyle().FramePadding.x;
+  const float knowledge_width=ImGui::CalcTextSize("Knowledge").x+2*ImGui::GetStyle().FramePadding.x;
   const float dev_width=ImGui::CalcTextSize("Dev tools").x+2*ImGui::GetStyle().FramePadding.x;
-  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowSize().x-ImGui::GetStyle().WindowPadding.x-settings_width-dev_width-ImGui::GetStyle().ItemSpacing.x));
+  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowSize().x-ImGui::GetStyle().WindowPadding.x-settings_width-dev_width-knowledge_width-2*ImGui::GetStyle().ItemSpacing.x));
   ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.55f,.12f,.15f,1));
   ImGui::PushStyleColor(ImGuiCol_ButtonHovered,ImVec4(.72f,.19f,.22f,1));
   ImGui::PushStyleColor(ImGuiCol_ButtonActive,ImVec4(.85f,.24f,.26f,1));
@@ -1174,6 +1190,9 @@ struct UI {
    ImGui::EndPopup();
   }
   ImGui::SameLine();
+  ImGui::BeginDisabled(!c.connected || c.capabilities.value("knowledge",0)<1 || c.state.value("phase","")!="playing");
+  if(ImGui::Button("Knowledge")) { keys.clear(); knowledge_browser.open(c); }
+  ImGui::EndDisabled(); ImGui::SameLine();
   if(ImGui::Button("Settings")) {
    begin_settings();
    ImGui::OpenPopup("Settings");
@@ -1286,6 +1305,7 @@ struct UI {
   if(quickbar.customize_window()) focus_game();
   if(quickbar.dirty) { quickbar.dirty=false; save_settings(); }
   if(item_rules_panel.draw(c)) focus_game();
+  if(knowledge_browser.draw(c)) focus_game();
   if(c.state.contains("player")) {
    if(CharacterSheet::draw(c.state["player"],open_character_sheet)) focus_game();
   }
