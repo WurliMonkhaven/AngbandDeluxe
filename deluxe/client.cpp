@@ -271,8 +271,11 @@ static void properties(const json &value) {
   }
  }
 }
+#include "store_panel.h"
 struct UI {
  Connection &c;
+ StorePanel store_panel;
+ bool was_store=false;
  float scale = 1.0f, game_fraction = .72f;
  bool fullscreen=false, draft_fullscreen=false;
  bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
@@ -450,7 +453,7 @@ struct UI {
   focus_game();
  }
  bool owns_keyboard() const {
-  return c.state.contains("terminal") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
+  return c.state.contains("terminal") && !c.state.contains("store") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
    && !quit_dialog && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId);
  }
  void prepare_frame(SDL_Window *window) {
@@ -770,7 +773,9 @@ struct UI {
   }
   if(c.state.contains("items")) for(const auto &o:c.state["items"]) {
    if(o.value("location","")!="Floor" || o.value("x",-1)!=x || o.value("y",-1)!=y) continue;
+   ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
    ImGui::TextWrapped("%s",o.value("label","").c_str());
+   ImGui::PopStyleColor();
    if(full) ImGui::TextWrapped("%s",o.value("description","").c_str());
   }
  }
@@ -820,6 +825,7 @@ struct UI {
     if(!matches(label,item_filter)) continue;
     auto id=o.value("id",""); ImGui::PushID(id.c_str());
     ImGui::TableNextRow(); ImGui::TableNextColumn();
+    ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
     if(ImGui::Selectable(label.c_str(),selected==id,ImGuiSelectableFlags_SpanAllColumns)) selected=id;
     if(ImGui::IsItemHovered()) {
      ImGui::BeginTooltip(); ImGui::TextUnformatted(label.c_str());
@@ -827,6 +833,7 @@ struct UI {
      if(!inscription.empty()) ImGui::Text("Inscription: %s",inscription.c_str());
      ImGui::EndTooltip();
     }
+    ImGui::PopStyleColor();
     ImGui::TableNextColumn(); ImGui::TextUnformatted(display_label(o.value("location","")).c_str());
     ImGui::TableNextColumn(); ImGui::Text("%d",o.value("quantity",0)); ImGui::PopID();
    }
@@ -914,10 +921,12 @@ struct UI {
     ImGui::PushID(id.c_str()); ImGui::TableNextRow(); ImGui::TableNextColumn();
     if(!option) ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     ImGui::TextUnformatted(option?option->value("shortcut","").c_str():""); ImGui::TableNextColumn();
+    ImGui::PushStyleColor(ImGuiCol_Text,option?color(item->value("name_color",1)):ImGui::GetColorU32(ImGuiCol_TextDisabled));
     if(ImGui::Selectable(item->value("label","").c_str(),prompt_item==id,ImGuiSelectableFlags_SpanAllColumns|ImGuiSelectableFlags_AllowDoubleClick)) {
      prompt_item=id;
      if(option && ImGui::IsMouseDoubleClicked(0)) answer=option->value("id","");
     }
+    ImGui::PopStyleColor();
     if(prompt_item==id && (fresh || ImGui::IsKeyPressed(ImGuiKey_UpArrow) || ImGui::IsKeyPressed(ImGuiKey_DownArrow))) ImGui::SetScrollHereY();
     ImGui::TableNextColumn(); ImGui::TextUnformatted(display_label(item->value("location","")).c_str());
     ImGui::TableNextColumn(); ImGui::Text("%d",item->value("quantity",0));
@@ -1036,9 +1045,13 @@ struct UI {
   settings_window(window);
   if(!in_game) launcher();
   const auto phase=c.state.value("phase","launcher");
+  const bool in_store=in_game && c.state.contains("store");
+  if(in_store) { grid_focus=false; keys.clear(); store_panel.draw(c); }
+  else if(was_store) { focus_game(); store_panel.last_name.clear(); }
+  was_store=in_store;
   const bool creating_character=in_game && (phase=="birth" || phase=="launcher");
   if(creating_character) grid(std::max(1.f,ImGui::GetContentRegionAvail().y));
-  if(in_game && !creating_character && ImGui::BeginTable("layout",2,ImGuiTableFlags_Resizable|ImGuiTableFlags_BordersInnerV)) {
+  if(in_game && !creating_character && !in_store && ImGui::BeginTable("layout",2,ImGuiTableFlags_Resizable|ImGuiTableFlags_BordersInnerV)) {
    ImGui::TableSetupColumn("Game",ImGuiTableColumnFlags_WidthStretch,0.69f);
    ImGui::TableSetupColumn("Panels",ImGuiTableColumnFlags_WidthStretch,0.31f);
    ImGui::TableNextRow(); ImGui::TableNextColumn();

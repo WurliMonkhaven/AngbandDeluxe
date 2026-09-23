@@ -753,6 +753,132 @@ class BackendTests(unittest.TestCase):
         self.assertLessEqual(max(abs(e.state['player']['x']-wall['x']),abs(e.state['player']['y']-wall['y'])),1)
         self.assertNotEqual(e.state['map']['actual'][wall['y']][wall['x']],original_feature,e.screen())
 
+    def enter_store(self, name):
+        e = self.engine
+        catalog = e.call('catalog.get')['result']['features']
+        target = next(f['id'] for f in catalog if f['name'] == name)
+        floors = {f['id'] for f in catalog if f['name'] in
+                  ('open floor', 'open door', 'broken door', 'up staircase', 'down staircase')}
+        floors.add(target)
+        for _ in range(220):
+            e.state = e.call('state.get')['result']
+            if 'store' in e.state:
+                self.assertEqual(e.state['store']['name'], name)
+                return
+            if e.state['readiness'] != 'ready':
+                e.key('enter')
+                continue
+            terrain = e.state['map']['actual']
+            start = (e.state['player']['x'], e.state['player']['y'])
+            frontier = deque([(start, [])]); seen = {start}; route = None
+            while frontier:
+                (x,y), path = frontier.popleft()
+                if terrain[y][x] == target and path:
+                    route = path; break
+                for dx,dy,key in [(1,0,'6'),(-1,0,'4'),(0,1,'2'),(0,-1,'8'),
+                                  (1,1,'3'),(-1,1,'1'),(1,-1,'9'),(-1,-1,'7')]:
+                    pos = x+dx,y+dy
+                    if pos not in seen and 0 <= pos[1] < len(terrain) and 0 <= pos[0] < len(terrain[0]) and terrain[pos[1]][pos[0]] in floors:
+                        seen.add(pos); frontier.append((pos,path+[key]))
+            self.assertTrue(route, 'No route to '+name)
+            e.key(ord(route[0]))
+        self.fail('Did not enter '+name)
+
+    def store_action(self, method, item=None):
+        e = self.engine
+        args = {'context':e.state['context']}
+        if item: args['item'] = item
+        old = e.state['revision']
+        self.assertIn('result', e.call(method,args))
+        e.next_state(old)
+        e.state = e.call('state.get')['result']
+
+    def store_reply(self, value):
+        e = self.engine
+        self.assertIsNotNone(e.prompt)
+        old = e.state['revision']; prompt = e.prompt; e.prompt = None
+        self.assertIn('result',e.call('prompt.reply',{'prompt_id':prompt['prompt_id'],'value':value}))
+        e.next_state(old)
+        e.state = e.call('state.get')['result']
+
+    def finish_store_prompts(self, confirm=True):
+        e = self.engine
+        for _ in range(20):
+            if e.prompt:
+                self.store_reply(confirm if e.prompt['type']=='confirmation' else 1)
+            elif e.state.get('message_pending'):
+                e.key('enter'); e.state=e.call('state.get')['result']
+            elif e.state.get('store',{}).get('ready'):
+                return
+            else:
+                e.receive()
+        self.fail('Store did not finish')
+
+    def test_native_store_transactions(self):
+        e=self.engine
+        e.hello(); e.birth(); self.enter_store('General Store')
+        shop=e.state['store']; before=e.state['player']['gold']
+        records={o['id']:o for o in e.state['items']}
+        entry=next(q for q in shop['stock'] if 'Ration' in records[q['item_id']]['label'])
+        kind=records[entry['item_id']]['actual']['kind']; price=entry['unit_price']
+        amount=lambda:sum(o['quantity'] for o in e.state['items'] if o['location']=='Pack' and o['actual']['kind']==kind)
+        original=amount()
+        self.assertTrue(records[entry['item_id']]['description'])
+        self.assertEqual(e.call('store.buy',{'context':'stale','item':entry['item_id']})['error']['code'],'stale_revision')
+        inventory=shop['inventory'][0]['item_id']
+        self.assertEqual(e.call('store.buy',{'context':e.state['context'],'item':inventory})['error']['code'],'invalid_argument')
+        self.store_action('store.buy',entry['item_id'])
+        self.assertEqual(e.prompt['type'],'quantity')
+        self.assertFalse(e.state['store']['ready'])
+        self.assertEqual(e.call('store.leave',{'context':e.state['context']})['error']['code'],'busy')
+        self.store_reply(None)
+        self.assertTrue(e.state['store']['ready']); self.assertEqual(amount(),original)
+        for confirm in (False,True):
+            records={o['id']:o for o in e.state['items']}
+            entry=next(q for q in e.state['store']['stock'] if records[q['item_id']]['actual']['kind']==kind)
+            self.store_action('store.buy',entry['item_id']); self.store_reply(1)
+            self.assertEqual(e.prompt['type'],'confirmation')
+            self.assertIn('Buy',e.prompt['text'])
+            self.assertIn('Ration',e.prompt['text'])
+            self.assertIn(f'Price: {price} gold',e.prompt['text'])
+            self.finish_store_prompts(confirm)
+            self.assertEqual(e.state['player']['gold'],before-(price if confirm else 0))
+            self.assertEqual(amount(),original+(1 if confirm else 0))
+        # Sell/give that item back through the engine's actual no-selling policy.
+        records={o['id']:o for o in e.state['items']}
+        entry=next(q for q in e.state['store']['inventory'] if records[q['item_id']]['actual']['kind']==kind and q['eligible'])
+        sale=entry['unit_price']
+        self.store_action('store.sell',entry['item_id']); self.finish_store_prompts()
+        self.assertEqual(amount(),original)
+        self.assertEqual(e.state['player']['gold'],before-price+sale)
+        self.store_action('store.leave')
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertNotIn('store',e.state); self.assertIn('dungeon',e.state)
+
+    def test_native_home_and_equipment_comparison(self):
+        e=self.engine
+        e.hello(); e.birth(); self.enter_store('Home')
+        before=e.state['player']['gold']
+        records={o['id']:o for o in e.state['items']}
+        entry=next(q for q in e.state['store']['inventory'] if records[q['item_id']]['location']=='Pack' and 'Ration' in records[q['item_id']]['label'])
+        kind=records[entry['item_id']]['actual']['kind']
+        self.store_action('store.sell',entry['item_id']); self.finish_store_prompts()
+        self.assertTrue(e.state['store']['home'])
+        self.assertEqual(len(e.state['store']['stock']),1)
+        item=next(o for o in e.state['items'] if o['location']=='Home')
+        self.assertEqual(item['actual']['kind'],kind); self.assertEqual(item['quantity'],1)
+        self.store_action('store.buy',item['id']); self.finish_store_prompts()
+        self.assertFalse(e.state['store']['stock']); self.assertEqual(e.state['player']['gold'],before)
+        self.store_action('store.leave')
+        self.enter_store('Weapon Smiths')
+        records={o['id']:o for o in e.state['items']}
+        comparisons=[q for q in e.state['store']['stock'] if q['compare_with']]
+        self.assertTrue(comparisons)
+        for quote in comparisons:
+            for handle in quote['compare_with']:
+                self.assertEqual(records[handle]['location'],'weapon')
+                self.assertTrue(records[handle]['description'])
+
     def test_native_item_selection(self):
         e=self.engine
         e.hello(); e.birth()

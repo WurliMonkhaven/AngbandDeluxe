@@ -21,8 +21,11 @@
 #include "obj-tval.h"
 #include "player.h"
 #include "player-path.h"
+#include "player-spell.h"
 #include "player-util.h"
 #include "player-timed.h"
+#include "store.h"
+#include "ui-store.h"
 #include "ui-command.h"
 #include "ui-context.h"
 #include "ui-display.h"
@@ -180,7 +183,7 @@ static bool cursed(const struct object *o)
  return false;
 }
 /* object_desc marks kinds/egos as seen. Use local metadata copies for queries. */
-static void describe(const struct object *obj, bool actual, char *buf, size_t n)
+static void describe(const struct object *obj, bool actual, char *buf, size_t n, uint32_t extra)
 {
  /* The engine's money-name path requires a player for its ignore check,
   * even in spoiler mode. Omniscient labels have no ignore annotation. */
@@ -201,7 +204,7 @@ static void describe(const struct object *obj, bool actual, char *buf, size_t n)
   copy.known = &known;
  } else { my_strcpy(buf, "Unobserved item", n); return; }
  object_desc(buf, n, &copy, ODESC_PREFIX | ODESC_FULL |
-  (actual ? ODESC_SPOIL : 0), actual ? NULL : player);
+  (actual ? ODESC_SPOIL : extra), actual ? NULL : player);
 }
 /* Use the same prose as classic inspection. Its hypothetical equipment/state
  * swaps are restored synchronously, and calc_bonuses uses update=false. */
@@ -277,8 +280,8 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
   }
   cJSON_AddItemToObject(j, "actions", actions);
  }
- describe(o, false, name, sizeof(name)); string(j, "label", name);
- describe(o, true, name, sizeof(name)); string(a, "label", name);
+ describe(o, false, name, sizeof(name), streq(location,"Store") ? ODESC_STORE : 0); string(j, "label", name);
+ describe(o, true, name, sizeof(name), 0); string(a, "label", name);
  string(a, "kind", o->kind->name); json_bool(a, "cursed", cursed(o));
  json_bool(a, "artifact", o->artifact != NULL); json_bool(a, "ego", o->ego != NULL);
  number(a, "to_hit", o->to_h); number(a, "to_damage", o->to_d);
@@ -293,6 +296,9 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  cJSON_AddItemToObject(j, "actual", a); cJSON_AddItemToObject(j, "player_known", k);
  number(j, "quantity", o->number); number(j, "x", o->grid.x); number(j, "y", o->grid.y);
  number(j, "glyph", o->kind->d_char); number(j, "color", o->kind->d_attr);
+ /* List text uses the engine's item-type colour, not its dungeon glyph colour. */
+ number(j, "name_color", !streq(location,"Store") && !streq(location,"Home") &&
+  tval_is_book_k(o->kind) && !player_object_to_book(player,o) ? COLOUR_SLATE : o->kind->base->attr);
  string(j, "inscription", quark_str(o->note));
  inspection_description(j, o);
  if (object_is_carried(player, o)) {
@@ -303,6 +309,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
 }
 #include "deluxe-view.h"
 #include "deluxe-travel.h"
+#include "deluxe-store.h"
 
 static cJSON *capture(void)
 {
@@ -410,6 +417,7 @@ static cJSON *capture(void)
    cJSON_AddItemToArray(monsters, j);
   }
  }
+ if (active_store) deluxe_capture_store(s, items, &index);
  for (i = 0; i < messages_num() && i < 200; ++i) {
   cJSON *m = cJSON_CreateObject(); string(m, "text", message_str(i));
   number(m, "count", message_count(i)); number(m, "category", message_type(i));
@@ -506,7 +514,7 @@ static bool item_hook(struct object **choice, const char *text, const char *reje
   next_choices = cJSON_CreateArray();
   for (i = 0; i < count; ++i) {
    char label[512], id[32]; cJSON *j = cJSON_CreateObject();
-   describe(objects[i], false, label, sizeof(label)); strnfmt(id, sizeof(id), "%d", i);
+   describe(objects[i], false, label, sizeof(label), 0); strnfmt(id, sizeof(id), "%d", i);
    string(j, "id", id); string(j, "label", label); cJSON_AddItemToArray(next_choices, j);
    if(object_is_carried(player,objects[i])) {
     char shortcut[2]={gear_to_label(player,objects[i]),0}; string(j,"shortcut",shortcut);
@@ -555,7 +563,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -606,7 +614,9 @@ static void pump(void)
   }
   cleanup_savefile_getter(g); response(id, out);
  } else if (!streq(str(p, "session_id"), "session-1")) error(id, "wrong_session", "Stale session.");
- else if (streq(method, "inspect.get")) {
+ else if (streq(method,"store.buy") || streq(method,"store.sell") || streq(method,"store.leave")) {
+  deluxe_store_request(id, method, p);
+ } else if (streq(method, "inspect.get")) {
   cJSON *v, *found = NULL;
   cJSON_ArrayForEach(v, cJSON_GetObjectItem(snapshot, "items")) if (streq(str(v, "id"), str(p, "handle"))) found = v;
   cJSON_ArrayForEach(v, cJSON_GetObjectItem(snapshot, "monsters")) if (streq(str(v, "id"), str(p, "handle"))) found = v;
@@ -722,6 +732,10 @@ static void pump(void)
   else if (streq(name, "right")) key = ARROW_RIGHT;
   if (active_prompt || !streq(str(p, "context"), context_text)) error(id, "stale_revision", "Input context changed.");
   else if (key < 1 || key > 0x10ffff) error(id, "invalid_argument", "Invalid key.");
+  else if (active_store && !store_busy) {
+   if (key == ESCAPE) { store_operation = STORE_LEAVE; response(id, cJSON_CreateObject()); }
+   else error(id, "busy", "Use the store interaction controls.");
+  }
   else { travel_stage=TRAVEL_IDLE; deluxe_target_key(key); response(id, cJSON_CreateObject()); }
  } else if (streq(method, "command.execute")) {
   if (!ready || active_prompt) error(id, "busy", "Finish the current prompt first.");
@@ -861,6 +875,7 @@ int main(int argc, char **argv)
  get_check_hook = check_hook; get_string_hook = string_hook; get_quantity_hook = quantity_hook;
  map_visual_hook = deluxe_observe_cell; map_visual_reset_hook = deluxe_reset_view;
  original_get_item = get_item_hook; get_item_hook = item_hook;
+ store_interact_hook = deluxe_store_session;
  cmd_get_hook = get_command;
  event_add_handler(EVENT_ENTER_BIRTH, lifecycle, NULL);
  event_add_handler(EVENT_ENTER_STORE, lifecycle, NULL);

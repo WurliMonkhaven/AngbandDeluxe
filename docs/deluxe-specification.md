@@ -26,7 +26,7 @@ implementation decisions below; these supersede conflicting original requirement
   call map helpers again from API queries: memory updates and hallucination RNG
   must occur exactly as they do during normal play. Cache invalidation must cover
   level changes, camera changes and new characters. Repeated queries are pure.
-- Terminal fallback remains for birth, stores, dedicated recall screens, character sheets,
+- Terminal fallback remains for birth, dedicated recall screens, character sheets,
   knowledge screens, nested selections and post-death interactions. Transitions
   preserve engine input contexts, cursor visibility and confirmations. Removing
   the terminal sidebar from normal play must not remove its useful information:
@@ -71,7 +71,7 @@ implementation decisions below; these supersede conflicting original requirement
   separate from normal gameplay commands, validated at legal engine boundaries,
   and use normal damage/death handling. They do not redefine game balance.
 - Cross-platform backend packages, alternate-variant conformance, complete native
-  birth/store flows, advanced spell-area previews, controller support and screen-reader validation
+  birth flows, advanced spell-area previews, controller support and screen-reader validation
   remain future work, not claims about the current prototype.
 
 ## 1. Product intent
@@ -449,3 +449,21 @@ same commands and eligibility rules. Dungeon presentation remains visible.
 Dev tools includes Quit without saving. It closes the backend and Deluxe
 without writing the current session, preserving the most recent existing save.
 Loading a regular save is read-only. Unsaved progress is intentionally discarded.
+
+
+### Native stores and Home
+
+Entering a shop opens stock and player belongings side by side, with quantities,
+engine unit prices, full inspection descriptions and comparisons against the
+corresponding equipped items (including both occupied ring slots). Your inventory
+shows only items the current shop can accept. Its heading always includes the
+player's current gold, including in no-selling games. The store/owner heading
+replaces the stock heading. Leave sits beside Buy
+(or Retrieve at Home), and the no-selling explanation is a Give-button tooltip.
+Buy and Sell/Give invoke the existing store flow: eligibility, inscriptions,
+quantity limits, carrying capacity and exact total-price confirmations remain
+engine-owned. A no-selling character sees Give and receives no gold. Home uses
+the same interface with Store/Retrieve and no prices. Leave/Escape returns to
+the dungeon. Transaction messages remain visible in the store.
+The optional store UI hook leaves the original terminal store unchanged for
+other frontends. Knowledge-menu shop recall still uses terminal fallback.

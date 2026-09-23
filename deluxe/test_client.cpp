@@ -224,6 +224,31 @@ int main(int argc,char **argv) {
    check(crt_persistence_alpha(strength,.1)<.04f,"Afterimage does not fade quickly");
   }
   check(crt_persistence_alpha(0,.016)==0 && crt_persistence_alpha(1,.31)==0,"Disabled or stale history survives");
+  // Exercise the real store layout headlessly, including empty home, shrinking
+  // stock and modal-busy states. No desktop input or native window is used.
+  ImGui::CreateContext();
+  auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(1280,800);
+  unsigned char *pixels; int atlas_w,atlas_h;
+  io.Fonts->GetTexDataAsRGBA32(&pixels,&atlas_w,&atlas_h); io.Fonts->SetTexID(1);
+  Connection shop; shop.connected=true;
+  shop.state={{"phase","store"},{"context","shop-1"},{"player",{{"gold",100}}},
+   {"items",json::array({{{"id","stock-1"},{"label","a Dagger"},{"location","Store"},{"quantity",2},{"description","Weapon description"}},
+                         {{"id","gear-1"},{"label","a Sword"},{"location","weapon"},{"quantity",1},{"description","Equipped description"}}})},
+   {"store",{{"name","Weapon Smiths"},{"ready",true},{"home",false},
+    {"stock",json::array({{{"item_id","stock-1"},{"unit_price",20},{"compare_with",json::array({"gear-1"})}}})},
+    {"inventory",json::array({{{"item_id","gear-1"},{"unit_price",30},{"eligible",true}}})}}}};
+  StorePanel panel; panel.last_name="Weapon Smiths"; panel.stock_selection=panel.inventory_selection=0;
+  for(int frame=0;frame<4;++frame) {
+   if(frame==1) { shop.state["store"]["ready"]=false; shop.prompt={{"type","confirmation"}}; }
+   if(frame==2) { shop.state["store"]["home"]=true; shop.state["store"]["stock"]=json::array(); }
+   if(frame==3) io.DisplaySize=ImVec2(800,600);
+   ImGui::NewFrame(); ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(io.DisplaySize);
+   ImGui::Begin("Store test"); panel.draw(shop); ImGui::End(); ImGui::Render();
+   check(ImGui::GetDrawData()->TotalVtxCount>0,"Store did not produce UI geometry");
+  }
+  check(shop.outgoing.empty(),"Inspecting store items must never issue a transaction");
+  check(panel.stock_selection==-1,"Removed stock must clear an invalid selection");
+  ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";
   return 0;

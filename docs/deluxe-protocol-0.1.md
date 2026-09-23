@@ -253,3 +253,37 @@ for consumables, plus eligible Take off, Fire and Throw actions.
 without calling the engine save/close-game path. Unlike `session.close`, it
 preserves existing save bytes and discards current unsaved state. The client
 closes only after the acknowledgement, without a backend-stopped error.
+
+
+### Native storefront (`interaction.store: 1`)
+
+During an active store visit, snapshots include `store`: `name`, `home`,
+`ready`, `no_selling`, optional `owner` and `owner_purse`, plus `stock` and
+`inventory` arrays. Entries reference current `items` by `item_id`. Store/Home
+stock is appended to `items` with location `Store`/`Home`; ordinary inventory
+handles retain their usual meaning. Non-home entries include `unit_price` in
+gold. Inventory entries include `eligible`; stock entries include `compare_with`
+(current equipped item handles in matching engine equipment slots). Descriptions
+use normal engine inspection and shop naming. Unit prices are display quotes;
+stack/charge rounding means the client must not calculate a transaction total.
+
+`store.buy` and `store.sell` accept `context` and `item`; they also mean retrieve
+and stash when `home` is true. `store.leave` accepts `context`. All require the
+current store context and `store.ready`, and reject concurrent prompts, stale
+handles and incorrect item ownership/eligibility. Store readiness is separate
+from normal gameplay `readiness`. Requests acknowledge acceptance, not completion;
+subsequent snapshots/prompts report the engine result. Transactions use existing
+quantity and confirmation prompts (confirmation text includes the exact price).
+Cancel replies preserve the existing engine cancellation behavior.
+
+`store.ready` is false throughout a transaction, including its prompts. If a
+transaction pauses for a message, `message_pending` is true and `terminal.input`
+acknowledges it using normal engine controls. At an idle storefront Escape leaves;
+other raw gameplay keys are rejected instead of being queued for later movement.
+Clients without this capability can continue to render the terminal fallback of
+backends that do not offer it; this backend's native storefront requires a client
+that understands the advertised capability.
+
+Item records include `name_color`, the engine palette index for list/inspection
+name text (item-type colour, with unreadable inventory books dimmed as in the
+original UI). `color` remains the separate dungeon glyph colour.
