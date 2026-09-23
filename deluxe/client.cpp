@@ -791,20 +791,31 @@ struct UI {
   ImGui::EndDisabled();
  }
  void items() {
+  if(ImGui::BeginTabBar("Item categories")) {
+   const char *tabs[]={"Inventory","Equipment","Quiver"};
+   for(int category=0;category<3;++category) if(ImGui::BeginTabItem(tabs[category])) {
+    ImGui::PushID(tabs[category]); items_category(category); ImGui::PopID();
+    ImGui::EndTabItem();
+   }
+   ImGui::EndTabBar();
+  }
+ }
+ void items_category(int category) {
   ImGui::InputTextWithHint("##items","Search items",item_filter,sizeof(item_filter));
   if(!c.state.contains("items")) return;
   std::vector<const json*> values;
   for(const auto &o:c.state["items"]) {
-   if(o.value("location","")=="Floor") {
-    if(!c.state.contains("player")) continue;
-    const auto &p=c.state["player"];
-    if(o.value("x",-1)!=p.value("x",-2)||o.value("y",-1)!=p.value("y",-2)) continue;
-   }
+   const auto location=o.value("location","");
+   const bool equipment=location!="Pack" && location!="Quiver" && location!="Floor" && location!="Store" && location!="Home";
+   if(category==0 ? location!="Pack" : category==2 ? location!="Quiver" : !equipment) continue;
    values.push_back(&o);
   }
   std::stable_sort(values.begin(),values.end(),[](const json *a,const json *b){return a->value("location","")<b->value("location","");});
-  if(ImGui::BeginTable("items",3,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,ImGui::GetTextLineHeightWithSpacing()*10))) {
-   ImGui::TableSetupColumn("Item",ImGuiTableColumnFlags_WidthStretch); ImGui::TableSetupColumn("Location"); ImGui::TableSetupColumn("Qty"); ImGui::TableHeadersRow();
+  if(ImGui::BeginTable("items",category==1?3:2,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,ImGui::GetTextLineHeightWithSpacing()*10))) {
+   ImGui::TableSetupColumn("Item",ImGuiTableColumnFlags_WidthStretch,1.f);
+   if(category==1) ImGui::TableSetupColumn("Slot",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFontSize()*6.f);
+   ImGui::TableSetupColumn("Qty",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFontSize()*2.5f);
+   ImGui::TableSetupScrollFreeze(0,1); ImGui::TableHeadersRow();
    for(const auto *item:values) {
     const auto &o=*item;
     std::string label=o.value("label","");
@@ -820,7 +831,7 @@ struct UI {
      ImGui::EndTooltip();
     }
     ImGui::PopStyleColor();
-    ImGui::TableNextColumn(); ImGui::TextUnformatted(display_label(o.value("location","")).c_str());
+    if(category==1) { ImGui::TableNextColumn(); ImGui::TextUnformatted(display_label(o.value("location","")).c_str()); }
     ImGui::TableNextColumn(); ImGui::Text("%d",o.value("quantity",0)); ImGui::PopID();
    }
    ImGui::EndTable();
