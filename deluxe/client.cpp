@@ -88,6 +88,8 @@ struct Connection {
  std::deque<json> messages;
  json previous_messages = json::array();
  json capabilities = json::object();
+ json comparisons = json::object();
+ std::map<std::string,std::string> comparison_requests;
  std::map<std::string,std::string> requests;
  unsigned long next = 0;
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
@@ -164,13 +166,24 @@ struct Connection {
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
-   if (name == "state.changed") { state = std::move(j.at("data")); game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
+   if (name == "state.changed") { state = std::move(j.at("data")); comparisons=json::object(); game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
    if (name == "prompt.requested") { prompt = j.at("data"); busy = false; pickup_travel=false; }
    return;
   }
   auto id = j.value("id",""); auto it = requests.find(id);
   if (it == requests.end()) return;
   auto method = it->second; requests.erase(it);
+  if(method=="item.compare") {
+   auto request=comparison_requests.find(id);
+   if(request!=comparison_requests.end()) {
+    const auto item=request->second; comparison_requests.erase(request);
+    if(comparisons.contains(item)) {
+     if(j.contains("error")) comparisons[item]={{"error",j["error"].value("message","Comparison unavailable.")}};
+     else if(j["result"].value("revision","")==state.value("revision","")) comparisons[item]=j["result"];
+    }
+   }
+   return;
+  }
   if (j.contains("error")) {
    const auto error=j["error"].value("message","Request failed"); notice(error); busy = false; pickup_travel=false;
    if(!state.contains("terminal")) menu_error=error;
@@ -288,6 +301,7 @@ static void properties(const json &value) {
 #include "character_sheet.h"
 #include "spell_panel.h"
 #include "item_description.h"
+#include "item_comparison.h"
 #include "store_panel.h"
 struct UI {
  Connection &c;
@@ -883,6 +897,7 @@ struct UI {
    }
    ImGui::PopStyleVar();
    const auto description=o.value("description","");
+   ItemComparison::draw(c,o);
    if(!description.empty()) { ImGui::Spacing(); ItemDescription::draw(o); }
   }
  }

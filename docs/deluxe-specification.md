@@ -525,3 +525,10 @@ Items retain their legacy description and also expose description_sections with 
 ### Native item combat cards
 
 Item combat_details are emitted alongside the original description from the same engine calculation. Rows have kind, label, value, str and dex fields: blows/upgrade values use hundredths of a blow; damage/throw_damage and damage_variant/throw_variant use tenths of damage; range is feet and break is percent. Warning and note rows preserve qualifications such as heavy weapons and off-weapon brands. Native inspection replaces combat prose with metric tiles, an STR/DEX upgrade table, and conditional target damage rows; tooltips explain units and alternatives. The original full description remains unchanged for fallback clients.
+
+
+### On-demand equipment comparison
+
+The item.compare capability accepts a current item handle and snapshot revision. The engine returns a whole-character preview for each compatible equipment slot, including both ring slots; stale requests are rejected. Computation uses known bonuses and the same melee damage helpers as inspection. Hypothetical slots, weight, derived states, and RNG are restored before responding. Replaced items remain carried; external items add one item of weight. Cursed/removal-blocked slots are marked hypothetical. Metrics include melee damage and attack rate, ranged bonuses/rate, armour, speed, carried weight, and attributes; resistances, flags, brands and slays identify gains/losses. Unknown melee dice omit the damage estimate rather than fabricating one. This is not an equip action.
+
+Inventory and store inspection request the preview only while expanded, cache it for the snapshot revision, and discard stale replies. The UI offers replacement-slot selection, Current/Selected/Change columns, and an option to show unchanged secondary stats. No per-movement bulk comparison calculations are added.

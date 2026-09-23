@@ -73,6 +73,7 @@ struct StorePanel {
    ImGui::TextWrapped("%s",selected->value("label","").c_str());
    ImGui::PopStyleColor();
    ImGui::Separator();
+   ItemComparison::draw(c,*selected);
    ImGui::PushID("Selected description"); ItemDescription::draw(*selected); ImGui::PopID();
    if(selected->contains("spells")) {
     if(ImGui::Button("Browse spells")) { browsed_spell.clear(); ImGui::OpenPopup("Book spells"); }

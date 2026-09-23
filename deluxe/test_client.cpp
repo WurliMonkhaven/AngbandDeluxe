@@ -318,6 +318,24 @@ int main(int argc,char **argv) {
    if(frame==2) check(closed,"Escape must close the native character sheet");
    ImGui::End(); ImGui::Render();
   }
+  io.AddKeyEvent(ImGuiKey_Escape,false);
+  Connection preview; preview.connected=true; preview.capabilities["item.compare"]=1;
+  preview.state={{"readiness","ready"},{"revision","1"}};
+  const json candidate={{"id","candidate"},{"comparison_available",true}};
+  ImGui::NewFrame(); ImGui::Begin("Comparison test");
+  ItemComparison::draw(preview,candidate);
+  ImGui::End(); ImGui::Render();
+  check(preview.requests.size()==1 && !preview.busy,"Comparison must be requested once without blocking input");
+  const auto request=preview.requests.begin()->first;
+  json option={{"slot_label","Left hand"},{"replaces","Empty slot"},
+   {"metrics",json::array({{{"id","armour"},{"label","Armour"},{"before",10},{"after",13},{"delta",3},{"scale",1}},
+                          {{"id","STR"},{"label","STR"},{"before",18},{"after",28},{"delta",10},{"scale",0}}})},
+   {"changes",json::array({{{"label","Fire"},{"before","Unprotected"},{"after","Resistant"}}})}};
+  preview.receive({{"id",request},{"result",{{"item","candidate"},{"revision","1"},{"fully_known",false},{"options",json::array({option,option})}}}});
+  for(int frame=0;frame<2;++frame) {
+   ImGui::NewFrame(); ImGui::Begin("Comparison test"); ItemComparison::draw(preview,candidate); ImGui::End(); ImGui::Render();
+  }
+  check(preview.next==1 && !preview.busy,"Cached comparison must not resend or block gameplay");
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";

@@ -945,10 +945,55 @@ class BackendTests(unittest.TestCase):
         records={o['id']:o for o in e.state['items']}
         comparisons=[q for q in e.state['store']['stock'] if q['compare_with']]
         self.assertTrue(comparisons)
+        current = e.call("state.get")["result"]
+        quote = comparisons[0]
+        preview = e.call("item.compare", {"revision": current["revision"], "item": quote["item_id"]})["result"]
+        self.assertTrue(preview["options"])
+        self.assertTrue(any(r["id"] == "weight" and r["delta"] > 0
+                            for r in preview["options"][0]["metrics"]))
+        self.assertEqual(e.call("state.get")["result"], current)
+
         for quote in comparisons:
             for handle in quote['compare_with']:
                 self.assertEqual(records[handle]['location'],'weapon')
                 self.assertTrue(records[handle]['description'])
+
+    def test_native_item_comparison(self):
+        e = self.engine
+        e.hello(); e.birth()
+        initial = e.call("state.get")["result"]
+        weapon = next(o for o in initial["items"] if o["location"] == "weapon")
+        params = {"revision": initial["revision"], "item": weapon["id"]}
+        same = e.call("item.compare", params)["result"]
+        self.assertTrue(same["options"])
+        self.assertTrue(all(r["delta"] == 0 for r in same["options"][0]["metrics"]))
+        self.assertFalse(same["options"][0]["changes"])
+        for _ in range(3):
+            self.assertEqual(e.call("item.compare", params)["result"], same)
+            self.assertEqual(e.call("state.get")["result"], initial)
+        self.assertEqual(e.call("item.compare", {**params, "revision": "0"})["error"]["code"], "stale_revision")
+        self.assertEqual(e.call("item.compare", {**params, "item": "bad"})["error"]["code"], "stale_handle")
+        armour = next(o for o in initial["items"] if o["location"] == "body")
+        kind = armour["actual"]["kind"]
+        old = e.state["revision"]
+        self.assertIn("result", e.call("command.execute", {"revision": old, "command": "core.takeoff", "item": armour["id"]}))
+        e.next_state(old)
+        while e.state["readiness"] != "ready": e.key("enter")
+        armour = next(o for o in e.state["items"] if o["actual"]["kind"] == kind)
+        baseline = e.call("state.get")["result"]
+        prediction = e.call("item.compare", {"revision": baseline["revision"], "item": armour["id"]})["result"]
+        metrics = {r["id"]: r for r in prediction["options"][0]["metrics"]}
+        self.assertGreater(metrics["armour"]["delta"], 0)
+        self.assertEqual(metrics["weight"]["delta"], 0)
+        self.assertEqual(e.call("state.get")["result"], baseline)
+        old = e.state["revision"]
+        self.assertIn("result", e.call("command.execute", {"revision": old, "command": "core.wield", "item": armour["id"]}))
+        e.next_state(old)
+        while e.state["readiness"] != "ready": e.key("enter")
+        self.assertEqual(e.state["player"]["armour"], metrics["armour"]["after"])
+        self.assertEqual(e.state["player"]["speed"], metrics["speed"]["after"])
+        for index, name in enumerate(("STR", "INT", "WIS", "DEX", "CON")):
+            self.assertEqual(e.state["player"]["stats"][index], metrics[name]["after"])
 
     def spell_command(self, command, spell=None):
         e=self.engine
@@ -1084,6 +1129,9 @@ class BackendTests(unittest.TestCase):
             while branch.state['readiness']!='ready': branch.key('enter')
             if browse:
                 for _ in range(3): self.spell_command('core.browse'); self.store_reply(None)
+                for item in branch.state['items']:
+                    if item.get('comparison_available'):
+                        self.assertIn('result', branch.call('item.compare', {'revision': branch.state['revision'], 'item': item['id']}))
             self.spell_command('core.cast',self.spell_book()['spells'][0]['id'])
             if branch.prompt: self.store_reply(True)
             branch.key(ord('6'))

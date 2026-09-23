@@ -21,6 +21,7 @@
 #include "obj-tval.h"
 #include "player.h"
 #include "player-properties.h"
+#include "player-calcs.h"
 #include "player-path.h"
 #include "player-spell.h"
 #include "player-util.h"
@@ -43,6 +44,7 @@
 #include "ui-output.h"
 #include "ui-player.h"
 #include "obj-properties.h"
+#include "obj-slays.h"
 #include "trap.h"
 #include "ui-term.h"
 #include "z-quark.h"
@@ -302,6 +304,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
   item_handles[index] = (struct object *)o; item_handle_count = index + 1;
  }
  string(j, "id", id); string(j, "location", location);
+ json_bool(j,"comparison_available",tval_is_wearable(o) && wield_slot(o)>=0 && !object_is_equipped(player->body,o));
  json_bool(j,"can_pickup",streq(location,"Floor") && square_isseen(cave,o->grid) && !ignore_item_ok(player,o) && (tval_is_money(o) || inven_carry_okay(o)));
  {
   cJSON *actions = cJSON_CreateArray();
@@ -352,6 +355,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
 }
 #include "deluxe-character.h"
 #include "deluxe-view.h"
+#include "deluxe-compare.h"
 #include "deluxe-travel.h"
 #include "deluxe-store.h"
 
@@ -615,12 +619,30 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"item.compare\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
  if (streq(method, "commands.list")) response(id, command_list());
  else if (streq(method, "state.get")) response(id, snapshot ? cJSON_CreateObjectReference(snapshot->child) : cJSON_CreateObject());
+ else if(streq(method,"item.compare")) {
+  const struct object *obj=NULL; cJSON *record; int ix=0;
+  if(!player || !player->race || !snapshot || (!ready && !(active_store && !store_busy)) || active_prompt) {
+   error(id,"busy","Finish the current interaction first."); goto done;
+  }
+  if(!streq(str(p,"revision"),revision_text)) { error(id,"stale_revision","State changed."); goto done; }
+  cJSON_ArrayForEach(record,cJSON_GetObjectItem(snapshot,"items")) {
+   ++ix;
+   if(streq(str(record,"id"),str(p,"item")) && ix<(int)item_handle_count) obj=item_handles[ix];
+  }
+  if(!obj) error(id,"stale_handle","Select a current item.");
+  else {
+   cJSON *out=cJSON_CreateObject();
+   string(out,"item",str(p,"item")); string(out,"revision",revision_text);
+   json_bool(out,"fully_known",object_fully_known(obj));
+   cJSON_AddItemToObject(out,"options",deluxe_compare(obj)); response(id,out);
+  }
+ }
  else if (streq(method, "catalog.get")) {
   cJSON *out = cJSON_CreateObject(), *features = cJSON_CreateArray();
   if (initialized) for (i = 0; i < FEAT_MAX; ++i) {
