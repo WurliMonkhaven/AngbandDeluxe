@@ -171,6 +171,89 @@ class BackendTests(unittest.TestCase):
         cell = view["cells"][player["y"]-view["y"]][player["x"]-view["x"]]
         self.assertTrue(cell[12])
 
+    def test_debug_status_effects(self):
+        e = self.engine
+        e.hello()
+        self.assertIn("error", e.call("debug.status", {"effect": "POISONED", "amount": 20}))
+        self.assertIn("error", e.call("debug.status.list"))
+        e.birth()
+        catalog = e.call("debug.status.list")["result"]
+        effects = {row["id"]: row for row in catalog}
+        self.assertIn("POISONED", effects)
+        self.assertIn("CUT", effects)
+        self.assertNotIn("COMMAND", effects)
+        self.assertTrue(effects["CUT"]["grades"])
+        before = e.call("state.get")["result"]
+        for params in ({"effect": "invalid", "amount": 20}, {"effect": "COMMAND", "amount": 20},
+                       {"effect": "CUT", "amount": -1}, {"effect": "CUT", "amount": 1.5},
+                       {"effect": "CUT", "amount": "20"}, {"effect": "CUT", "amount": 30001}):
+            self.assertEqual(e.call("debug.status", params)["error"]["code"], "invalid_argument")
+        self.assertEqual(e.call("state.get")["result"], before)
+        def apply(effect, amount):
+            old = e.state["revision"]
+            self.assertIn("result", e.call("debug.status", {"effect": effect, "amount": amount}))
+            e.next_state(old)
+            while e.state["readiness"] != "ready": e.key("enter")
+        apply("CUT", 500)
+        cut = next(s for s in e.state["player"]["statuses"] if s["id"] == "CUT")
+        self.assertEqual(cut["name"], "Deep Gash")
+        self.assertEqual(cut["duration"], 500)
+        apply("CUT", 20)
+        self.assertEqual(next(s for s in e.state["player"]["statuses"] if s["id"] == "CUT")["name"], "Light Cut")
+        apply("CUT", 0)
+        self.assertFalse(any(s["id"] == "CUT" for s in e.state["player"]["statuses"]))
+        apply("FAST", 25)
+        self.assertEqual(next(s for s in e.state["player"]["statuses"] if s["id"] == "FAST")["name"], "Haste")
+        apply("FAST", 0)
+        self.assertEqual(e.state["turn"], before["turn"], "Dev status changes must not spend a gameplay turn")
+
+    def test_native_status_effects(self):
+        e = self.engine
+        e.hello(); e.birth()
+        food = next(s for s in e.state["player"]["statuses"] if s["id"] == "FOOD")
+        self.assertFalse(food["visible"])
+        self.assertEqual(food["counter_kind"], "nourishment")
+        potion = next(item for item in e.state["items"] if "Berserk" in item["label"])
+        old = e.state["revision"]
+        self.assertIn("result", e.call("command.execute", {"revision": old, "command": "core.quaff", "item": potion["id"]}))
+        e.next_state(old)
+        while e.state["readiness"] != "ready": e.key("enter")
+        berserk = next(s for s in e.state["player"]["statuses"] if s["id"] == "SHERO")
+        self.assertEqual(berserk["name"], "Berserk")
+        self.assertEqual(berserk["kind"], "mixed")
+        self.assertTrue(berserk["visible"])
+        self.assertGreater(berserk["duration"], 0)
+        self.assertIn("armour", berserk["description"])
+        self.assertGreater(berserk["grade"], 0)
+        def set_wound(amount):
+            # Existing wizard commands, confined to this disposable character.
+            e.key(1); e.key(ord('E'))
+            for _ in range(30):
+                e.state = e.call("state.get")["result"]
+                if e.prompt:
+                    prompt = e.prompt; e.prompt = None; old = e.state["revision"]
+                    text = prompt.get("text", "").lower()
+                    if prompt["type"] == "confirmation": value = True
+                    elif prompt["type"] == "quantity": value = 0
+                    elif "which effect" in text: value = "TIMED_SET"
+                    elif "dice" in text: value = str(amount)
+                    elif "subtype" in text: value = "CUT"
+                    else: self.fail(f"Unexpected effect prompt: {prompt}")
+                    e.call("prompt.reply", {"prompt_id": prompt["prompt_id"], "value": value})
+                    e.next_state(old)
+                elif e.state["readiness"] != "ready": e.key("enter")
+                else: return
+            self.fail("Wizard effect did not finish")
+        set_wound(500)
+        cut = next(s for s in e.state["player"]["statuses"] if s["id"] == "CUT")
+        self.assertEqual(cut["name"], "Deep Gash")
+        self.assertEqual(cut["kind"], "harm")
+        self.assertEqual(cut["counter_kind"], "severity")
+        set_wound(0)
+        self.assertFalse(any(s["id"] == "CUT" for s in e.state["player"]["statuses"]))
+        before = e.call("state.get")["result"]
+        self.assertEqual(e.call("state.get")["result"], before)
+
     def test_native_knowledge(self):
         e = self.engine
         e.hello()

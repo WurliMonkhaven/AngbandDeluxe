@@ -661,3 +661,27 @@ Knowledge records also include known (boolean). The Known only checkbox defaults
 to enabled and hides unidentified item types; disabling it includes their
 flavours. Item names include their type (e.g. Bronze Ring). Item colours use
 Angband display attributes, with black replaced by readable white.
+
+
+## Status-effect overview (September 2026)
+
+Active effects appear as compact wrapping badges directly beneath resources.
+Harmful effects come first (red), followed by mixed effects (amber) and benefits
+(green). Explicit labels and explanatory tooltips supplement colour. Severity
+names for cuts and stun use current engine grades. Normal nourishment stays
+in the food bar; hunger also appears as a warning. Empty status space collapses.
+Badges are informational and do not capture gameplay commands.
+
+Player statuses retain label/duration and add id, name, description, kind,
+priority, color, grade, visible and counter_kind. Descriptions and presentation
+metadata live in the engine adapter. The timer remains an engine counter, not
+a promised number of player actions; wounds/stun expose severity, and food
+exposes nourishment. No extra requests, clocks or gameplay changes are needed.
+
+Dev tools includes Inflict status effect: an engine-provided selector, counter
+editor and severity thresholds. Apply sets the counter (zero clears ordinary
+effects; zero nourishment means starvation). debug.status:1 advertises
+debug.status.list and debug.status({effect,amount}); requests require ordinary
+living play and integer amounts in 0..30000, clamped by engine effect limits.
+Changes run through player_set_timed at a safe command boundary. Commanding
+a monster is excluded because it requires an actual controlled target.

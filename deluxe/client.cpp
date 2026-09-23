@@ -90,6 +90,7 @@ struct Connection {
  json capabilities = json::object();
  json comparisons = json::object();
  json item_rules=nullptr;
+ json debug_status_catalog=nullptr;
  json knowledge_list=nullptr,knowledge_detail=nullptr;
  std::string knowledge_list_request,knowledge_detail_request;
  json route=json::object(), travel=json::object();
@@ -187,6 +188,11 @@ struct Connection {
   auto id = j.value("id",""); auto it = requests.find(id);
   if (it == requests.end()) return;
   auto method = it->second; requests.erase(it);
+  if(method=="debug.status.list") {
+   debug_status_catalog=j.contains("error")?json{{"error",j["error"].value("message","Effects unavailable.")}}:j["result"];
+   if(debug_status_catalog.is_array()) std::sort(debug_status_catalog.begin(),debug_status_catalog.end(),[](const json &a,const json &b) { return a.value("name","")<b.value("name",""); });
+   return;
+  }
   if(method=="knowledge.list" || method=="knowledge.get") {
    auto &pending=method=="knowledge.list"?knowledge_list_request:knowledge_detail_request;
    if(id==pending) {
@@ -342,6 +348,7 @@ static void properties(const json &value) {
 #include "character_overview.h"
 #include "character_sheet.h"
 #include "knowledge_browser.h"
+#include "dev_status_dialog.h"
 #include "dungeon_feedback.h"
 #include "birth_panel.h"
 #include "quickbar.h"
@@ -368,6 +375,7 @@ struct UI {
  bool fullscreen=false, draft_fullscreen=false;
  bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
  int damage_amount=1;
+ DevStatusDialog dev_status_dialog;
  int crt=0, draft_crt=0;
  int crt_strength=1, draft_crt_strength=1;
  CrtSettings crt_settings{}, draft_crt_settings{};
@@ -1167,13 +1175,16 @@ struct UI {
   ImGui::PushStyleColor(ImGuiCol_ButtonActive,ImVec4(.85f,.24f,.26f,1));
   if(ImGui::Button("Dev tools")) ImGui::OpenPopup("Developer tools");
   ImGui::PopStyleColor(3);
-  bool open_damage=false;
+  bool open_damage=false,open_status=false;
   if(ImGui::BeginPopup("Developer tools")) {
    if(ImGui::MenuItem("Inflict damage on player",nullptr,false,c.ready() && c.state.value("phase","")=="playing")) open_damage=true;
+   if(ImGui::MenuItem("Inflict status effect",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.status",0)>0)) open_status=true;
    ImGui::Separator();
    if(ImGui::MenuItem("Quit without saving",nullptr,false,c.connected && !c.busy && c.capabilities.value("debug.quit",0)>0)) c.quit_without_saving();
    ImGui::EndPopup();
   }
+  if(open_status) { keys.clear(); dev_status_dialog.open(c); }
+  if(dev_status_dialog.draw(c)) focus_game();
   if(open_damage) { damage_amount=1; ImGui::OpenPopup("Inflict damage on player"); }
   if(ImGui::BeginPopupModal("Inflict damage on player",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
    ImGui::TextUnformatted("Damage to deal");

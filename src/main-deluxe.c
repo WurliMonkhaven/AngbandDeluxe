@@ -71,6 +71,7 @@ static unsigned long revision, sequence, context_id;
 static char revision_text[32], context_text[32];
 static const char *phase = "launcher";
 static int debug_damage;
+static int debug_status=-1,debug_status_amount;
 static int native_target_mode;
 static bool native_target_immediate;
 static struct loc native_target_grid;
@@ -371,6 +372,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  return j;
 }
 #include "deluxe-character.h"
+#include "deluxe-status.h"
 #include "deluxe-knowledge.h"
 #include "deluxe-view.h"
 #include "deluxe-compare.h"
@@ -438,13 +440,7 @@ static cJSON *capture(void)
   }
   cJSON_AddItemToObject(p, "stats", ints(player->known_state.stat_use, STAT_MAX));
   cJSON_AddItemToObject(p, "actual_stats", ints(player->state.stat_use, STAT_MAX));
-  { cJSON *statuses = cJSON_CreateArray();
-   for (i = 0; i < TMD_MAX; ++i) if (player->timed[i]) {
-    cJSON *t = cJSON_CreateObject(); string(t, "label", timed_effects[i].name);
-    number(t, "duration", player->timed[i]); cJSON_AddItemToArray(statuses, t);
-   }
-   cJSON_AddItemToObject(p, "statuses", statuses);
-  }
+  cJSON_AddItemToObject(p,"statuses",deluxe_statuses());
   cJSON_AddItemToObject(s, "player", p);
   deluxe_capture_view(s);
   deluxe_capture_terrain_actions(s);
@@ -642,7 +638,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -934,6 +930,21 @@ static void pump(void)
   /* Deliberately bypass close_game(), which saves a living character.
    * Loading opens the save read-only; leave that existing file untouched. */
   response(id,cJSON_CreateObject()); closing=true; exit(0);
+ } else if(streq(method,"debug.status.list")) {
+  if(!character_generated) error(id,"wrong_phase","Start a character first.");
+  else response(id,deluxe_debug_status_catalog());
+ } else if(streq(method,"debug.status")) {
+  const int idx=timed_name_to_idx(str(p,"effect"));
+  const cJSON *amount=cJSON_GetObjectItem(p,"amount");
+  if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing"))
+   error(id,"busy","Return to normal play before setting a status effect.");
+  else if(!deluxe_debug_status_allowed(idx)) error(id,"invalid_argument","Unknown or unsupported standalone status effect.");
+  else if(!cJSON_IsNumber(amount) || amount->valuedouble!=amount->valueint || amount->valueint<0 || amount->valueint>30000)
+   error(id,"invalid_argument","Amount must be a whole number from 0 to 30000.");
+  else {
+   debug_status=idx; debug_status_amount=amount->valueint; ready=false;
+   response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0);
+  }
  } else if (streq(method, "debug.damage")) {
   cJSON *amount = cJSON_GetObjectItem(p, "amount");
   if (!ready || active_prompt || !character_generated || player->is_dead || !streq(phase, "playing"))
@@ -995,6 +1006,10 @@ static errr get_command(cmd_context context)
    }
    else if(target_set_interactive(mode,native_target_grid.x,native_target_grid.y,true)) msg("Target Selected.");
    else if(mode&TARGET_KILL) msg("Target Aborted.");
+  }
+  if(debug_status>=0) {
+   int idx=debug_status,amount=debug_status_amount; debug_status=-1; ready=false;
+   player_set_timed(player,idx,amount,true,true);
   }
   if (debug_damage) {
    int damage = debug_damage; debug_damage = 0; ready = false;

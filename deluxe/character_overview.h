@@ -1,3 +1,4 @@
+#include "status_effects.h"
 // Compact character overview. All values and XP thresholds come from the engine.
 struct CharacterOverview {
  static void meter(const char *label,const std::string &value,float fraction,ImVec4 fill) {
@@ -84,6 +85,7 @@ struct CharacterOverview {
    }
    ImGui::EndTable();
   }
+  StatusEffects::draw(p);
   static const char *names[]={"STR","INT","WIS","DEX","CON"};
   if(p.contains("stats") && !p["stats"].empty() && ImGui::BeginTable("Attributes",int(p["stats"].size()),ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_BordersInnerV)) {
    ImGui::TableNextRow();
@@ -107,18 +109,25 @@ struct CharacterOverview {
    ImGui::TableNextColumn(); const int speed=p.value("speed",0); metric("Speed",(speed>=0?"+":"")+std::to_string(speed));
    ImGui::EndTable();
   }
-  for(const auto &status:p.value("statuses",json::array())) {
-   if(status.value("label","")=="FOOD") continue;
-   ImGui::TextWrapped("%s (%d)",display_label(status.value("label","")).c_str(),status.value("duration",0));
-  }
   if(p.value("study",0)) ImGui::Text("Spells to learn: %d",p.value("study",0));
   if(p.value("extra_moves",0)) ImGui::Text("Extra moves: %+d",p.value("extra_moves",0));
   section("Dungeon");
-  if(ImGui::BeginTable("Dungeon overview",4,ImGuiTableFlags_SizingStretchSame)) {
-   ImGui::TableNextRow(); ImGui::TableNextColumn(); metric("Depth",std::to_string(p.value("depth",0)),"Depth: "+std::to_string(p.value("depth_feet",p.value("depth",0)*50))+" feet");
-   ImGui::TableNextColumn(); metric("Light",std::to_string(p.value("light",0)));
-   ImGui::TableNextColumn(); metric("Feel",p.value("feeling","â€”"),p.value("feeling_description",""));
-   ImGui::TableNextColumn(); metric("",display_label(p.value("floor","")));
+  const char *dungeon_labels[]={"Depth","Light","Feel",""};
+  const std::string dungeon_values[]={std::to_string(p.value("depth",0)),std::to_string(p.value("light",0)),p.value("feeling","—"),display_label(p.value("floor",""))};
+  const std::string dungeon_tips[]={"Depth: "+std::to_string(p.value("depth_feet",p.value("depth",0)*50))+" feet","",p.value("feeling_description",""),""};
+  // Match metric's label/value spacing, plus the table's cell padding.
+  // Use the widest tile so every tile stays on one line at the breakpoint.
+  float tile_width=0;
+  for(int i=0;i<4;++i) {
+   const float content=ImGui::CalcTextSize(dungeon_labels[i]).x+ImGui::CalcTextSize(dungeon_values[i].c_str()).x;
+   const float padding=ImGui::GetFontSize()*(*dungeon_labels[i]?1.4f:.8f)+2*ImGui::GetStyle().CellPadding.x+2;
+   tile_width=std::max(tile_width,content+padding);
+  }
+  const int dungeon_columns=ImGui::GetContentRegionAvail().x>=4*tile_width?4:2;
+  if(ImGui::BeginTable("Dungeon overview",dungeon_columns,ImGuiTableFlags_SizingStretchSame)) {
+   for(int i=0;i<4;++i) {
+    ImGui::TableNextColumn(); metric(dungeon_labels[i],dungeon_values[i],dungeon_tips[i]);
+   }
    ImGui::EndTable();
   }
   if(p.value("trap_detected",false)) ImGui::TextUnformatted("Trap-detected area");

@@ -376,6 +376,25 @@ int main(int argc,char **argv) {
    check(creator.restart_ready,"Cancelled birth must return to main menu without backend stopped error");
   }
   {
+   json player={{"statuses",json::array({
+    {{"id","FAST"},{"name","Haste"},{"kind","benefit"},{"priority",2},{"visible",true},{"duration",20}},
+    {{"id","FOOD"},{"name","Fed"},{"visible",false}},
+    {{"id","CUT"},{"name","Deep Gash"},{"kind","harm"},{"priority",0},{"visible",true},{"duration",500},{"counter_kind","severity"}},
+    {{"id","SHERO"},{"name","Berserk"},{"kind","mixed"},{"priority",1},{"visible",true},{"duration",12}},
+    {{"id","OPP_FIRE"},{"name","Resist fire"},{"kind","benefit"},{"priority",2},{"visible",true},{"duration",15}}
+   })}};
+   const auto effects=StatusEffects::active(player);
+   check(effects.size()==4 && effects.front()["id"]=="CUT" && effects[1]["id"]=="SHERO","Status badges must suppress normal food and prioritise harmful effects");
+   for(float width:{160.f,350.f,650.f}) {
+    ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(width,500)); ImGui::Begin("Status layout test");
+    const float available=ImGui::GetContentRegionAvail().x;
+    ImGui::BeginGroup(); StatusEffects::draw(player); ImGui::EndGroup();
+    check(ImGui::GetItemRectSize().x<=available+1,"Status badges must wrap within the information panel");
+    ImGui::End(); ImGui::Render();
+   }
+   player["statuses"]=json::array(); check(StatusEffects::active(player).empty(),"Expired effects must disappear");
+  }
+  {
    Connection knowledge; knowledge.connected=true; knowledge.busy=true;
    KnowledgeBrowser browser; browser.open(knowledge);
    const auto old=knowledge.knowledge_list_request;
