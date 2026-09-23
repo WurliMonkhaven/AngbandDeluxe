@@ -256,12 +256,37 @@ int main(int argc,char **argv) {
   unsigned char *pixels; int atlas_w,atlas_h;
   io.Fonts->GetTexDataAsRGBA32(&pixels,&atlas_w,&atlas_h); io.Fonts->SetTexID(1);
   {
+  ImGui::NewFrame(); ImGui::Begin("Quickbar text layout");
+  const float text_size=ImGui::GetFontSize();
+  auto roomy=Quickbar::text_layout("Bazinga",ImGui::CalcTextSize("Bazinga").x+8,text_size+1);
+  check(roomy.lines.size()==1 && roomy.font_size==text_size,"Custom text must use the full available slot width");
+  auto wrapped=Quickbar::text_layout("Magic Missile",ImGui::CalcTextSize("Missile").x+1,text_size*2+1);
+  check(wrapped.lines.size()==2 && wrapped.font_size==text_size,"Custom labels must wrap before shrinking");
+  ImGui::End(); ImGui::Render();
   Connection hot; hot.connected=true; hot.character_save="quickbar-test";
   json potion={{"id","old-handle"},{"binding_key","potion-kind"},{"label","a Potion"},{"location","Pack"},{"quantity",2},{"actions",json::array({"core.quaff","core.drop"})}};
   hot.state={{"phase","playing"},{"readiness","ready"},{"revision","7"},{"terminal",json::array()},{"items",json::array({potion})}};
   UI hot_ui{hot}; hot_ui.grid_focus=true; hot_ui.quickbar_enabled=true; hot_ui.quickbar.profile=hot.character_save;
   hot_ui.quickbar.slots()[0]=Quickbar::item_binding(potion,"core.quaff");
   auto binding=hot_ui.quickbar.slots()[0];
+  check(Quickbar::item_choices(potion) && !Quickbar::spell_choices(potion),"Warrior items must not create a spell menu");
+  auto no_actions=potion; no_actions["actions"]=json::array();
+  check(!Quickbar::item_choices(no_actions),"Items with empty action lists must not create submenus");
+  hot_ui.quickbar.begin_customize(0);
+  hot_ui.quickbar.draft_icon=1; SDL_strlcpy(hot_ui.quickbar.draft_text,"Heal",65);
+  hot_ui.quickbar.draft_color[0]=.25f;
+  check(hot_ui.quickbar.slots()[0]==binding,"Customization draft must not modify binding before Save");
+  hot_ui.quickbar.begin_customize(0);
+  check(hot_ui.quickbar.draft_icon==0 && hot_ui.quickbar.draft_text[0]==0,"Reopening after Cancel must discard customization");
+  hot_ui.quickbar.draft_icon=1; SDL_strlcpy(hot_ui.quickbar.draft_text,"Heal",65); hot_ui.quickbar.draft_color[0]=.25f;
+  hot_ui.quickbar.save_customize();
+  hot_ui.quickbar.draft_icon=3;
+  check(hot_ui.quickbar.appearance_draft()["icon_style"]=="scroll","Icon picker must retain existing saved icon identities");
+  hot_ui.quickbar.begin_customize(0);
+  Quickbar restored; restored.load(hot_ui.quickbar.profiles); restored.profile=hot.character_save;
+  check(restored.slots()[0]["custom_text"]=="Heal" && restored.slots()[0]["custom_color"][0]==.25f,"Custom appearance must survive serialization");
+  check(Quickbar::resolve(restored.slots()[0],hot).item=="old-handle","Custom appearance must not change action resolution");
+
   check(Quickbar::resolve(binding,hot).amount==2,"Potion quantity");
   hot.state["items"]=json::array(); check(!Quickbar::resolve(binding,hot).reason.empty(),"Depleted stack must disable slot");
   potion["id"]="new-handle"; potion["quantity"]=5; hot.state["items"]=json::array({potion});
@@ -271,8 +296,11 @@ int main(int argc,char **argv) {
   potion["location"]="Pack"; hot.state["items"]=json::array({potion});
   json book={{"id","book-now"},{"binding_key","book-kind"},{"label","First Spells"},{"location","Pack"},{"book_available",true}};
   json spell={{"id","0"},{"label","Magic Missile"},{"mana",1},{"can_cast",false}};
+  check(!Quickbar::spell_choices(book),"Book without spells must not create empty menu");
   auto spell_binding=Quickbar::spell_binding(book,spell);
-  book["spells"]=json::array({spell}); hot.state["items"].push_back(book);
+  book["spells"]=json::array({spell});
+  check(Quickbar::spell_choices(book),"Book with spells must allow assignments");
+  hot.state["items"].push_back(book);
   check(!Quickbar::resolve(spell_binding,hot).reason.empty(),"Unknown spell must be unavailable");
   hot.state["items"][1]["spells"][0]["can_cast"]=true;
   hot.state["items"][1]["spells"][0]["low_mana"]=true;
@@ -306,8 +334,13 @@ int main(int argc,char **argv) {
   hot_ui.quickbar.profile="Renamed";
   for(float width:{350.f,850.f}) {
    ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(width,150)); ImGui::Begin("Quickbar layout");
-   hot_ui.quickbar.draw(hot); ImGui::End(); ImGui::Render();
+   hot_ui.quickbar.draw(hot);
+   if(width==350.f) { hot_ui.quickbar.begin_customize(0); hot_ui.quickbar.open_customize=true; }
+   hot_ui.quickbar.customize_window(); ImGui::End(); ImGui::Render();
   }
+  ImGui::NewFrame(); ImGui::Begin("Quickbar layout");
+  if(ImGui::BeginPopupModal("Customize quickbar slot")) { ImGui::CloseCurrentPopup(); ImGui::EndPopup(); }
+  ImGui::End(); ImGui::Render();
   }
   Connection shop; shop.connected=true;
   shop.state={{"phase","store"},{"context","shop-1"},{"player",{{"gold",100}}},

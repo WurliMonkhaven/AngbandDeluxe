@@ -1255,6 +1255,7 @@ struct UI {
    targeting_was_active=targeting_active;
    ImGui::EndChild(); ImGui::EndTable();
   }
+  if(quickbar.customize_window()) focus_game();
   if(quickbar.dirty) { quickbar.dirty=false; save_settings(); }
   if(item_rules_panel.draw(c)) focus_game();
   if(c.state.contains("player")) {

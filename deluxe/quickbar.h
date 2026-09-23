@@ -3,6 +3,88 @@ struct Quickbar {
  json profiles=json::object();
  std::string profile;
  bool dirty=false;
+ int editing_slot=-1, draft_icon=0;
+ bool open_customize=false;
+ float last_slot_width=100.f;
+ std::string editing_profile;
+ char draft_text[65]{};
+ float draft_color[3]{1,1,1};
+ static bool carried(const json &item) {
+  const auto loc=item.value("location","");
+  return loc!="Floor" && loc!="Store" && loc!="Home" && !item.value("binding_key","").empty();
+ }
+ static bool item_choices(const json &item) { return carried(item) && item.contains("actions") && !item["actions"].empty(); }
+ static bool spell_choices(const json &item) { return carried(item) && item.value("book_available",false) && item.contains("spells") && !item["spells"].empty(); }
+ static ImU32 appearance_color(const json &b) {
+  if(b.contains("custom_color")) { const auto &v=b["custom_color"]; return ImGui::ColorConvertFloat4ToU32(ImVec4(v[0].get<float>(),v[1].get<float>(),v[2].get<float>(),1)); }
+  return color(b.value("color",14));
+ }
+ void begin_customize(int slot) {
+  editing_slot=slot; editing_profile=profile;
+  const auto &b=slots()[slot];
+  const auto style=b.value("icon_style","automatic");
+  draft_icon=style=="text"?1:style=="potion"?2:style=="scroll"?3:style=="wand"?4:0;
+  const auto text=b.value("custom_text","");
+  SDL_strlcpy(draft_text,text.c_str(),sizeof(draft_text));
+  const auto rgb=ImGui::ColorConvertU32ToFloat4(appearance_color(b));
+  draft_color[0]=rgb.x; draft_color[1]=rgb.y; draft_color[2]=rgb.z;
+ }
+ json appearance_draft() const {
+  static const char *styles[]={"automatic","text","potion","scroll","wand"};
+  return {{"icon_style",styles[draft_icon]},{"custom_text",draft_text},{"custom_color",json::array({draft_color[0],draft_color[1],draft_color[2]})}};
+ }
+ void save_customize() {
+  if(editing_profile!=profile || editing_slot<0 || slots()[editing_slot].is_null()) return;
+  slots()[editing_slot].update(appearance_draft()); dirty=true;
+ }
+ bool customize_window() {
+  if(open_customize) { ImGui::OpenPopup("Customize quickbar slot"); open_customize=false; }
+  bool closed=false;
+  ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize()*24,0),ImGuiCond_Appearing);
+  if(ImGui::BeginPopupModal("Customize quickbar slot",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+   ImGui::Text("Slot %d",(editing_slot+1)%10);
+   int mode=draft_icon<2?draft_icon:2;
+   if(ImGui::Combo("Appearance",&mode,"Automatic\0Custom text\0Icon\0")) draft_icon=mode;
+   if(mode==2) {
+    const char *names[]={"Potion","Scroll / book","Wand"};
+    const char *styles[]={"potion","scroll","wand"};
+    const float tile=ImGui::GetFontSize()*2.5f;
+    for(int i=0;i<3;++i) {
+     if(i) ImGui::SameLine();
+     ImGui::PushID(i); const auto a=ImGui::GetCursorScreenPos();
+     if(ImGui::InvisibleButton("Choose icon",ImVec2(tile,tile))) draft_icon=i+2;
+     auto *draw=ImGui::GetWindowDrawList();
+     draw->AddRectFilled(a,ImVec2(a.x+tile,a.y+tile),ImGui::GetColorU32(draft_icon==i+2?ImGuiCol_ButtonActive:ImGuiCol_Button),3);
+     icon(draw,ImVec2(a.x+tile*.2f,a.y+tile*.2f),tile*.6f,json{{"icon_style",styles[i]}},ImGui::GetColorU32(ImGuiCol_Text));
+     if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",names[i]);
+     ImGui::PopID();
+    }
+    ImGui::TextDisabled("%s",names[draft_icon-2]);
+   }
+   if(draft_icon==1) { ImGui::InputText("Text / symbol",draft_text,sizeof(draft_text)); ImGui::TextDisabled("Text wraps to fit the slot."); }
+   ImGui::ColorEdit3("Colour",draft_color);
+   auto preview=slots()[editing_slot]; preview.update(appearance_draft());
+   ImGui::TextUnformatted("Preview");
+   const auto pos=ImGui::GetCursorScreenPos(); const float w=std::min(last_slot_width,ImGui::GetContentRegionAvail().x),h=height()-ImGui::GetStyle().ItemSpacing.y;
+   ImGui::Dummy(ImVec2(w,h));
+   auto *draw=ImGui::GetWindowDrawList();
+   draw->AddRectFilled(pos,ImVec2(pos.x+w,pos.y+h),ImGui::GetColorU32(ImGuiCol_FrameBg),3);
+   content(draw,pos,w,h,preview,appearance_color(preview));
+   draw->AddText(ImVec2(pos.x+3,pos.y+2),ImGui::GetColorU32(ImGuiCol_TextDisabled),std::to_string((editing_slot+1)%10).c_str());
+   ImGui::Spacing();
+   if(ImGui::Button("Reset appearance")) {
+    draft_icon=0; draft_text[0]=0;
+    const auto rgb=ImGui::ColorConvertU32ToFloat4(color(slots()[editing_slot].value("color",14)));
+    draft_color[0]=rgb.x; draft_color[1]=rgb.y; draft_color[2]=rgb.z;
+   }
+   ImGui::Separator();
+   if(ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) { ImGui::CloseCurrentPopup(); closed=true; }
+   ImGui::SameLine();
+   if(ImGui::Button("Save and Close")) { save_customize(); ImGui::CloseCurrentPopup(); closed=true; }
+   ImGui::EndPopup();
+  }
+  return closed;
+ }
  struct Action {
   std::string command,item,spell,reason;
   int amount=0; bool mana=false;
@@ -32,8 +114,13 @@ struct Quickbar {
    bool valid=true;
    for(const auto &b:it.value()) if(!b.is_null() && (!b.is_object() || !b.contains("type") || !b["type"].is_string() || !b.contains("label") || !b["label"].is_string() || !b.contains("command") || !b["command"].is_string())) valid=false;
    for(const auto &b:it.value()) if(b.is_object()) {
-    for(const char *field:{"key","spell","spell_name","category"}) if(b.contains(field) && !b[field].is_string()) valid=false;
+    for(const char *field:{"key","spell","spell_name","category","icon_style","custom_text"}) if(b.contains(field) && !b[field].is_string()) valid=false;
     if(b.contains("color") && !b["color"].is_number_integer()) valid=false;
+    if(b.contains("custom_color")) {
+     const auto &rgb=b["custom_color"];
+     if(!rgb.is_array() || rgb.size()!=3) valid=false;
+     else for(const auto &channel:rgb) if(!channel.is_number() || channel.get<float>()<0 || channel.get<float>()>1) valid=false;
+    }
    }
    if(valid) profiles[it.key()]=it.value();
   }
@@ -97,7 +184,7 @@ struct Quickbar {
   if(ImGui::BeginMenu("Assign to quickbar")) { slot_choices(binding); ImGui::EndMenu(); }
  }
  void item_menu(const json &item) {
-  if(item.value("binding_key","").empty()) return;
+  if(!item_choices(item)) return;
   if(ImGui::BeginMenu("Assign to quickbar")) {
    for(const auto &action:item.value("actions",json::array())) {
     const auto cmd=action.get<std::string>();
@@ -108,10 +195,11 @@ struct Quickbar {
  }
  void choose_binding(Connection &c,int slot) {
   auto &s=slots();
-  if(ImGui::BeginMenu("Items")) {
+  bool has_items=false,has_spells=false;
+  if(c.state.contains("items")) for(const auto &item:c.state["items"]) { has_items|=item_choices(item); has_spells|=spell_choices(item); }
+  if(has_items && ImGui::BeginMenu("Items")) {
    for(const auto &item:c.state.at("items")) {
-    const auto loc=item.value("location","");
-    if(loc=="Floor" || loc=="Store" || loc=="Home" || item.value("binding_key","").empty()) continue;
+    if(!item_choices(item)) continue;
     ImGui::PushID(item.value("id","").c_str());
     if(ImGui::BeginMenu(item.value("label","").c_str())) {
      for(const auto &action:item.value("actions",json::array())) if(ImGui::MenuItem(action_label(action.get<std::string>()))) {
@@ -123,8 +211,8 @@ struct Quickbar {
    }
    ImGui::EndMenu();
   }
-  if(ImGui::BeginMenu("Spells")) {
-   for(const auto &book:c.state.value("items",json::array())) if(book.value("book_available",false))
+  if(has_spells && ImGui::BeginMenu("Spells")) {
+   for(const auto &book:c.state.value("items",json::array())) if(spell_choices(book))
     for(const auto &spell:book.value("spells",json::array())) {
      ImGui::PushID(book.value("binding_key","").c_str()); ImGui::PushID(spell.value("id","").c_str());
      if(ImGui::MenuItem(spell.value("label","").c_str())) { s[slot]=spell_binding(book,spell); dirty=true; }
@@ -132,14 +220,52 @@ struct Quickbar {
     }
    ImGui::EndMenu();
   }
-  if(ImGui::BeginMenu("Commands")) {
+  if(!c.commands.empty() && ImGui::BeginMenu("Commands")) {
    for(const auto &cmd:c.commands) if(ImGui::MenuItem(cmd.value("label","").c_str())) { s[slot]=command_binding(cmd); dirty=true; }
    ImGui::EndMenu();
   }
  }
  static float height() { return ImGui::GetFontSize()*3.2f+ImGui::GetStyle().ItemSpacing.y; }
+ struct TextLayout { float font_size=0; std::vector<std::string> lines; };
+ static TextLayout text_layout(const std::string &text,float width,float height) {
+  TextLayout result;
+  if(text.empty() || width<=0 || height<=0) return result;
+  auto *font=ImGui::GetFont();
+  // Prefer normal-sized words, wrapping before reducing the font size.
+  for(float scale=1.f;scale>=.2f;scale-=.025f) {
+   result.font_size=ImGui::GetFontSize()*scale; result.lines.clear();
+   const char *p=text.c_str(),*end=p+text.size();
+   while(p<end) {
+    const char *next=font->CalcWordWrapPosition(result.font_size,p,end,width);
+    if(next==p) { next=p; size_t left=size_t(end-p); SDL_StepUTF8(&next,&left); }
+    result.lines.emplace_back(p,next); p=next;
+    while(p<end && (*p==' ' || *p=='\n' || *p=='\r')) ++p;
+   }
+   if(result.lines.size()*result.font_size<=height) break;
+  }
+  return result;
+ }
+ static void content(ImDrawList *draw,ImVec2 a,float width,float h,const json &binding,ImU32 ink) {
+  if(binding.value("icon_style","")=="text") {
+   const float padding=std::max(3.f,ImGui::GetFontSize()*.2f);
+   const float top=ImGui::GetFontSize()+3, bottom=binding.value("type","")=="command"?padding:ImGui::GetFontSize()+3;
+   const float w=std::max(1.f,width-2*padding),available=std::max(1.f,h-top-bottom);
+   auto layout=text_layout(binding.value("custom_text",""),w,available);
+   float y=a.y+top+(available-layout.lines.size()*layout.font_size)/2;
+   draw->PushClipRect(ImVec2(a.x+padding,a.y+top),ImVec2(a.x+width-padding,a.y+h-bottom),true);
+   for(const auto &line:layout.lines) {
+    float measure=ImGui::GetFont()->CalcTextSizeA(layout.font_size,FLT_MAX,0,line.c_str()).x;
+    draw->AddText(ImGui::GetFont(),layout.font_size,ImVec2(a.x+(width-measure)/2,y),ink,line.c_str()); y+=layout.font_size;
+   }
+   draw->PopClipRect();
+  } else {
+   const float size=std::min(width*.5f,h*.5f);
+   icon(draw,ImVec2(a.x+(width-size)/2,a.y+h*.23f),size,binding,ink);
+  }
+ }
  static void icon(ImDrawList *draw,ImVec2 a,float size,const json &binding,ImU32 ink) {
-  const auto category=binding.value("category","");
+  const auto style=binding.value("icon_style","automatic");
+  const auto category=style=="automatic"?binding.value("category",""):style;
   const float x=a.x,y=a.y,s=size;
   if(category.find("potion")!=std::string::npos) {
    draw->AddRect(ImVec2(x+s*.35f,y),ImVec2(x+s*.65f,y+s*.3f),ink,1,0,2);
@@ -165,6 +291,7 @@ struct Quickbar {
   const float gap=std::min(4.f,ImGui::GetContentRegionAvail().x/100.f);
   const float width=std::max(1.f,(ImGui::GetContentRegionAvail().x-gap*9)/10.f);
   const float h=height()-ImGui::GetStyle().ItemSpacing.y;
+  last_slot_width=width;
   for(int i=0;i<10;++i) {
    if(i) ImGui::SameLine(0,gap);
    ImGui::PushID(i); const auto a=ImGui::GetCursorScreenPos();
@@ -174,10 +301,9 @@ struct Quickbar {
    auto *draw=ImGui::GetWindowDrawList();
    draw->AddRectFilled(a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(hovered?ImVec4(.20f,.28f,.38f,1):ImVec4(.08f,.12f,.17f,1)),3);
    draw->AddRect(a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(usable?ImVec4(.35f,.55f,.72f,1):ImVec4(.22f,.25f,.29f,1)),3);
-   const auto ink=usable?color(s[i].value("color",14)):ImGui::GetColorU32(ImGuiCol_TextDisabled);
+   const auto ink=usable?appearance_color(s[i]):ImGui::GetColorU32(ImGuiCol_TextDisabled);
    if(!s[i].is_null()) {
-    const float size=std::min(width*.5f,h*.5f);
-    icon(draw,ImVec2(a.x+(width-size)/2,a.y+h*.23f),size,s[i],ink);
+    content(draw,a,width,h,s[i],ink);
     if(s[i].value("type","")!="command") {
      const auto count=std::to_string(action.amount)+(action.mana?" MP":"");
      const auto measure=ImGui::CalcTextSize(count.c_str());
@@ -194,7 +320,7 @@ struct Quickbar {
    }
    if(ImGui::BeginPopupContextItem("Slot menu")) {
     choose_binding(c,i);
-    if(!s[i].is_null()) { ImGui::Separator(); if(ImGui::MenuItem("Clear slot")) { s[i]=nullptr; dirty=true; } }
+    if(!s[i].is_null()) { ImGui::Separator(); if(ImGui::MenuItem("Customize")) { begin_customize(i); open_customize=true; } if(ImGui::MenuItem("Clear slot")) { s[i]=nullptr; dirty=true; } }
     ImGui::EndPopup();
    }
    ImGui::PopID();

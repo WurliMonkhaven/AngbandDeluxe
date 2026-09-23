@@ -572,3 +572,12 @@ backends lacking binding keys still support command slots.
 All activations use the existing command API, including engine checks,
 inscriptions, confirmations, low-mana warnings and targeting. There are no macro
 sequences or automatic confirmations. No gameplay rules are changed.
+
+Quickbar assignment menus omit empty categories and item action submenus. Occupied
+slots offer Customize above Clear: automatic or chosen category icons, custom
+text/symbols, and a colour picker with preview. Save and Close persists the
+appearance per slot; Cancel discards edits. Appearance never changes the action.
+
+Custom quickbar labels use the available slot width and wrap before shrinking,
+with reserved space for shortcut and quantity indicators. Customize groups
+artwork under Icon, with a visual picker; saved icon choices remain compatible.
