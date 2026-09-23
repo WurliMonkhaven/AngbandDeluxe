@@ -539,3 +539,36 @@ Inventory and store inspection request the preview only while expanded, cache it
 Inventory item context menus distinguish Ignore this item from Ignore item kind, with matching undo actions. Eligibility follows the original ignore menu; engine ignore processing, protected inscriptions and equipped-item drop confirmations remain in force. Item rules opens a native review/removal panel for individual ignored items, kind rules, quality thresholds, ego rules, and aware/unaware auto-inscriptions. The item.rules capability uses item.preferences, item.rules.list and item.rules.clear with current revision validation for mutations.
 
 Inscribe continues through Angband's original command and confirmation path, with a native editor showing the current inscription, Save/Cancel, and hover help for common tags. Auto-inscribe this kind opens a separate editor: saving updates the engine kind rule and applies normal auto-inscription to carried items, preserving existing notes; blank removes the rule without deleting existing inscriptions. These are character preferences saved through the normal save system, not changes to game balance.
+
+
+## Quick-action bar (September 2026)
+
+Gameplay settings include an optional Quick-action bar, disabled by default and
+applied only by Save and Close. Ten compact slots reserve a row beneath the
+playing dungeon, above the resizable Messages panel. Birth, stores and the main
+menu omit the bar. It does not cover or crop the dungeon.
+
+Click a slot or use physical top-row 1 through 0. Numpad movement is unchanged.
+No modifier bindings are included. Shortcuts apply only during ordinary play
+with game keyboard focus; prompts, targeting, message acknowledgement, text
+fields and pop-ups retain normal input. Held shortcuts fire once and their text
+events cannot leak into the resulting prompt.
+
+Right-click items, spells or commands to assign an action to a numbered slot.
+Right-click a slot to assign, replace or clear it. Items use small category
+symbols; spells and other actions use monograms, with full names in tooltips.
+Item counts or spell mana costs appear on slots. Unavailable bindings remain
+visible, dimmed, with a tooltip explaining why.
+
+Assignments persist per save in Deluxe preferences and follow successful save
+renames; deleting a save removes its profile. Bindings store engine-provided
+opaque item binding_key values and action/spell identities, never revision-scoped
+item handles. Each activation resolves a fresh eligible carried item or equipped
+item. Consumables recover when a matching stack is reacquired. Wearable identity
+includes its kind, ego/artifact and bonuses; changed equipment may need rebinding.
+Engine category metadata supplies presentation hints. These fields are additive;
+backends lacking binding keys still support command slots.
+
+All activations use the existing command API, including engine checks,
+inscriptions, confirmations, low-mana warnings and targeting. There are no macro
+sequences or automatic confirmations. No gameplay rules are changed.

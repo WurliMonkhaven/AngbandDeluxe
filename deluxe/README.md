@@ -179,3 +179,11 @@ Windows is the current target. macOS/Linux validation and packaging are deferred
 by the user; earlier cross-platform goals remain future work. Hands-on UI testing
 is user-performed, without computer-use automation. See the updated product
 specification for the authoritative scale, settings, menu and presentation decisions.
+
+
+## Quick-action bar
+
+Enable Quick-action bar under Settings > Gameplay. Right-click a slot, inventory
+item, spell or command to assign it. Click or press top-row 1-0 to activate;
+numpad movement is unchanged. Slots persist per save and resolve current items,
+including replacement consumable stacks. Right-click a slot to replace or clear.

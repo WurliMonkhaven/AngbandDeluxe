@@ -666,6 +666,8 @@ class BackendTests(unittest.TestCase):
         potion = next(i for i in initial["items"] if "Potion" in i["label"])
         self.assertNotIn("core.wield", potion["actions"])
         self.assertIn("core.quaff", potion["actions"])
+        self.assertTrue(potion["binding_key"])
+        self.assertEqual(potion["category"], "potion")
         self.assertIn("core.drop", potion["actions"])
         self.assertIn("An inheritance from your family", potion["description"])
         self.assertIn("When quaffed", potion["description"])
@@ -717,6 +719,8 @@ class BackendTests(unittest.TestCase):
             e.key("enter")
         self.assertEqual(e.state["player"]["name"], final["name"])
         self.assertEqual(e.state["player"]["hp"], final["hp"])
+        reloaded = next(i for i in e.state["items"] if "Potion" in i["label"])
+        self.assertEqual(reloaded["binding_key"], potion["binding_key"])
 
     def test_stairs_and_dungeon_inspection(self):
         e = self.engine

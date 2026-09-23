@@ -167,6 +167,9 @@ int main(int argc,char **argv) {
   check(!ui.proceed_with_click,"Legacy settings must default click acknowledgement off");
   check(!ui.click_exits_look,"Legacy settings must default click exits look off");
   check(!ui.quick_targeting,"Quick targeting defaults off");
+  check(!ui.quickbar_enabled,"Quickbar defaults off");
+  ui.draft_quickbar_enabled=true;
+  check(!ui.quickbar_enabled,"Quickbar draft must not apply");
   ui.draft_quick_targeting=true;
   check(!ui.quick_targeting,"Quick targeting draft must not apply immediately");
   ui.draft_click_exits_look=true;
@@ -182,6 +185,7 @@ int main(int argc,char **argv) {
   check(!ui.draft_proceed_with_click,"Cancelled gameplay draft retained");
   check(!ui.draft_click_exits_look,"Cancelled look click draft retained");
   check(!ui.draft_quick_targeting,"Cancel retained quick targeting draft");
+  check(!ui.draft_quickbar_enabled,"Cancel retained quickbar draft");
   check(ui.draft_low_animation && ui.draft_death_animation,"Cancelled animation draft retained");
   check(ui.draft_scale==1.25f && ui.draft_crt==0 && !ui.draft_fullscreen,"Draft was retained");
   check(ui.draft_crt_strength==1 && ui.crt_strength==1,"Cancelled strength was applied");
@@ -192,11 +196,16 @@ int main(int argc,char **argv) {
   ui.draft_click_exits_look=true;
   ui.draft_proceed_with_click=true;
   ui.draft_quick_targeting=true;
+  ui.draft_quickbar_enabled=true;
+  ui.quickbar.profile="test-character"; ui.quickbar.slots()[0]=Quickbar::command_binding({{"id","core.hold"},{"label","Hold"}});
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
   check(loaded.proceed_with_click,"Gameplay option did not persist");
   check(loaded.click_exits_look,"Click exits look did not persist");
   check(loaded.quick_targeting,"Quick targeting did not persist");
+  loaded.quickbar.profile="test-character";
+  check(loaded.quickbar_enabled && loaded.quickbar.slots()[0]["command"]=="core.hold","Quickbar settings and assignments did not persist");
+  loaded.quickbar.profile="other-character"; check(loaded.quickbar.slots()[0].is_null(),"Characters must not share slots");
   check(loaded.crt_settings.raster_lines==720 && loaded.crt_settings.mask==2,"Staged raster/mask settings did not persist");
   check(!loaded.low_animation && loaded.death_animation,"Independent animation switches did not persist");
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");
@@ -246,6 +255,60 @@ int main(int argc,char **argv) {
   auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(1280,800);
   unsigned char *pixels; int atlas_w,atlas_h;
   io.Fonts->GetTexDataAsRGBA32(&pixels,&atlas_w,&atlas_h); io.Fonts->SetTexID(1);
+  {
+  Connection hot; hot.connected=true; hot.character_save="quickbar-test";
+  json potion={{"id","old-handle"},{"binding_key","potion-kind"},{"label","a Potion"},{"location","Pack"},{"quantity",2},{"actions",json::array({"core.quaff","core.drop"})}};
+  hot.state={{"phase","playing"},{"readiness","ready"},{"revision","7"},{"terminal",json::array()},{"items",json::array({potion})}};
+  UI hot_ui{hot}; hot_ui.grid_focus=true; hot_ui.quickbar_enabled=true; hot_ui.quickbar.profile=hot.character_save;
+  hot_ui.quickbar.slots()[0]=Quickbar::item_binding(potion,"core.quaff");
+  auto binding=hot_ui.quickbar.slots()[0];
+  check(Quickbar::resolve(binding,hot).amount==2,"Potion quantity");
+  hot.state["items"]=json::array(); check(!Quickbar::resolve(binding,hot).reason.empty(),"Depleted stack must disable slot");
+  potion["id"]="new-handle"; potion["quantity"]=5; hot.state["items"]=json::array({potion});
+  check(Quickbar::resolve(binding,hot).item=="new-handle" && Quickbar::resolve(binding,hot).amount==5,"Reacquired stack must resolve current handle");
+  potion["location"]="Floor"; hot.state["items"]=json::array({potion});
+  check(!Quickbar::resolve(binding,hot).reason.empty(),"Ground item must not substitute carried consumable");
+  potion["location"]="Pack"; hot.state["items"]=json::array({potion});
+  json book={{"id","book-now"},{"binding_key","book-kind"},{"label","First Spells"},{"location","Pack"},{"book_available",true}};
+  json spell={{"id","0"},{"label","Magic Missile"},{"mana",1},{"can_cast",false}};
+  auto spell_binding=Quickbar::spell_binding(book,spell);
+  book["spells"]=json::array({spell}); hot.state["items"].push_back(book);
+  check(!Quickbar::resolve(spell_binding,hot).reason.empty(),"Unknown spell must be unavailable");
+  hot.state["items"][1]["spells"][0]["can_cast"]=true;
+  hot.state["items"][1]["spells"][0]["low_mana"]=true;
+  auto cast=Quickbar::resolve(spell_binding,hot);
+  check(cast.reason.empty() && cast.item=="book-now" && cast.spell=="0" && cast.mana && cast.amount==1,"Learned low-mana spell must retain engine confirmation path");
+  SDL_Event digit{}; digit.type=SDL_EVENT_KEY_DOWN; digit.key.scancode=SDL_SCANCODE_1;
+  check(hot_ui.quickbar_event(digit),"Top-row shortcut must be captured");
+  check(hot.busy && hot.next==1 && hot.outgoing.find("new-handle")!=std::string::npos,"Shortcut must execute current item once");
+  SDL_Event text{}; text.type=SDL_EVENT_TEXT_INPUT; text.text.text="1";
+  check(hot_ui.quickbar_event(text),"Shortcut text must not leak into engine prompt");
+  hot.prompt={{"type","confirmation"}}; digit.key.repeat=true;
+  check(hot_ui.quickbar_event(digit) && hot.next==1,"Held shortcut must not repeat into confirmation");
+  hot_ui.quickbar_event(text); digit.type=SDL_EVENT_KEY_UP; hot_ui.quickbar_event(digit);
+  digit.type=SDL_EVENT_KEY_DOWN; digit.key.repeat=false;
+  check(!hot_ui.quickbar_event(digit),"Prompt numeric input must remain available");
+  hot.prompt=json::object(); hot.busy=false;
+  digit.key.scancode=SDL_SCANCODE_KP_1; check(!hot_ui.quickbar_event(digit),"Numpad movement must pass through");
+  digit.key.scancode=SDL_SCANCODE_1; digit.key.mod=SDL_KMOD_SHIFT;
+  check(!hot_ui.quickbar_event(digit),"Modified digits must pass through");
+  digit.key.mod=SDL_KMOD_NONE; hot_ui.quickbar_enabled=false;
+  check(!hot_ui.quickbar_event(digit),"Disabled quickbar must preserve normal digits");
+  hot_ui.quickbar_enabled=true; io.WantTextInput=true;
+  check(!hot_ui.quickbar_event(digit),"Text fields must retain digits"); io.WantTextInput=false;
+  hot.state["message_pending"]=true; check(!hot_ui.quickbar_event(digit),"More acknowledgement must retain digits"); hot.state["message_pending"]=false;
+  const auto rename=hot.send("saves.rename",{{"save",hot.character_save},{"name","Renamed"}});
+  hot.receive({{"id",rename},{"result",json::object()}}); hot_ui.quickbar.sync_saves(hot.save_changes);
+  check(hot_ui.quickbar.profiles.contains("Renamed") && !hot_ui.quickbar.profiles.contains(hot.character_save),"Renaming a save must preserve its bar");
+  const auto failed=hot.send("saves.delete",{{"save","Renamed"}});
+  hot.receive({{"id",failed},{"error",{{"message","Test failure"}}}}); hot_ui.quickbar.sync_saves(hot.save_changes);
+  check(hot_ui.quickbar.profiles.contains("Renamed"),"Failed deletion must preserve bindings");
+  hot_ui.quickbar.profile="Renamed";
+  for(float width:{350.f,850.f}) {
+   ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(width,150)); ImGui::Begin("Quickbar layout");
+   hot_ui.quickbar.draw(hot); ImGui::End(); ImGui::Render();
+  }
+  }
   Connection shop; shop.connected=true;
   shop.state={{"phase","store"},{"context","shop-1"},{"player",{{"gold",100}}},
    {"items",json::array({{{"id","stock-1"},{"label","a Dagger"},{"location","Store"},{"quantity",2},{"description","Weapon description"}},

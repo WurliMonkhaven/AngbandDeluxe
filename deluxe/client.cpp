@@ -84,12 +84,13 @@ struct Connection {
  RenderGrid game_grid;
  std::unique_ptr<BackendReader> reader;
  std::unique_ptr<SDL_Process,decltype(&SDL_DestroyProcess)> process{nullptr,SDL_DestroyProcess};
- std::string outgoing, diagnostic, menu_error;
+ std::string outgoing, diagnostic, menu_error, character_save;
  std::deque<json> messages;
  json previous_messages = json::array();
  json capabilities = json::object();
  json comparisons = json::object();
  json item_rules=nullptr;
+ json save_change_requests=json::object(), save_changes=json::array();
  std::map<std::string,std::string> comparison_requests;
  std::map<std::string,std::string> requests;
  unsigned long next = 0;
@@ -141,11 +142,13 @@ struct Connection {
   send("debug.quit"); busy=true;
  }
  std::string send(const std::string &method, json params = json::object()) {
+  if(method=="session.new" || method=="session.load") character_save=params.value("save","");
   if (!connected) return "";
   auto id = "r" + std::to_string(++next);
   params["session_id"] = "session-1";
   outgoing += json{{"kind","request"},{"id",id},{"method",method},{"params",params}}.dump() + "\n";
   requests[id] = method;
+  if(method=="saves.rename" || method=="saves.delete") save_change_requests[id]={{"save",params.value("save","")},{"name",params.value("name","")}};
   return id;
  }
  bool start(const std::string &exe, const std::string &data, const std::string &user) {
@@ -174,6 +177,10 @@ struct Connection {
   auto id = j.value("id",""); auto it = requests.find(id);
   if (it == requests.end()) return;
   auto method = it->second; requests.erase(it);
+  if(save_change_requests.contains(id)) {
+   if(!j.contains("error")) save_changes.push_back(save_change_requests[id]);
+   save_change_requests.erase(id);
+  }
   if(method=="item.compare") {
    auto request=comparison_requests.find(id);
    if(request!=comparison_requests.end()) {
@@ -301,6 +308,7 @@ static void properties(const json &value) {
 }
 #include "character_overview.h"
 #include "character_sheet.h"
+#include "quickbar.h"
 #include "spell_panel.h"
 #include "item_description.h"
 #include "item_comparison.h"
@@ -308,6 +316,10 @@ static void properties(const json &value) {
 #include "store_panel.h"
 struct UI {
  Connection &c;
+ Quickbar quickbar;
+ bool quickbar_enabled=false, draft_quickbar_enabled=false;
+ bool quickbar_held[10]{};
+ char quickbar_text=0;
  bool open_character_sheet=false;
  bool inscription_edit=false;
  ItemRules item_rules_panel;
@@ -352,6 +364,8 @@ struct UI {
    proceed_with_click=j.value("proceed_with_click",false);
    click_exits_look=j.value("click_exits_look",false);
    quick_targeting=j.value("quick_targeting",false);
+   quickbar_enabled=j.value("quickbar_enabled",false);
+   quickbar.load(j.value("quickbar_profiles",json::object()));
    low_animation=j.value("low_health_animation",true); death_animation=j.value("death_animation",true);
    crt=std::clamp(j.value("crt",0),0,2);
    crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
@@ -361,20 +375,21 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick}}.dump(2);
+  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
  void save_settings() {
-  if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look,quick_targeting)) c.notice("Settings could not be saved.");
+  if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look,quick_targeting,quickbar_enabled)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
   draft_proceed_with_click=proceed_with_click;
   draft_click_exits_look=click_exits_look;
   draft_quick_targeting=quick_targeting;
+  draft_quickbar_enabled=quickbar_enabled;
   draft_low_animation=low_animation; draft_death_animation=death_animation;
   draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
   draft_crt_strength=crt_strength; draft_crt_settings=crt_settings;
@@ -383,7 +398,7 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
@@ -391,6 +406,7 @@ struct UI {
   proceed_with_click=draft_proceed_with_click;
   click_exits_look=draft_click_exits_look;
   quick_targeting=draft_quick_targeting;
+  quickbar_enabled=draft_quickbar_enabled;
   scale=draft_scale; fullscreen=draft_fullscreen; crt=draft_crt;
   crt_strength=draft_crt_strength; crt_settings=draft_crt_settings;
   return true;
@@ -418,6 +434,9 @@ struct UI {
      ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("Gameplay")) {
+     ImGui::Checkbox("Quick-action bar",&draft_quickbar_enabled);
+     if(ImGui::IsItemHovered()) ImGui::SetTooltip("Ten slots using top-row 1-0. Numpad movement is unchanged. Right-click a slot, item, spell or command to assign.");
+     ImGui::Spacing();
      ImGui::Spacing(); ImGui::Checkbox("Proceed with click",&draft_proceed_with_click);
      ImGui::TextWrapped("Left-click the game view to continue at - more -.");
      ImGui::Spacing(); ImGui::Checkbox("Quick targeting",&draft_quick_targeting);
@@ -484,6 +503,34 @@ struct UI {
    }
    ImGui::EndPopup();
   }
+ }
+ void activate_quickbar(int slot) {
+  quickbar.profile=c.character_save;
+  const auto action=Quickbar::resolve(quickbar.slots()[slot],c);
+  if(!action.reason.empty()) return;
+  keys.clear();
+  if(!action.spell.empty()) { c.command(action.command,action.item,action.spell); focus_game(); }
+  else execute(action.command,action.item);
+ }
+ bool quickbar_event(const SDL_Event &e) {
+  if(e.type==SDL_EVENT_WINDOW_FOCUS_LOST) { for(auto &held:quickbar_held) held=false; quickbar_text=0; }
+  if(e.type==SDL_EVENT_TEXT_INPUT) {
+   const char expected=quickbar_text; quickbar_text=0;
+   if(expected) return true; // Consume the text paired with the captured physical key, on any keyboard layout.
+  }
+  if(e.type!=SDL_EVENT_KEY_DOWN && e.type!=SDL_EVENT_KEY_UP) return false;
+  const int slot=int(e.key.scancode)-int(SDL_SCANCODE_1);
+  if(e.type==SDL_EVENT_KEY_DOWN) quickbar_text=0;
+  if(slot<0 || slot>=10) return false; // Keypad has distinct physical scancodes.
+  if(e.type==SDL_EVENT_KEY_UP) { bool held=quickbar_held[slot]; quickbar_held[slot]=false; return held; }
+  if(quickbar_held[slot] || (quickbar_enabled && owns_keyboard() && !ImGui::GetIO().WantTextInput && Quickbar::normal_play(c) &&
+    !(e.key.mod&(SDL_KMOD_CTRL|SDL_KMOD_SHIFT|SDL_KMOD_ALT|SDL_KMOD_GUI)))) {
+   quickbar_text=slot==9?'0':char('1'+slot);
+   if(!quickbar_held[slot] && !e.key.repeat) activate_quickbar(slot);
+   quickbar_held[slot]=true;
+   return true;
+  }
+  return false;
  }
  void focus_game() { focus_requested=true; keys.clear(); }
  bool proceed_click() {
@@ -858,7 +905,9 @@ struct UI {
       if(ImGui::MenuItem(item_action_label(command))) execute(command,id);
      }
      item_rules_panel.context(c,o);
-     ImGui::EndDisabled(); ImGui::EndPopup();
+     ImGui::EndDisabled();
+     if(quickbar_enabled) quickbar.item_menu(o);
+     ImGui::EndPopup();
     }
 
     if(ImGui::IsItemHovered()) {
@@ -1050,6 +1099,8 @@ struct UI {
   }
  }
  void draw(SDL_Window *window) {
+  quickbar.sync_saves(c.save_changes);
+  quickbar.profile=c.character_save;
   game_draw_list=nullptr;
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(vp->WorkPos); ImGui::SetNextWindowSize(vp->WorkSize);
@@ -1119,11 +1170,13 @@ struct UI {
    ImGui::BeginChild("Game",ImVec2(0,0),ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
    ImGui::SetScrollX(0); ImGui::SetScrollY(0);
    const float divider_height=8.f*display_scale*scale;
-   const float usable_height=std::max(1.f,ImGui::GetContentRegionAvail().y-divider_height-2*ImGui::GetStyle().ItemSpacing.y);
+   const bool show_quickbar=quickbar_enabled && phase=="playing";
+   const float usable_height=std::max(1.f,ImGui::GetContentRegionAvail().y-divider_height-2*ImGui::GetStyle().ItemSpacing.y-(show_quickbar?Quickbar::height():0));
    const float min_fraction=std::max(.2f,std::min(.4f,4*ImGui::GetTextLineHeight()/usable_height));
    const float max_fraction=std::min(.9f,1-std::min(.4f,3*ImGui::GetTextLineHeight()/usable_height));
    const float fraction=std::clamp(game_fraction,min_fraction,max_fraction);
    grid(std::max(1.f,usable_height*fraction));
+   if(show_quickbar) { ImGui::PushID("Quickbar"); int slot=quickbar.draw(c); if(slot>=0) activate_quickbar(slot); ImGui::PopID(); }
    if(c.state.contains("terminal")) {
     const auto divider=ImGui::GetCursorScreenPos();
     const float width=std::max(1.f,ImGui::GetContentRegionAvail().x);
@@ -1175,7 +1228,7 @@ struct UI {
     }
     if(ImGui::BeginTabItem("Inventory")) { ImGui::BeginChild("Item content"); items(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(c.capabilities.value("spells",0)>0 && c.state.contains("player") && c.state["player"].value("spellcasting",false) && ImGui::BeginTabItem("Spells")) {
-     ImGui::BeginChild("Spell content"); if(spell_panel.draw(c)) focus_game(); ImGui::EndChild(); ImGui::EndTabItem();
+     ImGui::BeginChild("Spell content"); if(spell_panel.draw(c,quickbar_enabled?&quickbar:nullptr)) focus_game(); ImGui::EndChild(); ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("Creatures")) { ImGui::BeginChild("Creature content"); creatures(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(ImGui::BeginTabItem("Map")) { ImGui::BeginChild("Map content"); minimap(); ImGui::EndChild(); ImGui::EndTabItem(); }
@@ -1184,7 +1237,11 @@ struct UI {
      ImGui::InputTextWithHint("##commands","Search commands",command_filter,sizeof(command_filter));
      ImGui::BeginDisabled(!c.ready());
      for(const auto &cmd:c.commands) {
-      auto label=cmd.value("label",""); if(matches(label,command_filter) && ImGui::Selectable(label.c_str())) execute(cmd.value("id",""));
+      auto label=cmd.value("label",""); if(!matches(label,command_filter)) continue;
+      ImGui::PushID(cmd.value("id","").c_str());
+      if(ImGui::Selectable(label.c_str())) execute(cmd.value("id",""));
+      if(quickbar_enabled && ImGui::BeginPopupContextItem("Command actions")) { quickbar.assign_menu(Quickbar::command_binding(cmd)); ImGui::EndPopup(); }
+      ImGui::PopID();
      }
      ImGui::EndDisabled(); ImGui::EndChild(); ImGui::EndTabItem();
     }
@@ -1198,6 +1255,7 @@ struct UI {
    targeting_was_active=targeting_active;
    ImGui::EndChild(); ImGui::EndTable();
   }
+  if(quickbar.dirty) { quickbar.dirty=false; save_settings(); }
   if(item_rules_panel.draw(c)) focus_game();
   if(c.state.contains("player")) {
    if(CharacterSheet::draw(c.state["player"],open_character_sheet)) focus_game();
@@ -1315,6 +1373,7 @@ int main(int argc,char **argv) {
      auto p=curve.map(ImVec2(e.motion.x,e.motion.y),true); e.motion.x=p.x; e.motion.y=p.y;
     }
    }
+   if(ui.quickbar_event(e)) continue;
    ImGui_ImplSDL3_ProcessEvent(&e);
    if(e.type==SDL_EVENT_QUIT) {
     if(!connection.state.contains("terminal")) { connection.closed=true; if(connection.process) SDL_KillProcess(connection.process.get(),true); }

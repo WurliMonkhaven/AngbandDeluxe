@@ -16,7 +16,7 @@ struct SpellPanel {
   const auto info=spell.value("info","");
   if(!info.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",info.c_str()); }
  }
- static std::string list(const json &spells,std::string &selection,float height,bool shortcuts=false) {
+ static std::string list(const json &spells,std::string &selection,float height,bool shortcuts=false,Quickbar *bar=nullptr,const json *book=nullptr) {
   std::string activated;
   if(!find(spells,selection)) selection=spells.empty()?"":spells.front().value("id","");
   if(ImGui::BeginTable("Spells",4,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,height))) {
@@ -35,6 +35,7 @@ struct SpellPanel {
     if(ImGui::Selectable(label.c_str(),selection==id,ImGuiSelectableFlags_SpanAllColumns|ImGuiSelectableFlags_AllowDoubleClick)) {
      selection=id; if(ImGui::IsMouseDoubleClicked(0)) activated=id;
     }
+    if(bar && book && ImGui::BeginPopupContextItem("Spell actions")) { bar->assign_menu(Quickbar::spell_binding(*book,s)); ImGui::EndPopup(); }
     if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",s.value("label","").c_str());
     ImGui::TableNextColumn(); ImGui::Text("%d",s.value("mana",0));
     ImGui::TableNextColumn(); ImGui::Text("%d%%",s.value("failure",0));
@@ -45,7 +46,7 @@ struct SpellPanel {
   }
   return activated;
  }
- bool draw(Connection &c) {
+ bool draw(Connection &c,Quickbar *bar=nullptr) {
   std::vector<const json*> books;
   for(const auto &o:c.state.at("items")) if(o.value("book_available",false) && o.contains("spells")) books.push_back(&o);
   if(books.empty()) { ImGui::TextWrapped("No readable spellbooks in your pack or on this tile."); return false; }
@@ -66,7 +67,7 @@ struct SpellPanel {
    ImGui::EndCombo();
   }
   const auto &spells=book->at("spells");
-  list(spells,selected,ImGui::GetTextLineHeightWithSpacing()*9);
+  list(spells,selected,ImGui::GetTextLineHeightWithSpacing()*9,false,bar,book);
   const auto *spell=find(spells,selected);
   bool acted=false;
   if(spell) {

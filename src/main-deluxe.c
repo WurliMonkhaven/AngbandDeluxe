@@ -306,6 +306,17 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
   item_handles[index] = (struct object *)o; item_handle_count = index + 1;
  }
  string(j, "id", id); string(j, "location", location);
+ {
+  char binding[256]; int used;
+  used=strnfmt(binding,sizeof(binding),"angband-kind-%d-ego-%d-art-%d",o->kind->kidx,o->ego?o->ego->eidx:0,o->artifact?o->artifact->aidx:0);
+  if(tval_is_wearable(o)) {
+   used+=strnfmt(binding+used,sizeof(binding)-used,"-%d-%d-%d",o->to_h,o->to_d,o->to_a);
+   for(i=0;i<OBJ_MOD_MAX && used<(int)sizeof(binding)-16;++i)
+    used+=strnfmt(binding+used,sizeof(binding)-used,"-%d",o->modifiers[i]);
+  }
+  string(j,"binding_key",binding); string(j,"category",tval_find_name(o->tval));
+ }
+
  json_bool(j,"comparison_available",tval_is_wearable(o) && wield_slot(o)>=0 && !object_is_equipped(player->body,o));
  json_bool(j,"can_pickup",streq(location,"Floor") && square_isseen(cave,o->grid) && !ignore_item_ok(player,o) && (tval_is_money(o) || inven_carry_okay(o)));
  {
