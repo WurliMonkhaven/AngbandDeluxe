@@ -510,3 +510,8 @@ client-only and neither selects an engine target nor consumes a turn.
 ### Compact character overview
 
 The fixed sidebar overview groups character identity and resources, dungeon context, and the tracked creature into distinct sections. Identity shares a compact wrapping row with a Details button, which opens the original character screen until a native sheet replaces it. HP/SP and Food/XP use a two-column bar layout; food retains both percentage and amount. XP shows progress within the current level using engine-supplied level_start_experience and next_level_experience thresholds, with exact totals in a tooltip. Attributes occupy equal-width columns; gold, armour, speed, depth, light and feeling use aligned cells. Creature names are capitalized for display. The overview remains outside the scrolling tab panel.
+
+
+### Native character sheet
+
+Details and the Character command open a read-only native modal with Overview, Combat & skills, Resistances & abilities, and Background tabs. The existing keyboard terminal sheet remains available. The engine exposes player.character_sheet containing grouped label/value/color rows shared with its original character screen, stat breakdowns, known effective resistance levels and ability descriptions, and background history. No terminal scraping or client combat calculations are used. Closing with Escape, Close, or the window close control returns focus to the game; browsing sends no gameplay command. This supersedes the interim Details button opening the original sheet.

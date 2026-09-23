@@ -20,6 +20,7 @@
 #include "obj-util.h"
 #include "obj-tval.h"
 #include "player.h"
+#include "player-properties.h"
 #include "player-path.h"
 #include "player-spell.h"
 #include "player-util.h"
@@ -40,6 +41,8 @@
 #include "ui-target.h"
 #include "target.h"
 #include "ui-output.h"
+#include "ui-player.h"
+#include "obj-properties.h"
 #include "trap.h"
 #include "ui-term.h"
 #include "z-quark.h"
@@ -314,6 +317,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  }
  return j;
 }
+#include "deluxe-character.h"
 #include "deluxe-view.h"
 #include "deluxe-travel.h"
 #include "deluxe-store.h"

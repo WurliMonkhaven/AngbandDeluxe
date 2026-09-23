@@ -299,6 +299,18 @@ int main(int argc,char **argv) {
    ImGui::End(); ImGui::Render();
    check(ImGui::GetDrawData()->TotalVtxCount>0,"Overview did not produce UI geometry");
   }
+  overview["character_sheet"]={{"rows",json::array({{{"group","Identity"},{"label","Name"},{"value","Test hero"},{"color",1}}})},
+   {"attributes",json::array({{{"label","STR"},{"base","18/20"},{"race",0},{"class",3},{"equipment",0},{"best","18/50"},{"current","18/50"}}})}};
+  ui.c.state["player"]=overview; ui.c.outgoing.clear();
+  ui.execute("core.character");
+  check(ui.open_character_sheet && ui.c.outgoing.empty(),"Character details must open locally without spending a turn");
+  for(int frame=0;frame<3;++frame) {
+   if(frame==2) io.AddKeyEvent(ImGuiKey_Escape,true);
+   ImGui::NewFrame(); ImGui::Begin("Sheet host");
+   bool closed=CharacterSheet::draw(overview,frame==0);
+   if(frame==2) check(closed,"Escape must close the native character sheet");
+   ImGui::End(); ImGui::Render();
+  }
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";

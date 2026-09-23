@@ -855,6 +855,22 @@ static const struct {
 	{ { 52, 9, 20, 8 }, false, get_panel_skills },
 };
 
+/* Export the original panel values without drawing or advancing the game. */
+void character_sheet_rows(void (*emit)(void *, const char *, const char *, const char *, int), void *user)
+{
+ static const char *groups[] = { "Identity", "Background", "Progression", "Combat", "Skills" };
+ size_t i, j;
+ for (i = 0; i < N_ELEMENTS(panels); ++i) {
+  struct panel *p = panels[i].panel();
+  for (j = 0; j < p->len; ++j) {
+   const struct panel_line *line = &p->lines[j];
+   if (line->label) emit(user, groups[i], line->label,
+    (i == 0 && j == 0) ? player->full_name : line->value, line->attr);
+  }
+  panel_free(p);
+ }
+}
+
 void display_player_xtra_info(void)
 {
 	size_t i;

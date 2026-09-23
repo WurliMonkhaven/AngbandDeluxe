@@ -643,6 +643,14 @@ class BackendTests(unittest.TestCase):
         initial = e.call("state.get")["result"]
         self.assertIn("player", initial)
         self.assertEqual(initial["player"]["level_start_experience"], 0)
+        sheet = initial["player"]["character_sheet"]
+        self.assertEqual(len(sheet["attributes"]), 5)
+        self.assertEqual(len(sheet["resistances"]), 13)
+        self.assertEqual({r["group"] for r in sheet["rows"]},
+                         {"Identity", "Background", "Progression", "Combat", "Skills"})
+        self.assertTrue(sheet["history"])
+        self.assertTrue(any(r["label"] == "Blows" for r in sheet["rows"]))
+
         self.assertEqual(initial["player"]["depth_feet"], initial["player"]["depth"] * 50)
         self.assertEqual(initial["player"]["feeling_description"], "Looks like a typical town.")
         self.assertGreater(initial["player"]["next_level_experience"], 0)

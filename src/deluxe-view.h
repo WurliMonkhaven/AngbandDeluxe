@@ -93,6 +93,7 @@ static void deluxe_capture_view(cJSON *state_record)
 }
 static void deluxe_character_details(cJSON *p)
 {
+ deluxe_character_sheet(p);
  char feeling_description[256];
  const struct trap *trap = square_trap(cave,player->grid);
  const char *title = player->class->title[MIN((player->lev-1)/5,9)];

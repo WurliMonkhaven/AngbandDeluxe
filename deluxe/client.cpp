@@ -285,10 +285,12 @@ static void properties(const json &value) {
  }
 }
 #include "character_overview.h"
+#include "character_sheet.h"
 #include "spell_panel.h"
 #include "store_panel.h"
 struct UI {
  Connection &c;
+ bool open_character_sheet=false;
  StorePanel store_panel;
  SpellPanel spell_panel;
  bool was_store=false;
@@ -470,6 +472,7 @@ struct UI {
   focus_game(); return true;
  }
  void execute(const std::string &id,const std::string &item="") {
+  if(id=="core.character" && c.state.contains("player") && c.state["player"].contains("character_sheet")) { keys.clear(); open_character_sheet=true; return; }
   if(c.native_targeting() && (id=="core.look" || id=="core.target")) c.target("targeting.begin",{{"mode",id=="core.look"?"look":"target"}});
   else c.command(id,item);
   focus_game();
@@ -1118,6 +1121,10 @@ struct UI {
    targeting_was_active=targeting_active;
    ImGui::EndChild(); ImGui::EndTable();
   }
+  if(c.state.contains("player")) {
+   if(CharacterSheet::draw(c.state["player"],open_character_sheet)) focus_game();
+  }
+  open_character_sheet=false;
   if(quit_dialog) { ImGui::OpenPopup("Close game"); quit_dialog=false; }
   if(ImGui::BeginPopupModal("Close game",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
    ImGui::TextWrapped(c.ready()?"Save this character and close Deluxe?":"Return to normal play to save. You can finish the current menu first.");
