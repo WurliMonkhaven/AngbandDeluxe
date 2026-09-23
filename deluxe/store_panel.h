@@ -3,6 +3,7 @@
 struct StorePanel {
  int stock_selection=-1, inventory_selection=-1;
  std::string last_name;
+ std::string browsed_spell;
 
  static const json *item(const Connection &c,const std::string &id) {
   for(const auto &record:c.state.at("items")) if(record.value("id","")==id) return &record;
@@ -73,6 +74,20 @@ struct StorePanel {
    ImGui::PopStyleColor();
    ImGui::Separator();
    ImGui::TextWrapped("%s",selected->value("description","").c_str());
+   if(selected->contains("spells")) {
+    if(ImGui::Button("Browse spells")) { browsed_spell.clear(); ImGui::OpenPopup("Book spells"); }
+    ImGui::SetNextWindowSize(ImVec2(std::min(ImGui::GetMainViewport()->WorkSize.x-24,ImGui::GetFontSize()*48),0),ImGuiCond_Always);
+    if(ImGui::BeginPopupModal("Book spells",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+     ImGui::TextWrapped("%s",selected->value("label","").c_str());
+     const auto &spells=selected->at("spells");
+     SpellPanel::list(spells,browsed_spell,ImGui::GetTextLineHeightWithSpacing()*9);
+     ImGui::BeginChild("Description",ImVec2(0,ImGui::GetTextLineHeightWithSpacing()*7));
+     if(const auto *spell=SpellPanel::find(spells,browsed_spell)) SpellPanel::description(*spell);
+     ImGui::EndChild();
+     if(ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+     ImGui::EndPopup();
+    }
+   }
    for(const auto &id:entry->value("compare_with",json::array())) {
     const auto *equipped=item(c,id.get<std::string>());
     if(!equipped) continue;

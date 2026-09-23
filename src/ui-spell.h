@@ -20,6 +20,7 @@
 #define INCLUDED_UI_SPELL_H
 
 struct player;
+extern void (*book_browse_hook)(const struct object *obj);
 
 void textui_book_browse(const struct object *obj);
 void textui_spell_browse(void);

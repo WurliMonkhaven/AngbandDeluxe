@@ -248,6 +248,25 @@ int main(int argc,char **argv) {
   }
   check(shop.outgoing.empty(),"Inspecting store items must never issue a transaction");
   check(panel.stock_selection==-1,"Removed stock must clear an invalid selection");
+  Connection magic; magic.connected=true;
+  json spell={{"id","spell-0"},{"label","Magic Missile"},{"description","Fires a bolt of magical energy."},
+   {"level",1},{"mana",1},{"failure",22},{"status","Untried"},{"can_cast",true},{"can_study",false}};
+  magic.state={{"readiness","ready"},{"revision","spell-test"},{"player",{{"new_spells",1}}},
+   {"items",json::array({{{"id","book-1"},{"label","First Spells"},{"book_available",true},{"choose_spells",true},{"spells",json::array({spell})}}})}};
+  SpellPanel spell_panel;
+  for(int frame=0;frame<3;++frame) {
+   ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(400,550)); ImGui::Begin("Spell test");
+   check(!spell_panel.draw(magic),"Inspecting a spell must not execute it");
+   ImGui::End(); ImGui::Render();
+  }
+  check(magic.outgoing.empty(),"Browsing must send no gameplay commands");
+  magic.prompt={{"type","choice"},{"selection_kind","spell"},{"prompt_id","spell-prompt"},{"choices",json::array({spell})}};
+  io.AddKeyEvent(ImGuiKey_Escape,true);
+  ImGui::NewFrame(); ImGui::Begin("Spell prompt test");
+  check(spell_panel.prompt(magic,true),"Escape must cancel a native spell selection");
+  ImGui::End(); ImGui::Render();
+  const auto cancelled=json::parse(magic.outgoing);
+  check(cancelled["method"]=="prompt.reply" && cancelled["params"]["value"].is_null(),"Spell cancellation must use the engine prompt");
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";

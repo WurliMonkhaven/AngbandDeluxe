@@ -314,10 +314,13 @@ static void spell_menu_browse(struct menu *m, const char *noun)
 /**
  * Browse a given book.
  */
+void (*book_browse_hook)(const struct object *obj) = NULL;
+
 void textui_book_browse(const struct object *obj)
 {
 	struct menu *m;
 	const char *noun = player_object_to_book(player, obj)->realm->spell_noun;
+	if (book_browse_hook) { book_browse_hook(obj); return; }
 
 	m = spell_menu_new(obj, spell_okay_to_browse, true);
 	if (m) {

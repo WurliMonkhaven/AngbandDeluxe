@@ -6,7 +6,7 @@
 // A separate semantic presentation stream, not a crop or interpretation of
 // terminal text. Unavailable/unsupported views deliberately use terminal fallback.
 inline const nlohmann::json *dungeon_view(const nlohmann::json &state) {
- if(state.value("phase","")!="playing" || (state.value("readiness","")!="ready" && !state.value("message_pending",false) && !state.contains("targeting") && !state.value("aiming",false) && !state.value("direction_prompt",false) && !state.value("item_selection",false))) return nullptr;
+ if(state.value("phase","")!="playing" || (state.value("readiness","")!="ready" && !state.value("message_pending",false) && !state.contains("targeting") && !state.value("aiming",false) && !state.value("direction_prompt",false) && !state.value("item_selection",false) && !state.value("spell_selection",false))) return nullptr;
  auto it=state.find("dungeon");
  if(it==state.end() || !it->is_object() || !it->contains("cells")) return nullptr;
  const auto &cells=it->at("cells");

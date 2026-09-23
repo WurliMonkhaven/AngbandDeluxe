@@ -228,9 +228,11 @@ struct Connection {
   params["context"]=state.value("context",""); send(method,std::move(params)); busy=true;
   pickup_travel=method=="dungeon.pickup" || method=="dungeon.terrain";
  }
- void command(const std::string &id, const std::string &item = "") {
+ void command(const std::string &id, const std::string &item = "", const std::string &spell = "") {
   if (!ready()) return;
-  send("command.execute",{{"revision",state.value("revision","")},{"command",id},{"item",item}}); busy = true;
+  json params={{"revision",state.value("revision","")},{"command",id},{"item",item}};
+  if(!spell.empty()) params["spell"]=spell;
+  send("command.execute",params); busy = true;
  }
  void answer(json v) {
   send("prompt.reply",{{"prompt_id",prompt.value("prompt_id","")},{"value",v}});
@@ -271,10 +273,12 @@ static void properties(const json &value) {
   }
  }
 }
+#include "spell_panel.h"
 #include "store_panel.h"
 struct UI {
  Connection &c;
  StorePanel store_panel;
+ SpellPanel spell_panel;
  bool was_store=false;
  float scale = 1.0f, game_fraction = .72f;
  bool fullscreen=false, draft_fullscreen=false;
@@ -847,7 +851,7 @@ struct UI {
    bool first=true;
    for(const auto &action:o.value("actions",json::array())) {
     const std::string id=action.get<std::string>();
-    const char *label=id=="core.wield"?"Wield / wear":id=="core.use"?"Use":id=="core.quaff"?"Quaff":id=="core.read"?"Read":id=="core.eat"?"Eat":id=="core.fire"?"Fire":id=="core.throw"?"Throw":id=="core.takeoff"?"Take off":id=="core.drop"?"Drop":"Inscribe";
+    const char *label=id=="core.browse"?"Browse spells":id=="core.wield"?"Wield / wear":id=="core.use"?"Use":id=="core.quaff"?"Quaff":id=="core.read"?"Read":id=="core.eat"?"Eat":id=="core.fire"?"Fire":id=="core.throw"?"Throw":id=="core.takeoff"?"Take off":id=="core.drop"?"Drop":"Inscribe";
     if(!first && ImGui::GetContentRegionAvail().x>ImGui::CalcTextSize(label).x+ImGui::GetStyle().FramePadding.x*2+ImGui::GetStyle().ItemSpacing.x) ImGui::SameLine(); first=false;
     if(ImGui::Button(label)) execute(id,selected);
    }
@@ -960,15 +964,18 @@ struct UI {
   auto id=c.prompt.value("prompt_id","");
   const bool fresh=id!=last_prompt;
   const bool item_selection=c.prompt.value("selection_kind","")=="item";
+  const bool spell_selection=c.prompt.value("selection_kind","")=="spell";
   if(fresh) { last_prompt=id; SDL_strlcpy(prompt_text,c.prompt.value("initial","").c_str(),sizeof(prompt_text)); }
   if(!ImGui::IsPopupOpen("Angband asks")) ImGui::OpenPopup("Angband asks");
-  if(item_selection) ImGui::SetNextWindowSize(ImVec2(std::min(ImGui::GetMainViewport()->WorkSize.x-24,ImGui::GetFontSize()*48),0),ImGuiCond_Always);
+  if(item_selection || spell_selection) ImGui::SetNextWindowSize(ImVec2(std::min(ImGui::GetMainViewport()->WorkSize.x-24,ImGui::GetFontSize()*48),0),ImGuiCond_Always);
   if(ImGui::BeginPopupModal("Angband asks",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
    ImGui::TextWrapped("%s",c.prompt.value("text","").c_str());
    auto type=c.prompt.value("type",""); bool answered=false;
    if(type=="confirmation") {
     if(ImGui::Button("Yes")) { c.answer(true); answered=true; } ImGui::SameLine();
     if(ImGui::Button("No")) { c.answer(false); answered=true; }
+   } else if(type=="choice" && spell_selection) {
+    answered=spell_panel.prompt(c,fresh);
    } else if(type=="choice" && item_selection) {
     answered=item_selection_prompt(fresh);
    } else if(type=="choice") {
@@ -984,7 +991,7 @@ struct UI {
     }
    }
    if(type!="choice") ImGui::SameLine();
-   if(!answered && (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))) { c.answer(nullptr); answered=true; }
+   if(!answered && !spell_selection && (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))) { c.answer(nullptr); answered=true; }
    if(answered) ImGui::CloseCurrentPopup(); ImGui::EndPopup();
   }
  }
@@ -1113,6 +1120,9 @@ struct UI {
      ImGui::BeginChild("Target content"); targeting_panel(); ImGui::EndChild(); ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("Items")) { ImGui::BeginChild("Item content"); items(); ImGui::EndChild(); ImGui::EndTabItem(); }
+    if(c.capabilities.value("spells",0)>0 && c.state.contains("player") && c.state["player"].value("spellcasting",false) && ImGui::BeginTabItem("Spells")) {
+     ImGui::BeginChild("Spell content"); if(spell_panel.draw(c)) focus_game(); ImGui::EndChild(); ImGui::EndTabItem();
+    }
     if(ImGui::BeginTabItem("Creatures")) { ImGui::BeginChild("Creature content"); creatures(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(ImGui::BeginTabItem("Map")) { ImGui::BeginChild("Map content"); minimap(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(ImGui::BeginTabItem("Commands")) {

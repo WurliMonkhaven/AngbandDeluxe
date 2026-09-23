@@ -97,10 +97,14 @@ class Engine:
         result = self.call("hello", {"protocols": [{"major": 0, "minor": 1}]})
         assert "result" in result, result
 
-    def birth(self, name="ProtocolTest"):
+    def birth(self, name="ProtocolTest", class_index=0):
         result = self.call("session.new", {"save": name})
         assert "result" in result, result
         self.next_state(None)
+        if class_index:
+            self.key('enter')  # Human, then the class menu.
+            for _ in range(class_index): self.key('down')
+            self.key('enter')
         for _ in range(50):
             if self.state.get("readiness") == "ready":
                 return
@@ -878,6 +882,151 @@ class BackendTests(unittest.TestCase):
             for handle in quote['compare_with']:
                 self.assertEqual(records[handle]['location'],'weapon')
                 self.assertTrue(records[handle]['description'])
+
+    def spell_command(self, command, spell=None):
+        e=self.engine
+        book=next(o for o in e.state['items'] if o.get('book_available'))
+        params={'revision':e.state['revision'],'command':command,'item':book['id']}
+        if spell: params['spell']=spell
+        old=e.state['revision']
+        self.assertIn('result',e.call('command.execute',params))
+        e.next_state(old); e.state=e.call('state.get')['result']
+
+    def spell_book(self):
+        return next(o for o in self.engine.state['items'] if o.get('book_available'))
+
+    def test_native_spells(self):
+        e=self.engine
+        e.hello(); e.birth(class_index=1)
+        self.assertEqual(e.state['player']['class'],'Mage')
+        book=self.spell_book(); spells=book['spells']
+        self.assertTrue(book['choose_spells'])
+        missile=next(s for s in spells if s['label']=='Magic Missile')
+        self.assertTrue(missile['can_study']); self.assertFalse(missile['can_cast'])
+        self.assertTrue(missile['description']); self.assertEqual(missile['mana'],1)
+        turn=e.state['turn']
+        # Browsing exposes future spells without taking a turn or consuming mana.
+        self.spell_command('core.browse')
+        self.assertEqual(e.prompt['selection_kind'],'spell'); self.assertTrue(e.prompt['browse'])
+        self.assertTrue(e.state['spell_selection']); self.assertIn('dungeon',e.state)
+        self.store_reply(None); self.assertEqual(e.state['turn'],turn)
+        # Ordinary keyboard/menu Study uses eligible native book and spell choices.
+        self.spell_command('core.study')
+        self.assertEqual(e.prompt['selection_kind'],'spell')
+        self.assertTrue(all(s['can_study'] for s in e.prompt['choices']))
+        self.assertEqual(e.call('prompt.reply',{'prompt_id':e.prompt['prompt_id'],'value':'999999'})['error']['code'],'invalid_argument')
+        self.store_reply(None); self.assertEqual(e.state['turn'],turn)
+        self.spell_command('core.study',missile['id'])
+        while e.state['readiness']!='ready': e.key('enter')
+        learned=next(s for s in self.spell_book()['spells'] if s['id']==missile['id'])
+        self.assertTrue(learned['can_cast']); self.assertFalse(learned['can_study'])
+        self.assertGreater(e.state['turn'],turn)
+        # Unknown and out-of-book spell handles must not reach engine arrays.
+        for handle in ('spell-999999','spell-6'):
+            self.assertEqual(e.call('command.execute',{'revision':e.state['revision'],'command':'core.cast','item':self.spell_book()['id'],'spell':handle})['error']['code'],'invalid_argument')
+        before=e.state
+        self.spell_command('core.cast',missile['id'])
+        self.assertTrue(e.state['aiming']); self.assertIn('dungeon',e.state)
+        e.key('escape')
+        self.assertEqual(e.state['turn'],before['turn']); self.assertEqual(e.state['player']['sp'],before['player']['sp'])
+        self.spell_command('core.cast',missile['id'])
+        e.key(ord('6'))
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertGreater(e.state['turn'],before['turn'])
+        self.assertEqual(e.state['player']['sp'],before['player']['sp']-1)
+        # Repeated casting reaches the engine's low-mana confirmation, which
+        # must remain available rather than being disabled by the client.
+        for _ in range(20):
+            self.spell_command('core.cast',missile['id'])
+            if e.prompt:
+                self.assertEqual(e.prompt['type'],'confirmation')
+                self.assertIn('Attempt it anyway',e.prompt['text'])
+                mana=e.state['player']['sp']; turn=e.state['turn']
+                self.store_reply(False)
+                self.assertEqual(e.state['turn'],turn); self.assertEqual(e.state['player']['sp'],mana)
+                break
+            self.assertTrue(e.state['aiming']); e.key(ord('6'))
+            while e.state['readiness']!='ready': e.key('enter')
+        else: self.fail('No low-mana confirmation')
+
+    def test_random_book_study(self):
+        e=self.engine
+        e.hello(); e.birth(class_index=3)
+        self.assertEqual(e.state['player']['class'],'Priest')
+        book=self.spell_book()
+        self.assertFalse(book['choose_spells'])
+        eligible=[s for s in book['spells'] if s['can_study']]
+        self.assertTrue(eligible)
+        self.assertEqual(e.call('command.execute',{'revision':e.state['revision'],'command':'core.study','item':book['id'],'spell':eligible[0]['id']})['error']['code'],'invalid_argument')
+        self.spell_command('core.study')
+        while e.state['readiness']!='ready': e.key('enter')
+        learned=[s for s in self.spell_book()['spells'] if s['can_cast']]
+        self.assertEqual(len(learned),1)
+        self.assertIn(learned[0]['id'],[s['id'] for s in eligible])
+
+    def test_spell_inscriptions_and_keyboard_selection(self):
+        e=self.engine
+        e.hello(); e.birth(class_index=1)
+        missile=next(s for s in self.spell_book()['spells'] if s['label']=='Magic Missile')
+        self.spell_command('core.study',missile['id'])
+        while e.state['readiness']!='ready': e.key('enter')
+        self.spell_command('core.inscribe')
+        e.wait_prompt()
+        self.store_reply('!m')
+        before=e.state
+        self.spell_command('core.cast',missile['id'])
+        self.assertEqual(e.prompt['type'],'confirmation')
+        self.store_reply(False)
+        self.assertEqual(e.state['turn'],before['turn'])
+        self.assertEqual(e.state['player']['sp'],before['player']['sp'])
+        self.spell_command('core.inscribe'); e.wait_prompt(); self.store_reply('')
+        # Keyboard m still goes through the native book selector, then the
+        # native spell selector; a cancelled direct cast leaves no stale choice.
+        e.key(ord('m')); e.wait_prompt()
+        self.assertEqual(e.prompt['selection_kind'],'item')
+        self.store_reply(e.prompt['choices'][0]['id'])
+        self.assertEqual(e.prompt['selection_kind'],'spell')
+        self.assertEqual([s['label'] for s in e.prompt['choices']],['Magic Missile'])
+        self.store_reply(e.prompt['choices'][0]['id'])
+        self.assertTrue(e.state['aiming']); e.key('escape')
+        self.assertEqual(e.state['turn'],before['turn'])
+
+    def test_spell_query_randomness(self):
+        e=self.engine
+        e.hello(); e.birth(class_index=1)
+        self.spell_command('core.study',self.spell_book()['spells'][0]['id'])
+        while e.state['readiness']!='ready': e.key('enter')
+        # Work the spell so its dynamic get_spell_info summary is exercised.
+        for _ in range(8):
+            self.spell_command('core.cast',self.spell_book()['spells'][0]['id'])
+            if e.prompt: self.store_reply(True)
+            e.key(ord('6'))
+            while e.state['readiness']!='ready': e.key('enter')
+            if self.spell_book()['spells'][0]['status']=='Learned': break
+        self.assertEqual(self.spell_book()['spells'][0]['status'],'Learned')
+        self.assertTrue(self.spell_book()['spells'][0]['info'])
+        e.call('session.close'); e.process.wait(timeout=10); e.stop()
+        baseline=Path(self.temp.name)/'spell-baseline'; shutil.copytree(Path(self.temp.name)/'save',baseline)
+        def cast(browse):
+            folder=Path(self.temp.name)/('browse' if browse else 'direct')
+            shutil.copytree(baseline,folder/'save')
+            branch=Engine(folder); self.engine=branch
+            branch.hello(); branch.call('session.load',{'save':'ProtocolTest'}); branch.next_state(None)
+            while branch.state['readiness']!='ready': branch.key('enter')
+            if browse:
+                for _ in range(3): self.spell_command('core.browse'); self.store_reply(None)
+            self.spell_command('core.cast',self.spell_book()['spells'][0]['id'])
+            if branch.prompt: self.store_reply(True)
+            branch.key(ord('6'))
+            while branch.state['readiness']!='ready': branch.key('enter')
+            result={key:branch.state[key] for key in ('turn','player','map','monsters','items')}
+            for collection in ('items','monsters'):
+                for entity in result[collection]: entity.pop('id',None)
+            branch.call('session.close'); branch.process.wait(timeout=10); branch.stop()
+            return result
+        direct=cast(False); browsed=cast(True)
+        self.engine=Engine(Path(self.temp.name)/'cleanup')
+        self.assertEqual(direct,browsed)
 
     def test_native_item_selection(self):
         e=self.engine

@@ -287,3 +287,29 @@ that understands the advertised capability.
 Item records include `name_color`, the engine palette index for list/inspection
 name text (item-type colour, with unreadable inventory books dimmed as in the
 original UI). `color` remains the separate dungeon glyph colour.
+
+
+### Spells (`spells: 1`)
+
+Player records add `spellcasting` and `new_spells`. Readable, available book items
+(and readable Store/Home stock) add `spells`, `book_available` and `choose_spells`.
+Each spell has an opaque session/class-scoped `id`, `label`, `description`,
+`level`, `mana`, current `failure` percentage, `status`, optional nonempty `info`,
+`can_cast`, `can_study`, `low_mana`, and `needs_aim`. These are engine results,
+not client calculations. Stock spells are inspectable but not actionable.
+
+`command.execute` for `core.cast` or `core.study` optionally accepts `spell`
+alongside a current book `item` handle and snapshot `revision`. The adapter
+validates membership and eligibility, selects that book through normal item
+checks/inscriptions, and supplies the spell through the normal selection hook.
+Random-study classes reject explicit spell selection: send `core.study` with
+the book only. `core.browse` browses a selected book or asks for one.
+
+Spell prompts have `type: choice`, `selection_kind: spell`, `browse`, and
+`choices` containing spell presentation fields plus an engine `shortcut`. Reply
+with the choice's `id` (not a snapshot spell id), or null to cancel/close. A browse
+prompt is inspection only; its result never casts or learns a spell. Snapshot
+`spell_selection: true` retains the semantic dungeon while a spell prompt is open.
+Do not infer casting eligibility from mana alone: the engine may permit casting
+after a low-mana confirmation. Successful selection can lead to further engine
+prompts or aiming; request acknowledgement never implies a completed cast.

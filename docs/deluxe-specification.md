@@ -467,3 +467,24 @@ the same interface with Store/Retrieve and no prices. Leave/Escape returns to
 the dungeon. Transaction messages remain visible in the store.
 The optional store UI hook leaves the original terminal store unchanged for
 other frontends. Knowledge-menu shop recall still uses terminal fallback.
+
+
+### Native spell browsing, study and casting
+
+Spellcasting characters have a Spells tab listing readable books in their pack
+or on their current tile. Each book shows all its spells, with engine-provided
+level, mana cost, current failure chance, learned/forgotten status, description
+and available effect summary. Castable and learnable spells are distinguished;
+unavailable entries remain inspectable. Hovering/browsing costs no turn and
+does not consume gameplay randomness. Shops and Home allow inspection of the
+spells in readable stock books before purchase/retrieval.
+
+Cast and Study feed the original engine commands. Book inscriptions, prerequisites,
+low-mana warnings, targeting and follow-up prompts remain authoritative. Low mana
+does not disable casting: Angband's confirmation still permits overexertion.
+Classes that choose spells select a specific spell; classes that learn randomly
+use Study book and retain the original random choice. Ordinary keyboard casting,
+study and book browsing use native book/spell prompts, including eligible-only
+selection, letter shortcuts, arrows/Enter and cancellation. The dungeon stays
+visible behind native spell choices. Birth and unrelated recall/knowledge screens
+remain terminal fallbacks; a native character sheet is subsequent work.

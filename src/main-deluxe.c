@@ -35,6 +35,8 @@
 #include "ui-object.h"
 #include "ui-keymap.h"
 #include "ui-map.h"
+#include "ui-menu.h"
+#include "ui-spell.h"
 #include "ui-target.h"
 #include "target.h"
 #include "ui-output.h"
@@ -89,6 +91,7 @@ static const struct command_entry commands[] = {
  {"core.use", "Use item", 'U'}, {"core.quaff", "Drink potion", 'q'},
  {"core.read", "Read scroll", 'r'}, {"core.eat", "Eat", 'E'},
  {"core.cast", "Cast spell", 'm'}, {"core.study", "Study spell", 'G'},
+ {"core.browse", "Browse spells", 'b'},
  {"core.fire", "Fire ammunition", 'f'}, {"core.throw", "Throw", 'v'},
  {"core.open", "Open", 'o'}, {"core.close", "Close door", 'c'},
  {"core.disarm", "Disarm", 'D'}, {"core.tunnel", "Tunnel", 'T'},
@@ -252,6 +255,7 @@ static void inspection_description(cJSON *record, const struct object *obj)
  mem_free(slots);
 #endif
 }
+#include "deluxe-spells.h"
 static cJSON *item_record(const struct object *o, const char *location, int index)
 {
  char name[512], id[80]; int i;
@@ -277,6 +281,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
    if(obj_can_throw(o)) cJSON_AddItemToArray(actions,cJSON_CreateString("core.throw"));
    if (carried && (!equipped || obj_can_takeoff(o))) cJSON_AddItemToArray(actions, cJSON_CreateString("core.drop"));
    cJSON_AddItemToArray(actions, cJSON_CreateString("core.inscribe"));
+   if(obj_can_browse(o)) cJSON_AddItemToArray(actions,cJSON_CreateString("core.browse"));
   }
   cJSON_AddItemToObject(j, "actions", actions);
  }
@@ -301,6 +306,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
   tval_is_book_k(o->kind) && !player_object_to_book(player,o) ? COLOUR_SLATE : o->kind->base->attr);
  string(j, "inscription", quark_str(o->note));
  inspection_description(j, o);
+ deluxe_book_record(j,o);
  if (object_is_carried(player, o)) {
   char label[2] = { gear_to_label(player, (struct object *)o), 0 };
   string(j, "selection_key", label);
@@ -352,6 +358,8 @@ static cJSON *capture(void)
   json_bool(p, "death_pending", player->is_dead ||
    (player->chp < 0 && messages_num() > 0 && message_type(0) == MSG_DEATH));
   number(p, "sp", player->csp); number(p, "max_sp", player->msp); number(p, "level", player->lev);
+  json_bool(p,"spellcasting",player->class->magic.total_spells>0);
+  number(p,"new_spells",player->upkeep->new_spells);
   number(p, "food", player->timed[TMD_FOOD]); number(p, "food_max", PY_FOOD_MAX);
   number(p, "depth", player->depth); number(p, "gold", player->au);
   deluxe_character_details(p);
@@ -455,6 +463,7 @@ static bool input_available(void)
 static void complete(void)
 {
  pending_item = NULL;
+ pending_spell = -1;
  if (action[0]) {
   cJSON *j = cJSON_CreateObject(); string(j, "action_id", action);
   string(j, "outcome", "resolved"); string(j, "revision", revision_text);
@@ -468,6 +477,9 @@ static cJSON *prompt(const char *type, const char *text, int maximum, const char
  ready = false; publish();
  string(p, "prompt_id", context_text); string(p, "type", type); string(p, "text", text);
  number(p, "maximum", maximum); string(p, "initial", initial);
+ if(spell_selection) {
+  string(p,"selection_kind","spell"); json_bool(p,"browse",spell_browsing);
+ }
  if(item_choice_objects) {
   int i, mapped=0; cJSON *records=cJSON_GetObjectItem(snapshot,"items");
   for(i=0;i<item_choice_count;++i) {
@@ -563,7 +575,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -746,7 +758,7 @@ static void pump(void)
    else {
     cJSON *out = cJSON_CreateObject();
     const char *item = str(p, "item");
-    pending_item = NULL;
+    pending_item = NULL; pending_spell = -1;
     if (*item) {
      cJSON *record; int ix = 0;
      cJSON_ArrayForEach(record, cJSON_GetObjectItem(snapshot, "items")) {
@@ -754,6 +766,13 @@ static void pump(void)
       if (streq(str(record, "id"), item) && ix < (int)item_handle_count) pending_item = item_handles[ix];
      }
      if (!pending_item) { cJSON_Delete(out); error(id, "stale_handle", "Select a current item."); goto done; }
+    }
+    if(*str(p,"spell")) {
+     bool study=streq(commands[i].id,"core.study");
+     if((!study && !streq(commands[i].id,"core.cast")) ||
+        (pending_spell=deluxe_requested_spell(pending_item,str(p,"spell"),study))<0) {
+      pending_item=NULL; cJSON_Delete(out); error(id,"invalid_argument","That spell is not available from this book for this action."); goto done;
+     }
     }
     my_strcpy(action, id, sizeof(action)); string(out, "action_id", action);
     /* Route through ordinary text UI prerequisites, inscription checks and queue. */
@@ -875,6 +894,8 @@ int main(int argc, char **argv)
  get_check_hook = check_hook; get_string_hook = string_hook; get_quantity_hook = quantity_hook;
  map_visual_hook = deluxe_observe_cell; map_visual_reset_hook = deluxe_reset_view;
  original_get_item = get_item_hook; get_item_hook = item_hook;
+ get_spell_hook = deluxe_get_spell; get_spell_from_book_hook = deluxe_spell_choose;
+ book_browse_hook = deluxe_browse_book;
  store_interact_hook = deluxe_store_session;
  cmd_get_hook = get_command;
  event_add_handler(EVENT_ENTER_BIRTH, lifecycle, NULL);
