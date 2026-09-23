@@ -148,7 +148,7 @@ struct RunHistory {
   ImGui::BeginDisabled(!can_leave);
   int action=0;
   if(ImGui::Button(archived?"Back to graveyard":"Main menu")) action=1;
-  ImGui::SameLine(); if(ImGui::Button("Play again")) action=2;
+  ImGui::SameLine(); if(ImGui::Button(archived?"New character like this":"Play Again")) action=2;
   ImGui::EndDisabled();
   if(!can_leave) { ImGui::SameLine(); ImGui::TextDisabled("Finishing the game save..."); }
   return action;

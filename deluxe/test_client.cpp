@@ -666,6 +666,27 @@ int main(int argc,char **argv) {
    if(frame==2) check(closed,"Escape should close rules without mutation");
   }
   for(const auto &request:preview.requests) check(request.second=="item.rules.list","Browsing rules must not mutate item preferences");
+  CharacterSelect roster;
+  json saved_characters=json::array({{{"id","Hero"},{"name","Hero"},{"identity","Human Warrior"},{"level",12},{"depth",8}},
+    {{"id","OldSave"},{"description","Older save description"}},{{"id","Fallen"},{"dead",true},{"name","Fallen"}}});
+  for(int frame=0;frame<6;++frame) {
+   roster.selected=frame==2?"OldSave":frame==3?"Fallen":"Missing";
+   ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(frame%2?600.f:1200.f,800));
+   ImGui::Begin("Character selection test");
+   check(roster.draw(frame==4?json::array():saved_characters,true)==0,"Browsing characters must not launch or mutate saves");
+   ImGui::End(); ImGui::Render();
+   if(frame==0) check(roster.selected=="Hero","Missing selection should choose the first character");
+   check(ImGui::GetDrawData()->TotalVtxCount>0,"Character roster must render");
+  }
+  Connection replay; replay.connected=true; replay.replay_save="Hero";
+  auto hello_id=replay.send("hello");
+  replay.receive({{"id",hello_id},{"result",{{"capabilities",{{"session.replay",1},{"interaction.birth",1}}}}}});
+  bool replay_sent=false;
+  for(const auto &request:replay.requests) {
+   check(request.second!="saves.list","Direct replay should bypass the character selector");
+   if(request.second=="session.replay") replay_sent=true;
+  }
+  check(replay_sent && replay.character_save=="Hero" && replay.busy,"Handshake must resume the completed save through replay");
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";

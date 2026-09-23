@@ -30,6 +30,7 @@
 #include "player-timed.h"
 #include "store.h"
 #include "score.h"
+#include "savefile.h"
 #include "ui-store.h"
 #include "ui-command.h"
 #include "ui-context.h"
@@ -53,6 +54,7 @@
 #include "ui-term.h"
 #include "z-quark.h"
 #include <locale.h>
+#include <sys/stat.h>
 #ifdef WINDOWS
 #include <windows.h>
 
@@ -378,6 +380,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
 #include "deluxe-character.h"
 #include "deluxe-options.h"
 #include "deluxe-run.h"
+#include "deluxe-save-summary.h"
 #include "deluxe-status.h"
 #include "deluxe-knowledge.h"
 #include "deluxe-view.h"
@@ -648,7 +651,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"run.summary\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"session.replay\":1,\"run.summary\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -725,7 +728,7 @@ static void pump(void)
  } else if (streq(method,"birth.action") || streq(method,"birth.cancel")) {
   if(streq(method,"birth.cancel")) cJSON_AddStringToObject(p,"action","cancel");
   deluxe_birth_action(id,p);
- } else if (streq(method, "session.new") || streq(method, "session.load")) {
+ } else if (streq(method, "session.new") || streq(method, "session.load") || streq(method,"session.replay")) {
   const char *name = str(p, "save");
   if (launch_mode >= 0) { error(id, "wrong_phase", "Start another backend process for another game."); goto done; }
   if (!*name || strlen(name) > 64 || strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(name)) {
@@ -733,13 +736,19 @@ static void pump(void)
   }
   savefile_set_name(name, false, false);
   if ((streq(method, "session.new") && file_exists(savefile)) ||
-      (streq(method, "session.load") && !file_exists(savefile))) {
+      (!streq(method, "session.new") && !file_exists(savefile))) {
    error(id, "invalid_argument", "Save already exists for New, or is missing for Load."); goto done;
+  }
+  if(streq(method,"session.replay")) {
+   const char *description=savefile_get_description(savefile);
+   if(!description || !strstr(description,", dead (")) {
+    error(id,"invalid_argument","Play Again requires a completed character save."); goto done;
+   }
   }
   my_strcpy(birth_race,str(p,"race"),sizeof(birth_race));
   my_strcpy(birth_class,str(p,"class"),sizeof(birth_class));
-  use_native_birth=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_birth"));
-  launch_mode = streq(method, "session.new") ? GAME_NEW : GAME_LOAD;
+  use_native_birth=!streq(method,"session.replay") && cJSON_IsTrue(cJSON_GetObjectItem(p,"native_birth"));
+  launch_mode = streq(method, "session.load") ? GAME_LOAD : GAME_NEW;
   response(id, cJSON_CreateObject());
  } else if (streq(method, "saves.rename") || streq(method, "saves.delete")) {
   const char *name = str(p, "save"), *new_name = str(p, "name");
@@ -762,7 +771,7 @@ static void pump(void)
   savefile_getter g = NULL; cJSON *out = cJSON_CreateArray();
   while (got_savefile(&g)) {
    const struct savefile_details *d = get_savefile_details(g); cJSON *j = cJSON_CreateObject();
-   string(j, "id", d->fnam); string(j, "description", d->desc); cJSON_AddItemToArray(out, j);
+   string(j, "id", d->fnam); string(j, "description", d->desc); deluxe_save_summary(j,d->fnam,d->desc); cJSON_AddItemToArray(out, j);
   }
   cleanup_savefile_getter(g); response(id, out);
  } else if (!streq(str(p, "session_id"), "session-1")) error(id, "wrong_session", "Stale session.");

@@ -89,7 +89,7 @@ struct Connection {
  RenderGrid game_grid;
  std::unique_ptr<BackendReader> reader;
  std::unique_ptr<SDL_Process,decltype(&SDL_DestroyProcess)> process{nullptr,SDL_DestroyProcess};
- std::string outgoing, diagnostic, menu_error, character_save;
+ std::string outgoing, diagnostic, menu_error, character_save, replay_save;
  std::deque<json> messages;
  json previous_messages = json::array();
  json capabilities = json::object();
@@ -160,7 +160,7 @@ struct Connection {
   send("debug.quit"); busy=true;
  }
  std::string send(const std::string &method, json params = json::object()) {
-  if(method=="session.new" || method=="session.load") { character_save=params.value("save",""); params["native_birth"]=capabilities.value("interaction.birth",0)>0; }
+  if(method=="session.new" || method=="session.load" || method=="session.replay") { character_save=params.value("save",""); params["native_birth"]=capabilities.value("interaction.birth",0)>0; }
   if (!connected) return "";
   auto id = "r" + std::to_string(++next);
   params["session_id"] = "session-1";
@@ -196,7 +196,7 @@ struct Connection {
     postgame_finished=j["data"].value("phase","")=="finished";
     busy=false; return; // Keep the last gameplay image for the shutdown transition.
    }
-   if (name == "state.changed") { state = std::move(j.at("data")); comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
+   if (name == "state.changed") { replay_save.clear(); state = std::move(j.at("data")); comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
    if(name=="knowledge.changed" && creature_race>=0 && j["data"].value("category","")=="creatures" && j["data"].value("id",-1)==creature_race) creature_detail=j["data"];
    if(name=="travel.changed") {
     travel=j.at("data");
@@ -262,6 +262,7 @@ struct Connection {
    const auto error=j["error"].value("message","Request failed"); notice(error); busy = false; pickup_travel=false;
    if(!state.contains("terminal") || method=="birth.action" || method=="birth.cancel") menu_error=error;
    if(method=="session.close" || method=="debug.quit" || method=="birth.cancel") { close_requested=false; return_to_menu=false; }
+   if(method=="session.replay") { replay_save.clear(); send("saves.list"); }
    if(method == "prompt.reply") { prompt = pending_prompt; pending_prompt = json::object(); }
    return;
   }
@@ -269,13 +270,20 @@ struct Connection {
   const auto &result = j.at("result");
   if (method == "hello") {
    capabilities=result.value("capabilities",json::object());
-   negotiated = true; send("saves.list"); send("commands.list");
-  } else if (method == "saves.list") { saves = result; busy=false; }
+   negotiated = true;
+   if(!replay_save.empty()) { send("session.replay",{{"save",replay_save}}); busy=true; }
+   else send("saves.list");
+   send("commands.list");
+  } else if (method == "saves.list") {
+   saves = result;
+   std::stable_sort(saves.begin(),saves.end(),[](const json &a,const json &b) { return a.value("modified",0.)>b.value("modified",0.); });
+   busy=false;
+  }
   else if (method == "saves.rename" || method == "saves.delete") { menu_error.clear(); send("saves.list"); }
   else if (method == "commands.list") commands = result;
   else if (method == "catalog.get") catalog = result;
   else if (method == "item.rules.list") item_rules=result;
-  else if (method == "session.new" || method == "session.load") { menu_error.clear(); send("catalog.get"); }
+  else if (method == "session.new" || method == "session.load" || method=="session.replay") { menu_error.clear(); send("catalog.get"); }
   else if (method == "session.save") { busy = false; notice("Game saved."); }
   else if (method == "session.close" || method == "debug.quit" || method == "birth.cancel") { close_confirmed=true; closed = !return_to_menu; busy = false; }
   else if (method == "prompt.reply") pending_prompt = json::object();
@@ -394,9 +402,12 @@ static void properties(const json &value) {
 #include "item_rules.h"
 #include "store_panel.h"
 #include "run_history.h"
+#include "character_select.h"
 struct UI {
  Connection &c;
  RunHistory run_history;
+ CharacterSelect character_select;
+ std::string pending_replay;
  DeathTransition shutdown;
  float shutdown_frame=-1;
  bool showing_postgame=false;
@@ -686,37 +697,22 @@ struct UI {
  }
  void launcher() {
   if(replay_prompt && c.negotiated && !c.busy) { replay_prompt=false; ImGui::OpenPopup("New character"); }
-  if(ImGui::Button("Graveyard")) {
+  const int choice=character_select.draw(c.saves,c.negotiated && !c.busy);
+  bool rename_clicked=choice==2,delete_clicked=choice==3;
+  if(choice==1) {
+   const auto it=std::find_if(c.saves.begin(),c.saves.end(),[&](const json &save){return save.value("id","")==character_select.selected;});
+   if(it!=c.saves.end()) {
+    c.menu_error.clear(); c.send(it->value("dead",false)?"session.replay":"session.load",{{"save",character_select.selected}}); c.busy=true; focus_game();
+   }
+  }
+  if(rename_clicked || delete_clicked) {
+   managed_save=character_select.selected; SDL_strlcpy(renamed_save,managed_save.c_str(),sizeof(renamed_save)); c.menu_error.clear();
+  }
+  if(choice==4) { c.menu_error.clear(); ImGui::OpenPopup("New character"); }
+  if(choice==5) {
    run_history.directory=fs::path(settings_path).parent_path()/"run-history";
    run_history.load(); run_history.browsing=true; run_history.current=nullptr;
   }
-  ImGui::Spacing();
-  const float heading_right=ImGui::GetCursorPosX()+ImGui::GetContentRegionAvail().x;
-  ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Characters");
-  ImGui::SameLine();
-  const float new_character_width=ImGui::CalcTextSize("New character").x+2*ImGui::GetStyle().FramePadding.x;
-  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),heading_right-new_character_width));
-  ImGui::BeginDisabled(!c.negotiated || c.busy);
-  if (ImGui::Button("New character")) { c.menu_error.clear(); ImGui::OpenPopup("New character"); }
-  ImGui::Separator();
-  bool rename_clicked=false, delete_clicked=false;
-  if(ImGui::BeginTable("Saved characters",3,ImGuiTableFlags_SizingStretchProp)) {
-   ImGui::TableSetupColumn("Character",ImGuiTableColumnFlags_WidthStretch);
-   ImGui::TableSetupColumn("Rename",ImGuiTableColumnFlags_WidthFixed);
-   ImGui::TableSetupColumn("Delete",ImGuiTableColumnFlags_WidthFixed);
-   for (const auto &s:c.saves) {
-   std::string id=s.value("id","");
-   ImGui::PushID(id.c_str()); ImGui::TableNextRow(); ImGui::TableNextColumn();
-   if (ImGui::Selectable((id+" — "+s.value("description","")).c_str())) { c.menu_error.clear(); c.send("session.load",{{"save",id}}); c.busy=true; focus_game(); }
-   ImGui::TableNextColumn();
-   if(ImGui::Button("Rename")) { managed_save=id; SDL_strlcpy(renamed_save,id.c_str(),sizeof(renamed_save)); rename_clicked=true; c.menu_error.clear(); }
-   ImGui::TableNextColumn();
-   if(ImGui::Button("Delete")) { managed_save=id; delete_clicked=true; c.menu_error.clear(); }
-   ImGui::PopID();
-   }
-   ImGui::EndTable();
-  }
-  ImGui::EndDisabled();
   if(rename_clicked) ImGui::OpenPopup("Rename save");
   if(delete_clicked) ImGui::OpenPopup("Delete save");
   if(ImGui::BeginPopupModal("Rename save",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -1266,7 +1262,10 @@ struct UI {
     ImGui::TextWrapped("The engine stopped before confirming its final save. The run summary has been retained.");
    const int action=run_history.draw(!ending || !c.connected);
    if(action) {
-    if(action==2) { replay_profile=run_history.current.value("player",json::object()); replay_prompt=true; }
+    if(action==2) {
+     if(ending && !run_history.archived) pending_replay=c.character_save;
+     else { replay_profile=run_history.current.value("player",json::object()); replay_prompt=true; }
+    }
     if(run_history.archived && action==1) { run_history.current=nullptr; run_history.archived=false; }
     else {
      run_history.current=nullptr; run_history.browsing=false;
@@ -1275,6 +1274,9 @@ struct UI {
    }
    if(ending) prompts();
    ImGui::End(); return;
+  }
+  if(!c.replay_save.empty() && !c.state.contains("terminal")) {
+   ImGui::TextUnformatted("Preparing your next character..."); ImGui::End(); return;
   }
   ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha,1.f); ImGui::BeginDisabled(ending);
   const bool in_game=c.state.contains("terminal");
@@ -1549,7 +1551,10 @@ int main(int argc,char **argv) {
    // A saved return-to-menu or normal post-game completion has exited cleanly.
    connection.close_process();
    connection=Connection{};
-   ui.grid_focus=ui.focus_requested=ui.return_from_prompt=false;
+   connection.replay_save=ui.pending_replay; ui.pending_replay.clear();
+   ui.birth_panel.initialized=false;
+   ui.grid_focus=ui.return_from_prompt=false;
+   ui.focus_requested=!connection.replay_save.empty();
    ui.selected.clear(); ui.last_prompt.clear(); ui.keys.clear();
    ui.item_filter[0]=ui.command_filter[0]=ui.message_filter[0]=0;
    ui.message_search_open=false;

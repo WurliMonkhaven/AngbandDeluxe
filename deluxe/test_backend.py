@@ -790,6 +790,14 @@ class BackendTests(unittest.TestCase):
         save_dir = Path(self.temp.name) / "save"
         original = save_dir / "ProtocolTest"
         data = original.read_bytes()
+        saved = next(s for s in e.call("saves.list")["result"] if s["id"] == "ProtocolTest")
+        self.assertFalse(saved["dead"])
+        self.assertEqual(saved["level"], 1)
+        self.assertEqual(saved["depth"], 0)
+        self.assertIn("Human", saved["identity"])
+        self.assertGreater(saved["modified"], 0)
+        for name in ("ProtocolTest", "Missing", "../ProtocolTest"):
+            self.assertEqual(e.call("session.replay", {"save":name})["error"]["code"], "invalid_argument")
         occupied = save_dir / "Occupied"
         occupied.write_bytes(data)
         for method, params in [
@@ -970,11 +978,30 @@ class BackendTests(unittest.TestCase):
         self.assertTrue((Path(self.temp.name)/"save"/"ProtocolTest").exists(), "Engine must save the dead character normally")
         self.engine = e = Engine(self.temp.name)
         e.hello()
-        e.call("session.new", {"save":"Replay", "native_birth":True, "race":"Elf", "class":"Mage"})
+        dead_save = Path(self.temp.name)/"save"/"ProtocolTest"
+        original = dead_save.read_bytes()
+        listing = e.call("saves.list")["result"]
+        saved = next(s for s in listing if s["id"] == "ProtocolTest")
+        self.assertTrue(saved["dead"])
+        self.assertGreater(saved["modified"], 0)
+        self.assertTrue(saved["last_saved"])
+        self.assertEqual(dead_save.read_bytes(), original)
+        self.assertIn("result", e.call("session.replay", {"save":"ProtocolTest", "native_birth":True}))
         e.next_state(None)
-        b=e.state["birth"]
-        self.assertEqual(next(r["name"] for r in b["races"] if r["id"]==b["race"]), "Elf")
-        self.assertEqual(next(r["name"] for r in b["classes"] if r["id"]==b["class"]), "Mage")
+        self.assertIn("New character based on previous one", e.screen())
+        self.assertNotIn("birth", e.state, "Replay should use Angband's original quickstart controls")
+        e.key(ord("y"))
+        for _ in range(20):
+            if e.state["readiness"] == "ready": break
+            e.key("enter")
+        self.assertEqual(e.state["readiness"], "ready")
+        self.assertEqual(e.state["player"]["race"], report["player"]["race"])
+        self.assertEqual(e.state["player"]["class"], report["player"]["class"])
+        self.assertEqual(e.state["player"]["level"], 1)
+        self.assertGreater(e.state["player"]["hp"], 0)
+        e.call("session.close")
+        self.assertEqual(e.process.wait(timeout=10), 0)
+        self.assertTrue(dead_save.exists())
 
     def test_debug_damage(self):
         e = self.engine
