@@ -75,8 +75,13 @@ struct KnowledgeBrowser {
   if(detail.is_null()) ImGui::TextDisabled(selected<0?"Select an entry to explore.":"Loading details...");
   else if(detail.contains("error")) ImGui::TextWrapped("%s",detail.value("error","").c_str());
   else {
+   details(detail);
+  }
+  ImGui::EndChild(); ImGui::EndTable();
+ }
+ static void details(const json &detail) {
    ImGui::PushStyleColor(ImGuiCol_Text,color(detail.value("color",1)));
-   ImGui::SeparatorText(detail.value("name","").c_str()); ImGui::PopStyleColor();
+   ImGui::TextWrapped("%s",detail.value("name","").c_str()); ImGui::Separator(); ImGui::PopStyleColor();
    ImGui::TextDisabled("%s",display_label(detail.value("group","")).c_str()); ImGui::Spacing();
    const auto stats=detail.value("stats",json::array());
    if(!stats.empty() && ImGui::BeginTable("Knowledge stats",int(stats.size()),ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_RowBg)) {
@@ -84,15 +89,13 @@ struct KnowledgeBrowser {
     for(const auto &stat:stats) { ImGui::TableNextColumn(); ImGui::TextDisabled("%s",stat.value("label","").c_str()); ImGui::Text("%d",stat.value("value",0)); }
     ImGui::EndTable(); ImGui::Spacing();
    }
-   ImGui::PushID(selected);
+   ImGui::PushID(detail.value("id",-1));
    const auto sections=detail.value("description_sections",json::array());
    if(sections.empty()) ImGui::TextWrapped("No further information is known yet.");
    for(const auto &section:sections) if(ImGui::CollapsingHeader(section.value("title","").c_str(),ImGuiTreeNodeFlags_DefaultOpen)) {
     ImGui::Spacing(); ImGui::TextWrapped("%s",section.value("text","").c_str()); ImGui::Spacing();
    }
    ImGui::PopID();
-  }
-  ImGui::EndChild(); ImGui::EndTable();
  }
  bool draw(Connection &c) {
   if(request_open) { ImGui::OpenPopup("Knowledge"); request_open=false; }

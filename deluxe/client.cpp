@@ -92,6 +92,9 @@ struct Connection {
  json item_rules=nullptr;
  json debug_status_catalog=nullptr;
  json knowledge_list=nullptr,knowledge_detail=nullptr;
+ json creature_detail=nullptr;
+ int creature_race=-1;
+ std::string creature_request;
  std::string knowledge_list_request,knowledge_detail_request;
  json route=json::object(), travel=json::object();
  std::string route_request;
@@ -177,6 +180,7 @@ struct Connection {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
    if (name == "state.changed") { state = std::move(j.at("data")); comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
+   if(name=="knowledge.changed" && creature_race>=0 && j["data"].value("category","")=="creatures" && j["data"].value("id",-1)==creature_race) creature_detail=j["data"];
    if(name=="travel.changed") {
     travel=j.at("data");
     const auto label=travel.value("label","");
@@ -191,6 +195,11 @@ struct Connection {
   if(method=="debug.status.list") {
    debug_status_catalog=j.contains("error")?json{{"error",j["error"].value("message","Effects unavailable.")}}:j["result"];
    if(debug_status_catalog.is_array()) std::sort(debug_status_catalog.begin(),debug_status_catalog.end(),[](const json &a,const json &b) { return a.value("name","")<b.value("name",""); });
+   return;
+  }
+  if(method=="knowledge.get" && id==creature_request) {
+   creature_request.clear();
+   creature_detail=j.contains("error")?json{{"error",j["error"].value("message","Creature recall unavailable.")}}:j["result"];
    return;
   }
   if(method=="knowledge.list" || method=="knowledge.get") {
@@ -392,6 +401,7 @@ struct UI {
  bool proceed_with_click=false, draft_proceed_with_click=false;
  bool click_exits_look=false, draft_click_exits_look=false;
  bool quick_targeting=false, draft_quick_targeting=false;
+ bool select_creatures_tab=false;
  int grid_menu_x=0,grid_menu_y=0;
  std::string grid_menu_context;
  float display_scale = 1.f;
@@ -829,6 +839,12 @@ struct UI {
        choose(action=="tunnel"?"Tunnel":action=="up"?"Go up":"Go down","dungeon.terrain",{{"action",action}});
       }
      }
+    if(c.capabilities.value("knowledge",0)>0 && c.state.contains("monsters"))
+     for(const auto &monster:c.state["monsters"]) if(monster.value("visible",false) && monster.value("x",-1)==grid_menu_x && monster.value("y",-1)==grid_menu_y && monster.contains("race_id")) {
+      contextual=true;
+      if(ImGui::MenuItem("Inspect")) inspect_creature(monster.value("race_id",-1));
+      break;
+     }
     if(contextual) ImGui::Separator();
     choose("Look","targeting.begin",{{"mode","look"}});
     choose("Target","targeting.set");
@@ -1004,17 +1020,40 @@ struct UI {
    if(!description.empty()) { ImGui::Spacing(); ItemDescription::draw(o); }
   }
  }
+ void inspect_creature(int race) {
+  if(race<0 || c.capabilities.value("knowledge",0)<1) return;
+  c.creature_race=race; c.creature_detail=nullptr; keys.clear();
+  c.creature_request=c.send("knowledge.get",{{"category","creatures"},{"id",race},{"watch",c.capabilities.value("knowledge.watch",0)>0}});
+  select_creatures_tab=true;
+ }
  void creatures() {
+  if(c.creature_race>=0) {
+   if(ImGui::Button("Back to creatures")) { if(c.capabilities.value("knowledge.watch",0)>0) c.send("knowledge.unwatch"); c.creature_race=-1; c.creature_detail=nullptr; c.creature_request.clear(); }
+   else {
+    ImGui::Spacing();
+    if(c.creature_detail.is_null()) ImGui::TextDisabled("Loading creature recall...");
+    else if(c.creature_detail.contains("error")) ImGui::TextWrapped("%s",c.creature_detail.value("error","").c_str());
+    else KnowledgeBrowser::details(c.creature_detail);
+    return;
+   }
+  }
   if(!c.state.contains("monsters")) return;
+  bool any=false;
   for(const auto &m:c.state["monsters"]) {
    if(!m.value("visible",false)) continue;
-   ImGui::PushID(m.value("id","").c_str());
-   if(ImGui::TreeNode(m.value("name","").c_str())) {
-    ImGui::Text("Position %d, %d",m.value("x",0),m.value("y",0));
-    ImGui::TextUnformatted(m.value("asleep",false)?"Asleep":"Awake"); ImGui::TreePop();
+   any=true; ImGui::PushID(m.value("id","").c_str());
+   const bool can_inspect=c.capabilities.value("knowledge",0)>0 && m.contains("race_id");
+   ImGui::PushStyleColor(ImGuiCol_Text,color(m.value("color",1)));
+   if(ImGui::Selectable(display_label(m.value("name","")).c_str()) && can_inspect) inspect_creature(m.value("race_id",-1));
+   ImGui::PopStyleColor();
+   if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s\nPosition %d, %d%s",m.value("asleep",false)?"Asleep":"Awake",m.value("x",0),m.value("y",0),can_inspect?"\nClick to inspect":"");
+   if(can_inspect && ImGui::BeginPopupContextItem("Creature actions")) {
+    if(ImGui::MenuItem("Inspect")) inspect_creature(m.value("race_id",-1));
+    ImGui::EndPopup();
    }
    ImGui::PopID();
   }
+  if(!any) ImGui::TextDisabled("No creatures in sight.");
  }
  void minimap() {
   if(!c.state.contains("map") || !c.catalog.contains("features")) return;
@@ -1288,7 +1327,7 @@ struct UI {
     if(c.capabilities.value("spells",0)>0 && c.state.contains("player") && c.state["player"].value("spellcasting",false) && ImGui::BeginTabItem("Spells")) {
      ImGui::BeginChild("Spell content"); if(spell_panel.draw(c,quickbar_enabled?&quickbar:nullptr)) focus_game(); ImGui::EndChild(); ImGui::EndTabItem();
     }
-    if(ImGui::BeginTabItem("Creatures")) { ImGui::BeginChild("Creature content"); creatures(); ImGui::EndChild(); ImGui::EndTabItem(); }
+    if(ImGui::BeginTabItem("Creatures",nullptr,select_creatures_tab?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)) { select_creatures_tab=false; ImGui::BeginChild("Creature content"); creatures(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(ImGui::BeginTabItem("Map")) { ImGui::BeginChild("Map content"); minimap(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(ImGui::BeginTabItem("Commands")) {
      ImGui::BeginChild("Command content");

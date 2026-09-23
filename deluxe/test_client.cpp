@@ -395,6 +395,29 @@ int main(int argc,char **argv) {
    player["statuses"]=json::array(); check(StatusEffects::active(player).empty(),"Expired effects must disappear");
   }
   {
+   Connection recall; recall.connected=true; recall.capabilities["knowledge"]=1;
+   UI inspector{recall}; recall.busy=true;
+   inspector.inspect_creature(10); const auto old=recall.creature_request;
+   inspector.inspect_creature(11); const auto latest=recall.creature_request;
+   recall.receive({{"id",old},{"result",{{"id",10},{"name","Old creature"}}}});
+   check(recall.creature_detail.is_null(),"Old creature recall must not overwrite the current selection");
+   const json detail={{"id",11},{"name","Aimless-looking merchant"},{"group","Townsfolk"},{"stats",json::array({{{"label","Sightings"},{"value",3}}})},{"description_sections",json::array({{{"title","Combat"},{"text","Known attacks appear here."}}})}};
+   recall.receive({{"id",latest},{"result",detail}});
+   check(recall.busy && recall.creature_detail["id"]==11 && recall.knowledge_detail.is_null(),"Creature recall must preserve command locks and independent knowledge selection");
+   check(inspector.select_creatures_tab,"Inspect must select the Creatures side tab");
+   auto updated=detail; updated["name"]="Updated recall"; updated["category"]="creatures";
+   recall.receive({{"kind","event"},{"event","knowledge.changed"},{"data",updated}});
+   check(recall.creature_detail["name"]=="Updated recall" && recall.busy,"Live lore must update without releasing the command lock");
+   updated["id"]=10; updated["name"]="Another race";
+   recall.receive({{"kind","event"},{"event","knowledge.changed"},{"data",updated}});
+   check(recall.creature_detail["id"]==11,"Updates for another inspected race must be ignored");
+
+   for(float width:{320.f,600.f}) {
+    ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(width,600)); ImGui::Begin("Creature inspection test");
+    inspector.creatures(); ImGui::End(); ImGui::Render();
+   }
+  }
+  {
    Connection knowledge; knowledge.connected=true; knowledge.busy=true;
    KnowledgeBrowser browser; browser.open(knowledge);
    const auto old=knowledge.knowledge_list_request;

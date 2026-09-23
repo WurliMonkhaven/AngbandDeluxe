@@ -28,6 +28,7 @@ class Engine:
         self.prompt = None
         self.responses = {}
         self.travel = {}
+        self.knowledge_events = []
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._errors, daemon=True).start()
 
@@ -56,6 +57,8 @@ class Engine:
         if j.get("kind") == "event":
             if j["event"] == "state.changed":
                 self.state = j["data"]
+            elif j["event"] == "knowledge.changed":
+                self.knowledge_events.append(j["data"])
             elif j["event"] == "travel.changed":
                 self.travel = j["data"]
             elif j["event"] == "prompt.requested":
@@ -252,6 +255,57 @@ class BackendTests(unittest.TestCase):
         set_wound(0)
         self.assertFalse(any(s["id"] == "CUT" for s in e.state["player"]["statuses"]))
         before = e.call("state.get")["result"]
+        self.assertEqual(e.call("state.get")["result"], before)
+
+    def test_creature_lore_watch(self):
+        e = self.engine
+        e.hello(); e.birth()
+        def change_lore(key):
+            # Exercise real lore changes through existing wizard commands.
+            e.key(1); e.key(ord(key))
+            for _ in range(20):
+                e.state = e.call("state.get")["result"]
+                if e.prompt:
+                    prompt = e.prompt; e.prompt = None; old = e.state["revision"]
+                    self.assertEqual(prompt["type"], "confirmation")
+                    e.call("prompt.reply", {"prompt_id": prompt["prompt_id"], "value": True})
+                    e.next_state(old)
+                elif e.state["readiness"] != "ready": e.key(ord('a'))
+                else: return
+            self.fail("Lore command did not complete")
+        change_lore('r')
+        entries = e.call("knowledge.list", {"category": "creatures"})["result"]["entries"]
+        race = entries[-1]["id"]
+        e.call("knowledge.get", {"category": "creatures", "id": race, "watch": True})
+        e.knowledge_events.clear()
+        # Unchanged input boundaries must not regenerate or send recall.
+        for _ in range(3): e.key("escape")
+        e.call("state.get")
+        self.assertEqual(e.knowledge_events, [])
+        change_lore('W')
+        e.call("state.get")
+        self.assertTrue(e.knowledge_events)
+        self.assertEqual(e.knowledge_events[-1]["id"], race)
+        self.assertEqual(e.knowledge_events[-1]["category"], "creatures")
+        self.assertIn("description_sections", e.knowledge_events[-1])
+        e.call("knowledge.unwatch")
+        e.knowledge_events.clear()
+        change_lore('r')
+        e.call("state.get")
+        self.assertEqual(e.knowledge_events, [])
+
+    def test_creature_inspection_ids(self):
+        e = self.engine
+        e.hello(); e.birth()
+        before = e.call("state.get")["result"]
+        known = {row["id"]: row for row in e.call("knowledge.list", {"category": "creatures"})["result"]["entries"]}
+        for monster in before["monsters"]:
+            self.assertIsInstance(monster["race_id"], int)
+            self.assertGreater(monster["race_id"], 0)
+            if monster["race_id"] in known:
+                detail = e.call("knowledge.get", {"category": "creatures", "id": monster["race_id"]})["result"]
+                self.assertEqual(detail["name"].lower(), monster["name"].lower())
+                self.assertIsInstance(detail["description_sections"], list)
         self.assertEqual(e.call("state.get")["result"], before)
 
     def test_native_knowledge(self):
@@ -1400,7 +1454,10 @@ class BackendTests(unittest.TestCase):
             self.spell_command('core.cast',self.spell_book()['spells'][0]['id'])
             if branch.prompt: self.store_reply(True)
             branch.key(ord('6'))
-            while branch.state['readiness']!='ready': branch.key('enter')
+            for _ in range(40):
+                if branch.state['readiness']=='ready': break
+                branch.key('enter')
+            self.assertEqual(branch.state['readiness'],'ready',f'Cast did not finish: phase={branch.state.get("phase")} prompt={branch.prompt}')
             result={key:branch.state[key] for key in ('turn','player','map','monsters','items')}
             for collection in ('items','monsters'):
                 for entity in result[collection]: entity.pop('id',None)

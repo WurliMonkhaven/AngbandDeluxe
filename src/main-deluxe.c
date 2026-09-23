@@ -476,7 +476,7 @@ static cJSON *capture(void)
    struct monster *m = cave_monster(cave, i); cJSON *j; char id[80];
    if (!m || !m->race) continue;
    j = cJSON_CreateObject(); strnfmt(id, sizeof(id), "monster-%lu-%d", revision, i);
-   string(j, "id", id); string(j, "name", m->race->name);
+   string(j, "id", id); string(j, "name", m->race->name); number(j,"race_id",m->race->ridx);
    number(j, "x", m->grid.x); number(j, "y", m->grid.y);
    number(j, "hp", m->hp); number(j, "max_hp", m->maxhp);
    number(j, "glyph", m->race->d_char); number(j, "color", m->race->d_attr);
@@ -509,6 +509,7 @@ static void publish(void)
  /* send_json serializes synchronously. Borrow the immutable snapshot instead
   * of allocating and freeing a second copy of every dungeon cell. */
  event("state.changed", cJSON_CreateObjectReference(snapshot->child));
+ deluxe_knowledge_publish();
 }
 static bool input_available(void)
 {
@@ -638,12 +639,13 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
  if (streq(method, "commands.list")) response(id, command_list());
  else if (streq(method, "state.get")) response(id, snapshot ? cJSON_CreateObjectReference(snapshot->child) : cJSON_CreateObject());
+ else if(streq(method,"knowledge.unwatch")) { deluxe_knowledge_unwatch(); response(id,cJSON_CreateObject()); }
  else if(streq(method,"knowledge.list") || streq(method,"knowledge.get")) deluxe_knowledge_request(id,method,p);
  else if(streq(method,"item.rules.list")) {
   if(!character_generated) error(id,"wrong_phase","Start a character first.");

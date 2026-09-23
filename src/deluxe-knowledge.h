@@ -82,6 +82,51 @@ static cJSON *deluxe_knowledge_detail(const char *category,int i)
  memcpy(STATE,saved_state,sizeof(saved_state)); state_i=saved_index; Rand_value=saved_value; Rand_quick=saved_quick;
  return out;
 }
+/* Observe only the inspected race. The cheap comparison includes pointed-to
+ * attack knowledge, without regenerating recall on ordinary unchanged turns.
+ * Lore's other linked lists are loaded definitions, not mutable recall inputs. */
+static int deluxe_watched_race=-1, deluxe_watched_level, deluxe_watched_max_num;
+static struct monster_lore deluxe_watched_lore;
+static struct monster_blow *deluxe_watched_blows;
+static bool *deluxe_watched_blow_known;
+static void deluxe_knowledge_unwatch(void)
+{
+ deluxe_watched_race=-1;
+ mem_free(deluxe_watched_blows); deluxe_watched_blows=NULL;
+ mem_free(deluxe_watched_blow_known); deluxe_watched_blow_known=NULL;
+}
+static bool deluxe_knowledge_watch_changed(void)
+{
+ const struct monster_lore *lore=get_lore(&r_info[deluxe_watched_race]);
+ return memcmp(&deluxe_watched_lore,lore,sizeof(*lore)) ||
+  memcmp(deluxe_watched_blows,lore->blows,z_info->mon_blows_max*sizeof(*lore->blows)) ||
+  memcmp(deluxe_watched_blow_known,lore->blow_known,z_info->mon_blows_max*sizeof(*lore->blow_known)) ||
+  deluxe_watched_level!=player->lev || deluxe_watched_max_num!=r_info[deluxe_watched_race].max_num;
+}
+static void deluxe_knowledge_remember(void)
+{
+ const struct monster_lore *lore=get_lore(&r_info[deluxe_watched_race]);
+ memcpy(&deluxe_watched_lore,lore,sizeof(*lore));
+ memcpy(deluxe_watched_blows,lore->blows,z_info->mon_blows_max*sizeof(*lore->blows));
+ memcpy(deluxe_watched_blow_known,lore->blow_known,z_info->mon_blows_max*sizeof(*lore->blow_known));
+ deluxe_watched_level=player->lev; deluxe_watched_max_num=r_info[deluxe_watched_race].max_num;
+}
+static void deluxe_knowledge_watch(int race)
+{
+ deluxe_knowledge_unwatch(); deluxe_watched_race=race;
+ deluxe_watched_blows=mem_alloc(z_info->mon_blows_max*sizeof(*deluxe_watched_blows));
+ deluxe_watched_blow_known=mem_alloc(z_info->mon_blows_max*sizeof(*deluxe_watched_blow_known));
+ deluxe_knowledge_remember();
+}
+static void deluxe_knowledge_publish(void)
+{
+ cJSON *detail;
+ if(deluxe_watched_race<0 || !character_generated || !streq(phase,"playing")) return;
+ if(!deluxe_knowledge_watch_changed()) return;
+ detail=deluxe_knowledge_detail("creatures",deluxe_watched_race);
+ string(detail,"category","creatures"); deluxe_knowledge_remember();
+ event("knowledge.changed",detail);
+}
 static void deluxe_knowledge_request(const char *id,const char *method,const cJSON *p)
 {
  const char *category=str(p,"category"); int i,max=0; cJSON *out,*entries;
@@ -95,6 +140,7 @@ static void deluxe_knowledge_request(const char *id,const char *method,const cJS
   const cJSON *entry=cJSON_GetObjectItem(p,"id"); i=num(p,"id",-1);
   if(!cJSON_IsNumber(entry) || entry->valuedouble!=i || !deluxe_knowledge_visible(category,i)) { error(id,"invalid_argument","Knowledge entry is unavailable."); return; }
   out=deluxe_knowledge_detail(category,i);
+  if(streq(category,"creatures") && cJSON_IsTrue(cJSON_GetObjectItem(p,"watch"))) deluxe_knowledge_watch(i);
  } else {
   out=cJSON_CreateObject(); entries=cJSON_CreateArray();
   for(i=0;i<max;++i) if(deluxe_knowledge_visible(category,i)) cJSON_AddItemToArray(entries,deluxe_knowledge_entry(category,i));

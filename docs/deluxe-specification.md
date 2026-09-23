@@ -685,3 +685,27 @@ debug.status.list and debug.status({effect,amount}); requests require ordinary
 living play and integer amounts in 0..30000, clamped by engine effect limits.
 Changes run through player_set_timed at a safe command boundary. Commanding
 a monster is excluded because it requires an actual controlled target.
+
+
+## Native creature inspection (September 2026)
+
+Right-click a visible creature and choose Inspect to select its recall in the
+Creatures side tab without obscuring the dungeon. Selecting an entry in the
+Creatures list, or its Inspect context action, opens the same view. Back to
+creatures returns to the visible list. Recall updates automatically as lore changes.
+The shared knowledge detail renderer supplies known attacks, abilities,
+resistances, movement, rewards and encounter history in collapsible sections.
+Recall describes a creature type and remains readable after it leaves sight.
+
+Monster records expose race_id, an engine/session-local link to knowledge.get
+with category creatures. Recall is fetched on selection and updated on lore changes, has
+independent reply state from the Knowledge window, discards stale replies, and
+never releases gameplay command locks or sends movement/targeting commands.
+
+The knowledge.watch:1 capability accepts watch:true on a creature knowledge.get.
+It replaces the one active creature watch; knowledge.unwatch ends it. At input
+boundaries, the adapter compares only that race's lore, including attack arrays,
+unique survival state and player level (used for reward text). Only a change
+builds and sends a knowledge.changed detail record. No polling or per-movement
+recall queries are needed. The side panel keeps scroll and collapsed sections
+while replacing its detail data; late updates for other races are ignored.
