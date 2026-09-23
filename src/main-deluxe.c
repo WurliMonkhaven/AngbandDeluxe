@@ -470,6 +470,7 @@ static cJSON *capture(void)
    cJSON_AddItemToArray(known, ints(known_row,cave->width));
    cJSON_AddItemToArray(visible, cJSON_CreateString(seen));
   }
+  counter(map,"level_id",deluxe_level);
   cJSON_AddItemToObject(map, "actual", terrain); cJSON_AddItemToObject(map, "known", known);
   cJSON_AddItemToObject(map, "visible", visible); cJSON_AddItemToObject(s, "map", map);
   for (i = 1; i < cave->mon_max; ++i) {
@@ -709,6 +710,7 @@ static void pump(void)
   cJSON *out = cJSON_CreateObject(), *features = cJSON_CreateArray();
   if (initialized) for (i = 0; i < FEAT_MAX; ++i) {
    cJSON *f = cJSON_CreateObject(); number(f, "id", (int)i); string(f, "name", f_info[i].name);
+   string(f,"map_kind",tf_has(f_info[i].flags,TF_UPSTAIR)?"up":tf_has(f_info[i].flags,TF_DOWNSTAIR)?"down":tf_has(f_info[i].flags,TF_SHOP)?"shop":tf_has(f_info[i].flags,TF_DOOR_ANY)?"door":tf_has(f_info[i].flags,TF_PASSABLE)?"floor":"wall");
    number(f, "glyph", f_info[i].d_char); number(f, "color", f_info[i].d_attr); cJSON_AddItemToArray(features, f);
   }
   cJSON_AddItemToObject(out, "features", features); response(id, out);

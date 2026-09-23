@@ -357,6 +357,7 @@ static void properties(const json &value) {
 #include "character_overview.h"
 #include "character_sheet.h"
 #include "knowledge_browser.h"
+#include "map_overview.h"
 #include "dev_status_dialog.h"
 #include "dungeon_feedback.h"
 #include "birth_panel.h"
@@ -375,6 +376,7 @@ struct UI {
  char quickbar_text=0;
  bool open_character_sheet=false;
  KnowledgeBrowser knowledge_browser;
+ MapOverview map_overview;
  bool inscription_edit=false;
  ItemRules item_rules_panel;
  StorePanel store_panel;
@@ -1056,20 +1058,7 @@ struct UI {
   if(!any) ImGui::TextDisabled("No creatures in sight.");
  }
  void minimap() {
-  if(!c.state.contains("map") || !c.catalog.contains("features")) return;
-  const auto &map=c.state["map"]["known"];
-  if(map.empty()) return;
-  auto origin=ImGui::GetCursorScreenPos(); float cell=std::max(1.f,ImGui::GetContentRegionAvail().x/float(map[0].size()));
-  auto draw=ImGui::GetWindowDrawList();
-  for(size_t y=0;y<map.size();++y) for(size_t x=0;x<map[y].size();++x) {
-   int f=map[y][x]; if(!f) continue;
-   int attr=f<int(c.catalog["features"].size())?c.catalog["features"][f].value("color",2):2;
-   draw->AddRectFilled(ImVec2(origin.x+x*cell,origin.y+y*cell),ImVec2(origin.x+(x+1)*cell,origin.y+(y+1)*cell),color(attr));
-  }
-  if(c.state.contains("player")) {
-   auto &p=c.state["player"]; draw->AddCircleFilled(ImVec2(origin.x+(p.value("x",0)+.5f)*cell,origin.y+(p.value("y",0)+.5f)*cell),std::max(2.f,cell),IM_COL32(255,100,100,255));
-  }
-  ImGui::Dummy(ImVec2(cell*map[0].size(),cell*map.size()));
+  if(map_overview.draw(c.state,c.catalog)) { grid_focus=false; keys.clear(); }
  }
  bool item_selection_prompt(bool fresh) {
   std::vector<const json*> rows;
@@ -1328,7 +1317,7 @@ struct UI {
      ImGui::BeginChild("Spell content"); if(spell_panel.draw(c,quickbar_enabled?&quickbar:nullptr)) focus_game(); ImGui::EndChild(); ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("Creatures",nullptr,select_creatures_tab?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)) { select_creatures_tab=false; ImGui::BeginChild("Creature content"); creatures(); ImGui::EndChild(); ImGui::EndTabItem(); }
-    if(ImGui::BeginTabItem("Map")) { ImGui::BeginChild("Map content"); minimap(); ImGui::EndChild(); ImGui::EndTabItem(); }
+    if(ImGui::BeginTabItem("Map")) { ImGui::BeginChild("Map content",ImVec2(0,0),ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse); minimap(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(ImGui::BeginTabItem("Commands")) {
      ImGui::BeginChild("Command content");
      ImGui::InputTextWithHint("##commands","Search commands",command_filter,sizeof(command_filter));

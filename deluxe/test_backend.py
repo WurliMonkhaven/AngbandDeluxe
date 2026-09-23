@@ -257,6 +257,19 @@ class BackendTests(unittest.TestCase):
         before = e.call("state.get")["result"]
         self.assertEqual(e.call("state.get")["result"], before)
 
+    def test_map_overview_metadata(self):
+        e = self.engine
+        e.hello(); e.birth()
+        before = e.call("state.get")["result"]
+        self.assertEqual(before["map"]["level_id"], before["dungeon"]["level_id"])
+        features = e.call("catalog.get")["result"]["features"]
+        kinds = {f["map_kind"] for f in features}
+        self.assertTrue({"up", "down", "shop", "wall", "floor", "door"}.issubset(kinds))
+        for row in before["map"]["known"]:
+            for feature in row:
+                self.assertEqual(features[feature]["id"], feature)
+        self.assertEqual(e.call("state.get")["result"], before)
+
     def test_creature_lore_watch(self):
         e = self.engine
         e.hello(); e.birth()

@@ -709,3 +709,19 @@ unique survival state and player level (used for reward text). Only a change
 builds and sends a knowledge.changed detail record. No polling or per-movement
 recall queries are needed. The side panel keeps scroll and collapsed sections
 while replacing its detail data; late updates for other races are ignored.
+
+
+## Read-only map overview (September 2026)
+
+The Map tab uses remembered terrain only. Muted floors, solid walls and warm
+doors support white player diamonds, cyan up-stair triangles, amber down-stair
+triangles and purple shop squares. A compact legend explains the markers.
+A pale outline locates the main dungeon view. Hover labels name remembered
+terrain and landmarks; unknown cells remain Unexplored.
+
+Mouse-wheel zoom anchors to the pointer; dragging pans locally. Fit floor
+shows the whole floor and Centre on player recentres without changing zoom.
+New levels reset to fit. No map gesture moves, targets or acts in the game.
+The map renderer accepts immutable state/catalog data and has no command access.
+Catalog features add map_kind (up/down/shop/door/floor/wall), derived from
+engine terrain flags; map adds level_id for resetting the local camera.

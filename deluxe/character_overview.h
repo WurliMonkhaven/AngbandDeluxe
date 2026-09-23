@@ -113,7 +113,7 @@ struct CharacterOverview {
   if(p.value("extra_moves",0)) ImGui::Text("Extra moves: %+d",p.value("extra_moves",0));
   section("Dungeon");
   const char *dungeon_labels[]={"Depth","Light","Feel",""};
-  const std::string dungeon_values[]={std::to_string(p.value("depth",0)),std::to_string(p.value("light",0)),p.value("feeling","—"),display_label(p.value("floor",""))};
+  const std::string dungeon_values[]={std::to_string(p.value("depth",0)),std::to_string(p.value("light",0)),p.value("feeling","â€”"),display_label(p.value("floor",""))};
   const std::string dungeon_tips[]={"Depth: "+std::to_string(p.value("depth_feet",p.value("depth",0)*50))+" feet","",p.value("feeling_description",""),""};
   // Match metric's label/value spacing, plus the table's cell padding.
   // Use the widest tile so every tile stays on one line at the breakpoint.

@@ -395,6 +395,27 @@ int main(int argc,char **argv) {
    player["statuses"]=json::array(); check(StatusEffects::active(player).empty(),"Expired effects must disappear");
   }
   {
+   MapOverview map; map.centre=ImVec2(10,10);
+   const ImVec2 mouse(130,70),origin(0,0),size(200,200);
+   const auto anchor=MapOverview::world_at(mouse,origin,size,map.centre,5);
+   map.zoom_at(3,mouse,origin,size,5);
+   const auto after=MapOverview::world_at(mouse,origin,size,map.centre,15);
+   check(std::abs(anchor.x-after.x)<.001f && std::abs(anchor.y-after.y)<.001f,"Map zoom must preserve the tile under the pointer");
+   map.zoom_at(100,mouse,origin,size,5); check(map.zoom==24,"Map zoom must be bounded");
+   Connection view; UI map_ui{view};
+   view.catalog={{"features",json::array({{{"id",0},{"name","Unknown"}},{{"id",1},{"name","Open floor"},{"map_kind","floor"}},{{"id",2},{"name","Staircase down"},{"map_kind","down"}},{{"id",3},{"name","General store"},{"map_kind","shop"}}})}};
+   view.state={{"map",{{"level_id","one"},{"known",json::array({json::array({0,1,2,0}),json::array({1,3,1,0})})}}},{"player",{{"x",1},{"y",1}}},{"dungeon",{{"x",0},{"y",0},{"width",3},{"height",2}}}};
+   for(int frame=0;frame<3;++frame) {
+    ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(frame==0?260:600,500)); ImGui::Begin("Map overview test");
+    map_ui.minimap(); ImGui::End(); ImGui::Render();
+   }
+   check(view.outgoing.empty(),"Viewing the map must never issue game commands");
+   map_ui.map_overview.zoom=4; map_ui.map_overview.fitted=false;
+   view.state["map"]["level_id"]="two";
+   ImGui::NewFrame(); ImGui::Begin("Map overview test"); map_ui.minimap(); ImGui::End(); ImGui::Render();
+   check(map_ui.map_overview.zoom==1 && map_ui.map_overview.fitted,"A new floor must reset the map to fit");
+  }
+  {
    Connection recall; recall.connected=true; recall.capabilities["knowledge"]=1;
    UI inspector{recall}; recall.busy=true;
    inspector.inspect_creature(10); const auto old=recall.creature_request;
