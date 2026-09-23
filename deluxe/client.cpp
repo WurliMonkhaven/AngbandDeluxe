@@ -790,9 +790,12 @@ struct UI {
   }
   ImGui::EndDisabled();
  }
+ static const char *item_action_label(const std::string &id) {
+  return id=="core.browse"?"Browse spells":id=="core.wield"?"Wield / wear":id=="core.use"?"Use":id=="core.quaff"?"Quaff":id=="core.read"?"Read":id=="core.eat"?"Eat":id=="core.fire"?"Fire":id=="core.throw"?"Throw":id=="core.takeoff"?"Take off":id=="core.drop"?"Drop":"Inscribe";
+ }
  void items() {
   if(ImGui::BeginTabBar("Item categories")) {
-   const char *tabs[]={"Inventory","Equipment","Quiver"};
+   const char *tabs[]={"Pack","Equipment","Quiver"};
    for(int category=0;category<3;++category) if(ImGui::BeginTabItem(tabs[category])) {
     ImGui::PushID(tabs[category]); items_category(category); ImGui::PopID();
     ImGui::EndTabItem();
@@ -824,13 +827,24 @@ struct UI {
     ImGui::TableNextRow(); ImGui::TableNextColumn();
     ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
     if(ImGui::Selectable(label.c_str(),selected==id,ImGuiSelectableFlags_SpanAllColumns)) selected=id;
+    ImGui::PopStyleColor();
+    if(ImGui::BeginPopupContextItem("Item actions")) {
+     selected=id;
+     ImGui::TextDisabled("%s",label.c_str()); ImGui::Separator();
+     ImGui::BeginDisabled(!c.ready());
+     for(const auto &action:o.value("actions",json::array())) {
+      const auto command=action.get<std::string>();
+      if(ImGui::MenuItem(item_action_label(command))) execute(command,id);
+     }
+     ImGui::EndDisabled(); ImGui::EndPopup();
+    }
+
     if(ImGui::IsItemHovered()) {
      ImGui::BeginTooltip(); ImGui::TextUnformatted(label.c_str());
      const auto inscription=o.value("inscription","");
      if(!inscription.empty()) ImGui::Text("Inscription: %s",inscription.c_str());
      ImGui::EndTooltip();
     }
-    ImGui::PopStyleColor();
     if(category==1) { ImGui::TableNextColumn(); ImGui::TextUnformatted(display_label(o.value("location","")).c_str()); }
     ImGui::TableNextColumn(); ImGui::Text("%d",o.value("quantity",0)); ImGui::PopID();
    }
@@ -839,18 +853,36 @@ struct UI {
   for(const auto *item:values) if(item->value("id","")==selected) {
    const auto &o=*item;
    ImGui::SeparatorText("Inspection");
-   properties(o["player_known"]);
    ImGui::BeginDisabled(!c.ready());
    bool first=true;
    for(const auto &action:o.value("actions",json::array())) {
     const std::string id=action.get<std::string>();
-    const char *label=id=="core.browse"?"Browse spells":id=="core.wield"?"Wield / wear":id=="core.use"?"Use":id=="core.quaff"?"Quaff":id=="core.read"?"Read":id=="core.eat"?"Eat":id=="core.fire"?"Fire":id=="core.throw"?"Throw":id=="core.takeoff"?"Take off":id=="core.drop"?"Drop":"Inscribe";
-    if(!first && ImGui::GetContentRegionAvail().x>ImGui::CalcTextSize(label).x+ImGui::GetStyle().FramePadding.x*2+ImGui::GetStyle().ItemSpacing.x) ImGui::SameLine(); first=false;
+    const char *label=item_action_label(id);
+    const float right=ImGui::GetCursorScreenPos().x+ImGui::GetContentRegionAvail().x;
+    if(!first && ImGui::GetItemRectMax().x+ImGui::GetStyle().ItemSpacing.x+ImGui::CalcTextSize(label).x+2*ImGui::GetStyle().FramePadding.x<right) ImGui::SameLine();
+    first=false;
     if(ImGui::Button(label)) execute(id,selected);
    }
    ImGui::EndDisabled();
+   ImGui::Spacing();
+   ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
+   ImGui::TextWrapped("%s",o.value("label","").c_str()); ImGui::PopStyleColor();
+   ImGui::PushStyleVar(ImGuiStyleVar_CellPadding,ImVec2(ImGui::GetFontSize()*.4f,ImGui::GetFontSize()*.3f));
+   if(ImGui::BeginTable("Item facts",2,ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_RowBg)) {
+    const auto known=o.value("player_known",json::object());
+    for(auto it=known.begin();it!=known.end();++it) if(it.value().is_primitive()) {
+     ImGui::TableNextColumn();
+     properties(json::object({{it.key(),it.value()}}));
+    }
+    ImGui::TableNextRow(); ImGui::TableNextColumn();
+    ImGui::TextDisabled("Quantity"); ImGui::SameLine(); ImGui::Text("%d",o.value("quantity",0));
+    ImGui::TableNextColumn(); ImGui::TextDisabled("%s",category==1?"Slot":"Location"); ImGui::SameLine();
+    ImGui::TextWrapped("%s",display_label(o.value("location","")).c_str());
+    ImGui::EndTable();
+   }
+   ImGui::PopStyleVar();
    const auto description=o.value("description","");
-   if(!description.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",description.c_str()); }
+   if(!description.empty()) { ImGui::Spacing(); ImGui::SeparatorText("Description"); ImGui::TextWrapped("%s",description.c_str()); }
   }
  }
  void creatures() {
@@ -1112,7 +1144,7 @@ struct UI {
     if(targeting_active && ImGui::BeginTabItem("Look / Target",nullptr,targeting_was_active?ImGuiTabItemFlags_None:ImGuiTabItemFlags_SetSelected)) {
      ImGui::BeginChild("Target content"); targeting_panel(); ImGui::EndChild(); ImGui::EndTabItem();
     }
-    if(ImGui::BeginTabItem("Items")) { ImGui::BeginChild("Item content"); items(); ImGui::EndChild(); ImGui::EndTabItem(); }
+    if(ImGui::BeginTabItem("Inventory")) { ImGui::BeginChild("Item content"); items(); ImGui::EndChild(); ImGui::EndTabItem(); }
     if(c.capabilities.value("spells",0)>0 && c.state.contains("player") && c.state["player"].value("spellcasting",false) && ImGui::BeginTabItem("Spells")) {
      ImGui::BeginChild("Spell content"); if(spell_panel.draw(c)) focus_game(); ImGui::EndChild(); ImGui::EndTabItem();
     }
