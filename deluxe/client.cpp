@@ -22,6 +22,17 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
+// Trim a connector against both cell rectangles so it never crosses a glyph
+// or continues through the targeting box. Handles non-square terminal cells.
+static bool target_connector(ImVec2 from,ImVec2 to,float cw,float ch,ImVec2 &start,ImVec2 &end) {
+ const float dx=to.x-from.x,dy=to.y-from.y;
+ const float span=std::max(std::abs(dx)/cw,std::abs(dy)/ch);
+ if(span<=1.f) return false;
+ const float trim=.5f/span;
+ start=ImVec2(from.x+dx*trim,from.y+dy*trim);
+ end=ImVec2(to.x-dx*trim,to.y-dy*trim);
+ return true;
+}
 static float resource_fraction(int value,int maximum) {
  return maximum>0?std::clamp(float(value)/float(maximum),0.f,1.f):0.f;
 }
@@ -299,6 +310,7 @@ struct UI {
  bool targeting_was_active=false;
  bool proceed_with_click=false, draft_proceed_with_click=false;
  bool click_exits_look=false, draft_click_exits_look=false;
+ bool quick_targeting=false, draft_quick_targeting=false;
  int grid_menu_x=0,grid_menu_y=0;
  std::string grid_menu_context;
  float display_scale = 1.f;
@@ -316,6 +328,7 @@ struct UI {
    fullscreen=j.value("fullscreen",false);
    proceed_with_click=j.value("proceed_with_click",false);
    click_exits_look=j.value("click_exits_look",false);
+   quick_targeting=j.value("quick_targeting",false);
    low_animation=j.value("low_health_animation",true); death_animation=j.value("death_animation",true);
    crt=std::clamp(j.value("crt",0),0,2);
    crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
@@ -325,19 +338,20 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look}}.dump(2);
+  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
  void save_settings() {
-  if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look)) c.notice("Settings could not be saved.");
+  if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look,quick_targeting)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
   draft_proceed_with_click=proceed_with_click;
   draft_click_exits_look=click_exits_look;
+  draft_quick_targeting=quick_targeting;
   draft_low_animation=low_animation; draft_death_animation=death_animation;
   draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
   draft_crt_strength=crt_strength; draft_crt_settings=crt_settings;
@@ -346,13 +360,14 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
   low_animation=draft_low_animation; death_animation=draft_death_animation;
   proceed_with_click=draft_proceed_with_click;
   click_exits_look=draft_click_exits_look;
+  quick_targeting=draft_quick_targeting;
   scale=draft_scale; fullscreen=draft_fullscreen; crt=draft_crt;
   crt_strength=draft_crt_strength; crt_settings=draft_crt_settings;
   return true;
@@ -382,6 +397,8 @@ struct UI {
     if(ImGui::BeginTabItem("Gameplay")) {
      ImGui::Spacing(); ImGui::Checkbox("Proceed with click",&draft_proceed_with_click);
      ImGui::TextWrapped("Left-click the game view to continue at - more -.");
+     ImGui::Spacing(); ImGui::Checkbox("Quick targeting",&draft_quick_targeting);
+     if(ImGui::IsItemHovered()) ImGui::SetTooltip("Click to confirm a target and continue casting, shooting or another aimed action.");
      ImGui::Spacing(); ImGui::Checkbox("Click exits look",&draft_click_exits_look);
      ImGui::EndTabItem();
     }
@@ -593,23 +610,45 @@ struct UI {
     const ImVec2 at(origin.x+x*cw,origin.y+y*ch);
     draw->AddRect(at,ImVec2(at.x+cw,at.y+ch),ink,0,0,thickness);
    };
-   if(c.state.contains("targeting")) {
+   int x=0,y=0;
+   const auto mouse=ImGui::GetMousePos();
+   const bool hovered=ImGui::IsItemHovered() && grid_cell_at(mouse.x-origin.x,mouse.y-origin.y,cw,ch,grid.width,grid.height,x,y);
+   x+=ox; y+=oy;
+   // A direction prompt is already an aiming interaction. Preview its mouse
+   // location locally, without entering another engine mode or sending input.
+   const bool mouse_target=hovered && !c.state.value("message_pending",false) &&
+    (c.state.value("aiming",false) || (quick_targeting && c.state.contains("targeting") && c.state["targeting"].value("mode","")=="target"));
+   auto target_box=[&](int wx,int wy) {
+    if(c.state.contains("player")) {
+     const auto &p=c.state["player"];
+     const int tx=wx-ox,ty=wy-oy;
+     ImVec2 a,b;
+     if(tx>=0 && ty>=0 && size_t(tx)<grid.width && size_t(ty)<grid.height &&
+        target_connector(ImVec2(origin.x+(p.value("x",0)-ox+.5f)*cw,origin.y+(p.value("y",0)-oy+.5f)*ch),
+         ImVec2(origin.x+(tx+.5f)*cw,origin.y+(ty+.5f)*ch),cw,ch,a,b)) {
+      draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
+      draw->AddLine(a,b,IM_COL32(255,225,125,135),std::max(1.f,display_scale));
+      draw->PopClipRect();
+     }
+    }
+    outline(wx,wy,IM_COL32(255,225,125,255),2.f*display_scale);
+   };
+   if(mouse_target) {
+    target_box(x,y);
+   } else if(c.state.contains("targeting")) {
     const auto &t=c.state["targeting"];
     for(const auto &point:t["path"]) {
-     const int x=point[0].get<int>()-ox,y=point[1].get<int>()-oy;
-     if(x>=0 && y>=0 && size_t(x)<grid.width && size_t(y)<grid.height)
-      draw->AddCircleFilled(ImVec2(origin.x+(x+.5f)*cw,origin.y+(y+.5f)*ch),std::max(1.f,display_scale),IM_COL32(240,205,100,190));
+     const int px=point[0].get<int>()-ox,py=point[1].get<int>()-oy;
+     if(px>=0 && py>=0 && size_t(px)<grid.width && size_t(py)<grid.height)
+      draw->AddCircleFilled(ImVec2(origin.x+(px+.5f)*cw,origin.y+(py+.5f)*ch),std::max(1.f,display_scale),IM_COL32(240,205,100,190));
     }
-    outline(t.value("x",0),t.value("y",0),IM_COL32(255,225,125,255),2.f*display_scale);
+    target_box(t.value("x",0),t.value("y",0));
    } else if(c.state.contains("selected_target")) {
     const auto &t=c.state["selected_target"];
     outline(t.value("x",0),t.value("y",0),IM_COL32(210,175,85,200),display_scale);
    }
-   int x,y;
-   const auto mouse=ImGui::GetMousePos();
-   if(ImGui::IsItemHovered() && grid_cell_at(mouse.x-origin.x,mouse.y-origin.y,cw,ch,grid.width,grid.height,x,y)) {
-    x+=ox; y+=oy;
-    outline(x,y,IM_COL32(140,185,220,190),display_scale);
+   if(hovered) {
+    if(!mouse_target) outline(x,y,IM_COL32(140,185,220,190),display_scale);
     ImGui::BeginTooltip(); ImGui::PushTextWrapPos(ImGui::GetFontSize()*26);
     tile_details(x,y,false); ImGui::PopTextWrapPos(); ImGui::EndTooltip();
     if(ImGui::IsMouseClicked(0) && c.native_targeting() && !c.busy && !c.state.value("message_pending",false)) {
@@ -617,7 +656,7 @@ struct UI {
      if(active || (c.ready() && c.mouse_movement())) {
       const auto &io=ImGui::GetIO();
       const bool exit_look=click_exits_look && c.state.contains("targeting") && c.state["targeting"].value("mode","")=="look";
-      c.target(active && !exit_look?"targeting.select":"dungeon.click",{{"x",x},{"y",y},{"exit_look",exit_look},{"shift",io.KeyShift},{"control",io.KeyCtrl},{"alt",io.KeyAlt}});
+      c.target(active && !exit_look?"targeting.select":"dungeon.click",{{"x",x},{"y",y},{"exit_look",exit_look},{"confirm",quick_targeting},{"shift",io.KeyShift},{"control",io.KeyCtrl},{"alt",io.KeyAlt}});
       focus_game();
      }
     }

@@ -488,3 +488,20 @@ study and book browsing use native book/spell prompts, including eligible-only
 selection, letter shortcuts, arrows/Enter and cancellation. The dungeon stays
 visible behind native spell choices. Birth and unrelated recall/knowledge screens
 remain terminal fallbacks; a native character sheet is subsequent work.
+
+
+### Quick targeting
+
+Gameplay settings includes Quick targeting (off by default, staged until Save
+and Close). When enabled, a left click during an aimed action or combat targeting
+selects the clicked monster/location and immediately resumes the original action.
+This applies to casting, shooting, throwing and other actions using the shared
+aiming flow. Look-mode selection and movement-direction prompts keep their
+existing behaviour. Engine range, effect and subsequent confirmation checks
+still apply. A cosmetic connector runs from the player's cell to the near edge
+of the active targeting box; it is distinct from the engine's projection path.
+
+Aim-direction prompts immediately show a mouse-following targeting box and
+edge connector, before entering a separate targeting mode. With Quick targeting
+enabled, the first click at that preview resumes the aimed action. Hover is
+client-only and neither selects an engine target nor consumes a turn.

@@ -34,7 +34,7 @@ struct target_ui_state {
 	int path_length;
 };
 extern const struct target_ui_state *target_ui_current;
-bool target_ui_select(struct loc grid);
+bool target_ui_select(struct loc grid, bool confirm);
 
 /**
  * Convert a "key event" into a "location" (Y)

@@ -398,6 +398,45 @@ class BackendTests(unittest.TestCase):
         self.targeting('targeting.begin', mode='target')
         self.assertEqual(e.call('dungeon.click', {'context':e.state['context'],'x':x,'y':y,'exit_look':True})['error']['code'], 'busy')
 
+    def test_quick_targeting_throw(self):
+        e=self.engine
+        e.hello(); e.birth()
+        before=e.state
+        item=next(o for o in before['items'] if o['location']=='Pack')
+        kind=item['actual']['kind']
+        amount=sum(o['quantity'] for o in before['items'] if o['location']=='Pack' and o['actual']['kind']==kind)
+        e.call('command.execute',{'revision':before['revision'],'command':'core.throw','item':item['id']})
+        e.next_state(before['revision'])
+        self.assertTrue(e.state.get('aiming'))
+        p=e.state['player']
+        self.targeting('targeting.select',x=p['x']+1,y=p['y'],confirm=True)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertNotIn('targeting',e.state)
+        self.assertGreater(e.state['turn'],before['turn'])
+        self.assertEqual(sum(o['quantity'] for o in e.state['items'] if o['location']=='Pack' and o['actual']['kind']==kind),amount-1)
+
+    def test_quick_targeting_spell_and_look(self):
+        e=self.engine
+        e.hello(); e.birth(class_index=1)
+        missile=next(s for s in self.spell_book()['spells'] if s['label']=='Magic Missile')
+        self.spell_command('core.study',missile['id'])
+        while e.state['readiness']!='ready': e.key('enter')
+        before=e.state
+        self.spell_command('core.cast',missile['id'])
+        self.targeting('targeting.control',operation='target')
+        self.assertIn('targeting',e.state)
+        p=e.state['player']
+        self.targeting('targeting.select',x=p['x']+1,y=p['y'],confirm=True)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertNotIn('targeting',e.state)
+        self.assertGreater(e.state['turn'],before['turn'])
+        self.assertEqual(e.state['player']['sp'],before['player']['sp']-1)
+        self.targeting('targeting.begin',mode='look')
+        turn=e.state['turn']
+        self.targeting('targeting.select',x=p['x']+1,y=p['y'],confirm=True)
+        self.assertEqual(e.state['targeting']['mode'],'look')
+        self.assertEqual(e.state['turn'],turn)
+
     def test_native_aim_cancel_preserves_item_and_turn(self):
         e = self.engine
         e.hello(); e.birth()

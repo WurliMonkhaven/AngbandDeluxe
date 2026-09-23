@@ -1213,13 +1213,15 @@ static bool pile_has_known(const struct object *obj) {
 
 const struct target_ui_state *target_ui_current;
 static bool target_ui_relocate;
+static bool target_ui_confirm;
 static struct loc target_ui_requested;
 
-bool target_ui_select(struct loc grid)
+bool target_ui_select(struct loc grid, bool confirm)
 {
 	if (!target_ui_current || !square_in_bounds_fully(cave, grid)) return false;
 	target_ui_requested = grid;
 	target_ui_relocate = true;
+	target_ui_confirm = confirm && !(target_ui_current->mode & TARGET_LOOK);
 	/* Wake the description handler; the outer loop consumes this relocation
 	 * before normal Escape handling. No target/action is committed here. */
 	Term_keypress(ESCAPE, 0);
@@ -1375,6 +1377,14 @@ bool target_set_interactive(int mode, int x, int y, bool allow_pathfinding)
 		if (target_ui_relocate) {
 			target_ui_relocate = false;
 			x = target_ui_requested.x; y = target_ui_requested.y;
+			if (target_ui_confirm) {
+				struct monster *mon = square_monster(cave, loc(x,y));
+				target_ui_confirm = false;
+				if (target_able(mon)) target_set_monster(mon);
+				else target_set_location(y,x);
+				done = true;
+				continue;
+			}
 			adjust_panel_help(y, x, help, player, mode, &targets,
 				&show_interesting, &target_index);
 			continue;

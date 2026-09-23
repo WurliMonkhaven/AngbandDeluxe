@@ -714,12 +714,19 @@ static void pump(void)
     Term_keypress(ESCAPE,0); response(id,cJSON_CreateObject());
    }
   } else if(select) {
-   if(target_ui_current) { target_ui_select(grid); response(id,cJSON_CreateObject()); }
+   bool confirm=cJSON_IsTrue(cJSON_GetObjectItem(p,"confirm"));
+   if(target_ui_current) { target_ui_select(grid,confirm); response(id,cJSON_CreateObject()); }
    else {
     /* The engine's aim-direction handler already accepts a mouse location. */
     if(grid.x<terminal.offset_x || grid.y<terminal.offset_y || grid.x>=terminal.offset_x+SCREEN_WID || grid.y>=terminal.offset_y+SCREEN_HGT)
      error(id,"invalid_argument","Select a tile in the current viewport.");
-    else { Term_mousepress(COL_MAP+(grid.x-terminal.offset_x)*tile_width,ROW_MAP+(grid.y-terminal.offset_y)*tile_height,1); response(id,cJSON_CreateObject()); }
+    else if(textui_aiming && confirm) {
+     struct monster *mon=square_monster(cave,grid);
+     if(target_able(mon)) target_set_monster(mon);
+     else target_set_location(grid.y,grid.x);
+     /* Resume the original aim handler with its ordinary use-target input. */
+     Term_keypress('5',0); response(id,cJSON_CreateObject());
+    } else { Term_mousepress(COL_MAP+(grid.x-terminal.offset_x)*tile_width,ROW_MAP+(grid.y-terminal.offset_y)*tile_height,1); response(id,cJSON_CreateObject()); }
    }
   } else {
    int key=streq(operation,"cancel")?ESCAPE:streq(operation,"next")?'+':streq(operation,"previous")?'-':

@@ -161,6 +161,9 @@ int main(int argc,char **argv) {
   ui.begin_settings(); ui.draft_scale=1.5f; ui.draft_crt=2; ui.draft_fullscreen=true;
   check(!ui.proceed_with_click,"Legacy settings must default click acknowledgement off");
   check(!ui.click_exits_look,"Legacy settings must default click exits look off");
+  check(!ui.quick_targeting,"Quick targeting defaults off");
+  ui.draft_quick_targeting=true;
+  check(!ui.quick_targeting,"Quick targeting draft must not apply immediately");
   ui.draft_click_exits_look=true;
   check(!ui.click_exits_look,"Look click draft applied immediately");
   ui.draft_proceed_with_click=true;
@@ -173,6 +176,7 @@ int main(int argc,char **argv) {
   ui.begin_settings(); // Reopening after Cancel discards the draft.
   check(!ui.draft_proceed_with_click,"Cancelled gameplay draft retained");
   check(!ui.draft_click_exits_look,"Cancelled look click draft retained");
+  check(!ui.draft_quick_targeting,"Cancel retained quick targeting draft");
   check(ui.draft_low_animation && ui.draft_death_animation,"Cancelled animation draft retained");
   check(ui.draft_scale==1.25f && ui.draft_crt==0 && !ui.draft_fullscreen,"Draft was retained");
   check(ui.draft_crt_strength==1 && ui.crt_strength==1,"Cancelled strength was applied");
@@ -182,10 +186,12 @@ int main(int argc,char **argv) {
   ui.draft_low_animation=false; ui.draft_death_animation=true;
   ui.draft_click_exits_look=true;
   ui.draft_proceed_with_click=true;
+  ui.draft_quick_targeting=true;
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
   check(loaded.proceed_with_click,"Gameplay option did not persist");
   check(loaded.click_exits_look,"Click exits look did not persist");
+  check(loaded.quick_targeting,"Quick targeting did not persist");
   check(loaded.crt_settings.raster_lines==720 && loaded.crt_settings.mask==2,"Staged raster/mask settings did not persist");
   check(!loaded.low_animation && loaded.death_animation,"Independent animation switches did not persist");
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");
@@ -224,6 +230,11 @@ int main(int argc,char **argv) {
    check(crt_persistence_alpha(strength,.1)<.04f,"Afterimage does not fade quickly");
   }
   check(crt_persistence_alpha(0,.016)==0 && crt_persistence_alpha(1,.31)==0,"Disabled or stale history survives");
+  ImVec2 connector_start,connector_end;
+  check(target_connector(ImVec2(0,0),ImVec2(100,0),10,20,connector_start,connector_end) && connector_start.x==5 && connector_end.x==95 && connector_end.y==0,"Horizontal connector must end at box edge");
+  check(target_connector(ImVec2(0,0),ImVec2(0,-100),10,20,connector_start,connector_end) && connector_start.y==-10 && connector_end.y==-90,"Vertical connector must respect cell height");
+  check(target_connector(ImVec2(0,0),ImVec2(100,100),10,20,connector_start,connector_end) && connector_end.x==95 && connector_end.y==95,"Diagonal connector must intersect the near box edge");
+  check(!target_connector(ImVec2(0,0),ImVec2(0,0),10,20,connector_start,connector_end),"Same-cell connector must not divide by zero");
   // Exercise the real store layout headlessly, including empty home, shrinking
   // stock and modal-busy states. No desktop input or native window is used.
   ImGui::CreateContext();

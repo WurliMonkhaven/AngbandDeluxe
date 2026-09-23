@@ -313,3 +313,12 @@ prompt is inspection only; its result never casts or learns a spell. Snapshot
 Do not infer casting eligibility from mana alone: the engine may permit casting
 after a low-mana confirmation. Successful selection can lead to further engine
 prompts or aiming; request acknowledgement never implies a completed cast.
+
+
+`targeting.select` accepts optional `confirm: true`. During combat targeting it
+applies relocation and confirmation atomically in the original target loop.
+During an aim-direction prompt it selects the clicked monster/location and feeds
+the original use-target input. Look mode ignores confirmation and only relocates;
+movement-direction prompts retain ordinary mouse direction behaviour. Context,
+coordinate and visibility-of-viewport input checks still apply. Missing/false
+`confirm` preserves the previous select-then-confirm interaction.
