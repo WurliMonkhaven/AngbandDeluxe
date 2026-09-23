@@ -142,7 +142,7 @@ struct Connection {
   send("debug.quit"); busy=true;
  }
  std::string send(const std::string &method, json params = json::object()) {
-  if(method=="session.new" || method=="session.load") character_save=params.value("save","");
+  if(method=="session.new" || method=="session.load") { character_save=params.value("save",""); params["native_birth"]=capabilities.value("interaction.birth",0)>0; }
   if (!connected) return "";
   auto id = "r" + std::to_string(++next);
   params["session_id"] = "session-1";
@@ -194,11 +194,12 @@ struct Connection {
   }
   if (j.contains("error")) {
    const auto error=j["error"].value("message","Request failed"); notice(error); busy = false; pickup_travel=false;
-   if(!state.contains("terminal")) menu_error=error;
-   if(method=="session.close" || method=="debug.quit") { close_requested=false; return_to_menu=false; }
+   if(!state.contains("terminal") || method=="birth.action" || method=="birth.cancel") menu_error=error;
+   if(method=="session.close" || method=="debug.quit" || method=="birth.cancel") { close_requested=false; return_to_menu=false; }
    if(method == "prompt.reply") { prompt = pending_prompt; pending_prompt = json::object(); }
    return;
   }
+  if(method=="birth.action") menu_error.clear();
   const auto &result = j.at("result");
   if (method == "hello") {
    capabilities=result.value("capabilities",json::object());
@@ -210,7 +211,7 @@ struct Connection {
   else if (method == "item.rules.list") item_rules=result;
   else if (method == "session.new" || method == "session.load") { menu_error.clear(); send("catalog.get"); }
   else if (method == "session.save") { busy = false; notice("Game saved."); }
-  else if (method == "session.close" || method == "debug.quit") { close_confirmed=true; closed = !return_to_menu; busy = false; }
+  else if (method == "session.close" || method == "debug.quit" || method == "birth.cancel") { close_confirmed=true; closed = !return_to_menu; busy = false; }
   else if (method == "prompt.reply") pending_prompt = json::object();
  }
  void flush_input() {
@@ -308,6 +309,7 @@ static void properties(const json &value) {
 }
 #include "character_overview.h"
 #include "character_sheet.h"
+#include "birth_panel.h"
 #include "quickbar.h"
 #include "spell_panel.h"
 #include "item_description.h"
@@ -316,6 +318,7 @@ static void properties(const json &value) {
 #include "store_panel.h"
 struct UI {
  Connection &c;
+ BirthPanel birth_panel;
  Quickbar quickbar;
  bool quickbar_enabled=false, draft_quickbar_enabled=false;
  bool quickbar_held[10]{};
@@ -546,7 +549,7 @@ struct UI {
   focus_game();
  }
  bool owns_keyboard() const {
-  return c.state.contains("terminal") && !c.state.contains("store") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
+  return c.state.contains("terminal") && !c.state.contains("birth") && !c.state.contains("store") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
    && !quit_dialog && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId);
  }
  void prepare_frame(SDL_Window *window) {
@@ -1106,7 +1109,7 @@ struct UI {
   ImGui::SetNextWindowPos(vp->WorkPos); ImGui::SetNextWindowSize(vp->WorkSize);
   ImGui::Begin("Angband Deluxe",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
   const bool in_game=c.state.contains("terminal");
-  if(in_game) {
+  if(in_game && !c.state.contains("birth")) {
    if(ImGui::Button("Save and...")) ImGui::OpenPopup("Save menu");
    if(ImGui::BeginPopup("Save menu")) {
     ImGui::BeginDisabled(!c.ready());
@@ -1162,7 +1165,10 @@ struct UI {
   else if(was_store) { focus_game(); store_panel.last_name.clear(); }
   was_store=in_store;
   const bool creating_character=in_game && (phase=="birth" || phase=="launcher");
-  if(creating_character) grid(std::max(1.f,ImGui::GetContentRegionAvail().y));
+  if(creating_character) {
+   if(c.state.contains("birth")) { grid_focus=false; keys.clear(); birth_panel.draw(c); }
+   else grid(std::max(1.f,ImGui::GetContentRegionAvail().y));
+  } else birth_panel.initialized=false;
   if(in_game && !creating_character && !in_store && ImGui::BeginTable("layout",2,ImGuiTableFlags_Resizable|ImGuiTableFlags_BordersInnerV)) {
    ImGui::TableSetupColumn("Game",ImGuiTableColumnFlags_WidthStretch,0.69f);
    ImGui::TableSetupColumn("Panels",ImGuiTableColumnFlags_WidthStretch,0.31f);

@@ -1596,8 +1596,11 @@ static enum birth_stage get_confirm_command(void)
  * We're imposing a step-based system onto the main game here, so we need
  * to keep track of where we're up to, where each step moves on to, etc.
  */
+int (*birth_interact_hook)(void);
+
 int textui_do_birth(void)
 {
+ if (birth_interact_hook) return birth_interact_hook();
 	enum birth_stage current_stage = BIRTH_RESET;
 	enum birth_stage prev = BIRTH_BACK;
 	enum birth_stage roller = BIRTH_RESET;

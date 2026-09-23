@@ -1,5 +1,6 @@
 // Headless checks: no native window, GPU or computer-control automation.
 #include "client.cpp"
+#include "imgui_internal.h"
 #include <iostream>
 #include <stdexcept>
 #include <chrono>
@@ -341,6 +342,38 @@ int main(int argc,char **argv) {
   ImGui::NewFrame(); ImGui::Begin("Quickbar layout");
   if(ImGui::BeginPopupModal("Customize quickbar slot")) { ImGui::CloseCurrentPopup(); ImGui::EndPopup(); }
   ImGui::End(); ImGui::Render();
+  }
+  {
+   Connection creator; creator.connected=true; creator.character_save="BirthTest";
+   json choice={{"id",0},{"name","Human"},{"modifiers",json::array({0,0,0,0,0})},{"abilities",json::array()}};
+   choice["spellcasting"]=true;
+   choice["abilities"]=json::array({{{"name","Spell Choice"},{"description","You may choose your own spells to study."}},{{"name","Combat Regeneration"},{"description","You draw power from combat. Spell points grow as you fight and fade as your blood cools. Casting spells restores some health; the more hurt you are, the greater the benefit."}}});
+   json stats=json::array();
+   for(int i=0;i<5;++i) stats.push_back({{"id",i},{"name","STR"},{"base",10},{"total","10"},{"can_buy",true}});
+   creator.state={{"phase","birth"},{"revision","1"},{"birth",{{"races",json::array({choice})},{"classes",json::array({choice})},{"race",0},{"class",0},{"stats",stats},{"name",""},{"history","Generated history"},{"options",json::array()}}}};
+   BirthPanel birth;
+   for(int i=0;i<10;++i) {
+    birth.step=i%5; if(i) birth.initialized=true;
+    creator.busy=i==6; creator.state["birth"]["rolled"]=i>=5;
+    ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(i<5?1100.f:620.f,650)); ImGui::Begin("Birth layout test");
+    birth.draw(creator); ImGui::End(); ImGui::Render();
+   }
+   ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(620,600)); ImGui::Begin("Allocation regression");
+   BirthPanel::stats(creator,creator.state["birth"],true);
+   auto *allocation=ImGui::TableFindByID(ImGui::GetID("Point allocation"));
+   check(allocation && allocation->ColumnsCount==7,"Editable allocation must have its own seven-column table");
+   check(allocation->Columns[6].WidthGiven>=2*(ImGui::CalcTextSize("+").x+2*ImGui::GetStyle().FramePadding.x)+ImGui::GetStyle().ItemSpacing.x-1,"Adjust column must fit both buttons");
+   BirthPanel::stats(creator,creator.state["birth"],false);
+   auto *preview_table=ImGui::TableFindByID(ImGui::GetID("Attribute preview"));
+   allocation=ImGui::TableFindByID(ImGui::GetID("Point allocation"));
+   check(preview_table && preview_table!=allocation && allocation->ColumnsCount==7,"Preview must not overwrite allocation table state");
+   ImGui::End(); ImGui::Render();
+   check(creator.outgoing.empty(),"Birth layout must not issue commands while browsing");
+   creator.busy=false; BirthPanel::act(creator,"buy",{{"choice",1}});
+   check(creator.busy && creator.outgoing.find("birth.action")!=std::string::npos && creator.outgoing.find("revision")!=std::string::npos,"Birth action must carry current revision and wait for engine");
+   creator.return_to_menu=true; const auto cancel=creator.send("birth.cancel",{{"revision","1"}});
+   creator.receive({{"id",cancel},{"result",json::object()}}); creator.process_stopped(0);
+   check(creator.restart_ready,"Cancelled birth must return to main menu without backend stopped error");
   }
   Connection shop; shop.connected=true;
   shop.state={{"phase","store"},{"context","shop-1"},{"player",{{"gold",100}}},

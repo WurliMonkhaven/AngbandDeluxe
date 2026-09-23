@@ -566,6 +566,71 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn("Renamed", [s["id"] for s in e.call("saves.list")["result"]])
         self.assertEqual(occupied.read_bytes(), data)
 
+    def native_birth_action(self, action, **args):
+        e = self.engine
+        old = e.state["revision"]
+        self.assertIn("result", e.call("birth.action", {"revision": old, "action": action, **args}))
+        return e.next_state(old)
+
+    def test_native_birth(self):
+        e = self.engine
+        e.hello()
+        self.assertIn("result", e.call("session.new", {"save": "NativeBirth", "native_birth": True}))
+        e.next_state(None)
+        self.assertEqual(e.state["phase"], "birth")
+        initial = e.call("state.get")["result"]
+        self.assertEqual(len(initial["birth"]["stats"]), 5)
+        self.assertTrue(initial["birth"]["races"])
+        self.assertTrue(initial["birth"]["classes"])
+        for _ in range(3): self.assertEqual(initial, e.call("state.get")["result"])
+        invalid = e.call("birth.action", {"revision": e.state["revision"], "action": "race", "choice": 99999})
+        self.assertEqual(invalid["error"]["code"], "invalid_argument")
+        mage = next(c for c in initial["birth"]["classes"] if c["name"] == "Mage")
+        elf = next(r for r in initial["birth"]["races"] if r["name"] == "Elf")
+        self.native_birth_action("race", choice=elf["id"])
+        self.native_birth_action("class", choice=mage["id"])
+        self.native_birth_action("reset")
+        self.assertEqual(e.state["birth"]["points_left"], 20)
+        self.assertTrue(all(s["base"] == 10 for s in e.state["birth"]["stats"]))
+        before = e.state["revision"]
+        self.native_birth_action("buy", choice=1)
+        self.assertEqual(e.state["birth"]["stats"][1]["base"], 11)
+        self.assertEqual(e.state["birth"]["points_left"], 19)
+        self.assertEqual(e.call("birth.action", {"revision": before, "action": "buy", "choice": 1})["error"]["code"], "stale_revision")
+        self.native_birth_action("sell", choice=1)
+        self.assertEqual(e.state["birth"]["points_left"], 20)
+        self.native_birth_action("roll")
+        first = e.state["birth"]["stats"]
+        self.assertFalse(e.state["birth"]["previous_roll"])
+        self.native_birth_action("roll")
+        self.assertTrue(e.state["birth"]["previous_roll"])
+        self.native_birth_action("previous")
+        self.assertEqual(e.state["birth"]["stats"], first)
+        self.native_birth_action("suggest")
+        opt = next(o for o in e.state["birth"]["options"] if o["id"] == "birth_no_selling")
+        self.native_birth_action("option", option=opt["id"], value=not opt["value"])
+        self.assertEqual(next(o for o in e.state["birth"]["options"] if o["id"] == opt["id"])["value"], not opt["value"])
+        self.native_birth_action("accept", name="Native Hero", history="A test adventurer.")
+        for _ in range(20):
+            if e.state.get("readiness") == "ready": break
+            e.key("enter")
+        self.assertEqual(e.state["phase"], "playing")
+        self.assertNotIn("birth", e.state)
+        self.assertEqual(e.state["player"]["name"], "Native Hero")
+        self.assertEqual(e.state["player"]["race"], "Elf")
+        self.assertEqual(e.state["player"]["class"], "Mage")
+        self.assertEqual(e.state["player"]["character_sheet"]["history"], "A test adventurer.")
+        self.assertIn("result", e.call("session.save"))
+
+    def test_native_birth_cancel(self):
+        e = self.engine
+        e.hello()
+        e.call("session.new", {"save": "CancelledBirth", "native_birth": True})
+        e.next_state(None)
+        self.assertIn("result", e.call("birth.cancel", {"revision": e.state["revision"]}))
+        self.assertEqual(e.process.wait(timeout=5), 0)
+        self.assertFalse(list(Path(self.temp.name).rglob("CancelledBirth")))
+
     def test_birth_stat_cursor(self):
         e = self.engine
         e.hello()

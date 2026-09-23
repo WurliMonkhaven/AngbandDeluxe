@@ -581,3 +581,26 @@ appearance per slot; Cancel discards edits. Appearance never changes the action.
 Custom quickbar labels use the available slot width and wrap before shrinking,
 with reserved space for shortcut and quantity indicators. Customize groups
 artwork under Icon, with a visual picker; saved icon choices remain compatible.
+
+
+## Native character creation (September 2026)
+
+The Windows client opts into interaction.birth when launching a character.
+Creation uses five native steps: Race, Class, Attributes, Identity and Review.
+Selections show engine-supplied modifiers, skills and ability descriptions,
+with a live preview. Narrow windows stack the preview beneath the controls.
+Point buy exposes remaining points, costs, refunds, reset and suggested allocation.
+Random rolling supports re-roll and previous-roll restoration. Identity includes
+an editable name and background. Birth options remain available throughout.
+A previous-character shortcut is available when the engine permits quickstart.
+Begin adventure accepts the character through ordinary engine birth commands;
+Return to main menu cancels without creating a save. Gameplay panels and quickbar
+remain hidden during creation. The starting funds preview is before outfit costs.
+
+The adapter implements an optional birth UI hook, not new gameplay rules.
+State includes a structured birth record; birth.action and birth.cancel require
+the current revision and an active creation boundary. Race/class IDs, stat IDs,
+name limits and birth-option choices are validated. Engine events supply point
+costs and totals; state queries do not generate rolls or mutate the character.
+Clients without the capability retain terminal creation. Existing commands and
+save formats remain unchanged. macOS/Linux packaging remains deferred.

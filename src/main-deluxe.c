@@ -20,6 +20,8 @@
 #include "obj-util.h"
 #include "obj-tval.h"
 #include "player.h"
+#include "player-birth.h"
+#include "ui-birth.h"
 #include "player-properties.h"
 #include "player-calcs.h"
 #include "player-path.h"
@@ -87,6 +89,7 @@ static bool (*original_get_item)(struct object **, const char *, const char *, c
 static char *seen_ids[32768];
 static size_t seen_count;
 static int launch_mode = -1;
+static bool use_native_birth;
 
 struct command_entry { const char *id, *label; char key; };
 static const struct command_entry commands[] = {
@@ -373,6 +376,9 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
 #include "deluxe-travel.h"
 #include "deluxe-store.h"
 
+static void publish(void);
+static void pump(void);
+#include "deluxe-birth.h"
 static cJSON *capture(void)
 {
 #ifndef NDEBUG
@@ -402,6 +408,7 @@ static cJSON *capture(void)
   json_bool(cursor, "visible", terminal.scr->cv && !terminal.scr->cu);
   cJSON_AddItemToObject(s, "cursor", cursor);
  }
+ if(birth_active) cJSON_AddItemToObject(s,"birth",deluxe_birth_record());
  if (character_generated && player && cave) {
   struct object *o; cJSON *p = cJSON_CreateObject(), *slots = cJSON_CreateArray();
   cJSON *map = cJSON_CreateObject(), *terrain = cJSON_CreateArray(), *known = cJSON_CreateArray();
@@ -633,7 +640,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -704,6 +711,9 @@ static void pump(void)
    number(f, "glyph", f_info[i].d_char); number(f, "color", f_info[i].d_attr); cJSON_AddItemToArray(features, f);
   }
   cJSON_AddItemToObject(out, "features", features); response(id, out);
+ } else if (streq(method,"birth.action") || streq(method,"birth.cancel")) {
+  if(streq(method,"birth.cancel")) cJSON_AddStringToObject(p,"action","cancel");
+  deluxe_birth_action(id,p);
  } else if (streq(method, "session.new") || streq(method, "session.load")) {
   const char *name = str(p, "save");
   if (launch_mode >= 0) { error(id, "wrong_phase", "Start another backend process for another game."); goto done; }
@@ -715,6 +725,7 @@ static void pump(void)
       (streq(method, "session.load") && !file_exists(savefile))) {
    error(id, "invalid_argument", "Save already exists for New, or is missing for Load."); goto done;
   }
+  use_native_birth=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_birth"));
   launch_mode = streq(method, "session.new") ? GAME_NEW : GAME_LOAD;
   response(id, cJSON_CreateObject());
  } else if (streq(method, "saves.rename") || streq(method, "saves.delete")) {
@@ -855,6 +866,7 @@ static void pump(void)
    else { deluxe_target_key(key); response(id,cJSON_CreateObject()); }
   }
  } else if (streq(method, "terminal.input")) {
+  if(birth_active) { error(id,"busy","Use character creation controls."); goto done; }
   int key = num(p, "key", -1);
   const char *name = str(p, "key");
   if (streq(name, "enter")) key = KC_ENTER;
@@ -1014,6 +1026,7 @@ int main(int argc, char **argv)
  Term_activate(&terminal); angband_term[0] = &terminal;
  while (launch_mode < 0) pump();
  init_display(); init_angband(); textui_init(); initialized = true;
+ if(use_native_birth) birth_interact_hook=deluxe_birth_session;
  get_check_hook = check_hook; get_string_hook = string_hook; get_quantity_hook = quantity_hook;
  map_visual_hook = deluxe_observe_cell; map_visual_reset_hook = deluxe_reset_view;
  original_get_item = get_item_hook; get_item_hook = item_hook;
