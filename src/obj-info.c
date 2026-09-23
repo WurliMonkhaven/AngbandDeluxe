@@ -954,7 +954,7 @@ static int obj_known_blows(const struct object *obj, int max_num,
 /**
  * Describe blows.
  */
-static bool describe_blows(textblock *tb, const struct object *obj)
+static bool describe_blows(textblock *tb, const struct object *obj, object_info_combat_cb combat, void *user)
 {
 	int i;
 	struct blow_info blow_info[STAT_RANGE * 2]; /* (Very) theoretical max */
@@ -962,6 +962,12 @@ static bool describe_blows(textblock *tb, const struct object *obj)
 
 	num_entries = obj_known_blows(obj, STAT_RANGE * 2, blow_info);
 	if (num_entries == 0) return false;
+ if(combat) {
+  combat(user,"blows","Blows / round",blow_info[0].centiblows,0,0);
+  for(i=1;i<num_entries;++i)
+   combat(user,"upgrade",blow_info[i].centiblows%10 ? "Slightly faster" : "Blows / round",
+    blow_info[i].centiblows,blow_info[i].str_plus,blow_info[i].dex_plus);
+ }
 
 	/* First entry is always current blows (+0, +0) */
 	textblock_append_c(tb, COLOUR_L_GREEN, "%d.%d ",
@@ -1516,7 +1522,7 @@ bool o_obj_known_damage(const struct object *obj, int *normal_damage,
 /**
  * Describe damage.
  */
-static bool describe_damage(textblock *tb, const struct object *obj, bool throw)
+static bool describe_damage(textblock *tb, const struct object *obj, bool throw, object_info_combat_cb combat, void *user)
 {
 	int i;
 	bool nonweap_slay = false;
@@ -1531,6 +1537,16 @@ static bool describe_damage(textblock *tb, const struct object *obj, bool throw)
 		obj_known_damage(obj, &normal_damage, brand_damage, slay_damage,
 						 &nonweap_slay, throw);
 
+ if(combat) {
+  combat(user,throw?"throw_damage":"damage","Normal",normal_damage,0,0);
+  for(i=0;i<z_info->brand_max;++i) if(brand_damage[i]>0) {
+   char label[160]; strnfmt(label,sizeof(label),"Not resistant to %s",brands[i].name);
+   combat(user,throw?"throw_variant":"damage_variant",label,brand_damage[i],0,0);
+  }
+  for(i=0;i<z_info->slay_max;++i) if(slay_damage[i]>0)
+   combat(user,throw?"throw_variant":"damage_variant",slays[i].name,slay_damage[i],0,0);
+  if(nonweap_slay) combat(user,"note","This weapon may benefit from off-weapon brands or slays.",0,0,0);
+ }
 	/* Mention slays and brands from other items */
 	if (nonweap_slay)
 		textblock_append(tb, "This weapon may benefit from one or more off-weapon brands or slays.\n");
@@ -1749,7 +1765,7 @@ static void obj_known_misc_combat(const struct object *obj, bool *thrown_effect,
 /**
  * Describe combat advantages.
  */
-static bool describe_combat(textblock *tb, const struct object *obj)
+static bool describe_combat(textblock *tb, const struct object *obj, object_info_combat_cb combat, void *user)
 {
 	struct object *bow = equipped_item_by_slot_name(player, "shooting");
 	bool weapon = tval_is_melee_weapon(obj);
@@ -1765,6 +1781,7 @@ static bool describe_combat(textblock *tb, const struct object *obj)
 	if (!weapon && !ammo && !rock) {
 		if (thrown_effect) {
 			textblock_append(tb, "It can be thrown at creatures with damaging effect.\n");
+   if(combat) combat(user,"note","Can be thrown at creatures with damaging effect.",0,0,0);
 			return true;
 		} else
 			return false;
@@ -1775,7 +1792,14 @@ static bool describe_combat(textblock *tb, const struct object *obj)
 	if (heavy)
 		textblock_append_c(tb, COLOUR_L_RED, "You are too weak to use this weapon.\n");
 
-	describe_blows(tb, obj);
+ if(combat) {
+  if(heavy) combat(user,"warning","You are too weak to use this weapon.",0,0,0);
+  if(ammo) {
+   combat(user,"range","Range",range,0,0);
+   combat(user,"break","Break chance",break_chance,0,0);
+  }
+ }
+ describe_blows(tb, obj, combat, user);
 
 	if (ammo) {
 		textblock_append(tb, "When fired, hits targets up to ");
@@ -1784,10 +1808,10 @@ static bool describe_combat(textblock *tb, const struct object *obj)
 	}
 
 	if (weapon || ammo) {
-		describe_damage(tb, obj, false);
+		describe_damage(tb, obj, false, combat, user);
 	}
 	if (throwing_weapon || rock) {
-		describe_damage(tb, obj, true);
+		describe_damage(tb, obj, true, combat, user);
 	}
 
 	if (ammo) {
@@ -2324,7 +2348,7 @@ static void info_section(textblock *tb, size_t *start, const char *id,
  *start = end;
 }
 
-static textblock *object_info_out_sections(const struct object *obj, int mode, object_info_section_cb emit, void *user)
+static textblock *object_info_out_sections(const struct object *obj, int mode, object_info_section_cb emit, object_info_combat_cb combat, void *user)
 {
 	bitflag flags[OF_SIZE];
 	struct element_info el_info[ELEM_MAX];
@@ -2389,7 +2413,7 @@ static textblock *object_info_out_sections(const struct object *obj, int mode, o
 		}
 
  info_section(tb,&section_start,"use","Use & activation",emit,user);
-		if (subjective && describe_combat(tb, obj)) {
+		if (subjective && describe_combat(tb, obj, combat, user)) {
 			something = true;
 			textblock_append(tb, "\n");
 		}
@@ -2409,13 +2433,13 @@ static textblock *object_info_out_sections(const struct object *obj, int mode, o
 
 static textblock *object_info_out(const struct object *obj, int mode)
 {
- return object_info_out_sections(obj,mode,NULL,NULL);
+ return object_info_out_sections(obj,mode,NULL,NULL,NULL);
 }
 
 textblock *object_info_sections(const struct object *obj, oinfo_detail_t mode,
- object_info_section_cb emit, void *user)
+ object_info_section_cb emit, object_info_combat_cb combat, void *user)
 {
- return object_info_out_sections(obj,mode | OINFO_SUBJ,emit,user);
+ return object_info_out_sections(obj,mode | OINFO_SUBJ,emit,combat,user);
 }
 
 

@@ -253,6 +253,13 @@ int main(int argc,char **argv) {
    {"store",{{"name","Weapon Smiths"},{"ready",true},{"home",false},
     {"stock",json::array({{{"item_id","stock-1"},{"unit_price",20},{"compare_with",json::array({"gear-1"})}}})},
     {"inventory",json::array({{{"item_id","gear-1"},{"unit_price",30},{"eligible",true}}})}}}};
+  shop.state["items"][0]["description_sections"]=json::array({{{"id","combat"},{"title","Combat"},{"text","Combat info: legacy fallback"}}});
+  shop.state["items"][0]["combat_details"]=json::array({
+   {{"kind","blows"},{"value",270}},{{"kind","damage"},{"value",155}},
+   {{"kind","throw_damage"},{"value",76}},{{"kind","range"},{"value",120}},{{"kind","break"},{"value",35}},
+   {{"kind","upgrade"},{"str",1},{"dex",0},{"value",330}},{{"kind","upgrade"},{"str",0},{"dex",1},{"value",275}},
+   {{"kind","damage_variant"},{"label","Dragons"},{"value",420}},{{"kind","throw_variant"},{"label","Not resistant to fire"},{"value",215}},
+   {{"kind","warning"},{"label","Heavy weapon"}}});
   StorePanel panel; panel.last_name="Weapon Smiths"; panel.stock_selection=panel.inventory_selection=0;
   for(int frame=0;frame<4;++frame) {
    if(frame==1) { shop.state["store"]["ready"]=false; shop.prompt={{"type","confirmation"}}; }

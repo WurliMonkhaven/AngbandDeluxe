@@ -520,3 +520,8 @@ Details and the Character command open a read-only native modal with Overview, C
 ### Structured inspection descriptions
 
 Items retain their legacy description and also expose description_sections with stable id, title, and text fields. Sections are emitted directly by the engine description generators in the same calculation: origin/lore, curses, bonuses/damage, resistances/protection, durability, abilities, use/activation, combat, digging, and notes. Empty sections are omitted. Inventory and store inspection use collapsible headings, initially expanding gameplay effects and combat while collapsing lore, durability and digging. Numeric combat breakdowns within these sections remain engine-authored prose; the client does not parse or recalculate them.
+
+
+### Native item combat cards
+
+Item combat_details are emitted alongside the original description from the same engine calculation. Rows have kind, label, value, str and dex fields: blows/upgrade values use hundredths of a blow; damage/throw_damage and damage_variant/throw_variant use tenths of damage; range is feet and break is percent. Warning and note rows preserve qualifications such as heavy weapons and off-weapon brands. Native inspection replaces combat prose with metric tiles, an STR/DEX upgrade table, and conditional target damage rows; tooltips explain units and alternatives. The original full description remains unchanged for fallback clients.

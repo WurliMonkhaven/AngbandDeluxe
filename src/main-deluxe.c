@@ -233,7 +233,15 @@ static void inspection_section(void *user, const char *id, const char *title,
  }
  text[used]=0; row=cJSON_CreateObject();
  string(row,"id",id); string(row,"title",title); string(row,"text",text);
- cJSON_AddItemToArray((cJSON *)user,row); mem_free(text);
+ cJSON_AddItemToArray(cJSON_GetObjectItem((cJSON *)user,"description_sections"),row); mem_free(text);
+}
+static void inspection_combat(void *user, const char *kind, const char *label,
+ int value, int str_plus, int dex_plus)
+{
+ cJSON *row=cJSON_CreateObject();
+ string(row,"kind",kind); string(row,"label",label); number(row,"value",value);
+ number(row,"str",str_plus); number(row,"dex",dex_plus);
+ cJSON_AddItemToArray(cJSON_GetObjectItem((cJSON *)user,"combat_details"),row);
 }
 static void inspection_description(cJSON *record, const struct object *obj)
 {
@@ -261,7 +269,8 @@ static void inspection_description(cJSON *record, const struct object *obj)
  {
   cJSON *sections=cJSON_CreateArray();
   cJSON_AddItemToObject(record,"description_sections",sections);
-  tb = object_info_sections(obj, OINFO_NONE, inspection_section, sections);
+  cJSON_AddItemToObject(record,"combat_details",cJSON_CreateArray());
+  tb = object_info_sections(obj, OINFO_NONE, inspection_section, inspection_combat, record);
  }
  memcpy(STATE, rng_state, sizeof(rng_state));
  state_i = rng_index; Rand_value = rng_value; Rand_quick = rng_quick;

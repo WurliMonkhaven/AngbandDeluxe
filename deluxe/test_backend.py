@@ -671,6 +671,14 @@ class BackendTests(unittest.TestCase):
         self.assertIn("When quaffed", potion["description"])
         weapon = next(i for i in initial["items"] if i["location"] == "weapon")
         self.assertIn("Combat info", weapon["description"])
+        combat = weapon["combat_details"]
+        self.assertTrue(any(r["kind"] == "damage" for r in combat))
+        blows = next(r for r in combat if r["kind"] == "blows")
+        shown_blows = f'{blows["value"] // 100}.{(blows["value"] // 10) % 10}'
+        self.assertIn(shown_blows + " blow", weapon["description"])
+        for row in combat:
+            if row["kind"] == "upgrade" and row["value"] % 10 == 0:
+                self.assertIn(f'With +{row["str"]} STR and +{row["dex"]} DEX', weapon["description"])
         sections = {s["id"]: s["text"] for s in weapon["description_sections"]}
         self.assertIn("Combat info", sections["combat"])
         self.assertIn("An inheritance from your family", sections["lore"])
