@@ -365,8 +365,11 @@ const char *message_sound_name(int message)
  * 
  * \param type MSG_* constant for the sound type
  */
+void (*sound_event_hook)(int type) = NULL;
+
 void sound(int type)
 {
+	if (sound_event_hook) sound_event_hook(type);
 	/* No sound */
 	if (!OPT(player, use_sound)) return;
 

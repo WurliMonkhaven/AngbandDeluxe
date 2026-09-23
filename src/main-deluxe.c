@@ -164,6 +164,18 @@ static void event(const char *name, cJSON *data)
  string(r, "session_id", "session-1"); string(r, "event", name);
  cJSON_AddItemToObject(r, "data", data); send_json(r);
 }
+/* Sound cues are transient events, never replayed from message history. */
+static void deluxe_sound_event(int type)
+{
+ const char *name=message_sound_name(type);
+ if(name && *name) {
+  cJSON *j=cJSON_CreateObject(); string(j,"name",name); event("sound.play",j);
+ }
+}
+static void deluxe_target_selected(void)
+{
+ cJSON *j=cJSON_CreateObject(); string(j,"name","target_confirmed"); event("sound.play",j);
+}
 static cJSON *command_list(void)
 {
  size_t i; cJSON *a = cJSON_CreateArray();
@@ -651,7 +663,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"session.replay\":1,\"run.summary\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -1108,6 +1120,8 @@ int main(int argc, char **argv)
  book_browse_hook = deluxe_browse_book;
  store_interact_hook = deluxe_store_session;
  cmd_get_hook = get_command;
+ sound_event_hook=deluxe_sound_event;
+ target_selected_hook=deluxe_target_selected;
  event_add_handler(EVENT_ENTER_BIRTH, lifecycle, NULL);
  event_add_handler(EVENT_ENTER_STORE, lifecycle, NULL);
  event_add_handler(EVENT_LEAVE_STORE, lifecycle, NULL);
@@ -1120,6 +1134,7 @@ int main(int argc, char **argv)
  event_add_handler(EVENT_ENTER_DEATH,deluxe_travel_event,NULL);
  play_game((enum game_mode_type)launch_mode);
  phase = "finished"; ready = false; publish(); complete();
+ sound_event_hook=NULL; target_selected_hook=NULL;
  textui_cleanup(); cleanup_angband();
  deluxe_reset_view();
  return 0;

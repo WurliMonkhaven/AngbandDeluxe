@@ -1,0 +1,8 @@
+{
+  "ui": {"interface": true, "files": ["ui_a.wav"]},
+  "target": {"interface": true, "files": ["target_a.wav"]},
+  "potion": {"files": ["potion_a.wav", "potion_b.wav"]},
+  "melee": {"files": ["melee_a.wav", "melee_b.wav"]},
+  "spell": {"files": ["spell_a.wav", "spell_b.wav"]},
+  "crt": {"interface": true, "files": ["crt_a.wav"]}
+}

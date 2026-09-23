@@ -1,0 +1,86 @@
+[
+  {
+    "file": "ui_a.wav",
+    "event": "ui",
+    "treatment": "Dry switch",
+    "seconds": 0.12,
+    "peak_dbfs": -9.9
+  },
+  {
+    "file": "target_a.wav",
+    "event": "target",
+    "treatment": "Soft lock",
+    "seconds": 0.3,
+    "peak_dbfs": -7.54
+  },
+  {
+    "file": "potion_a.wav",
+    "event": "potion",
+    "treatment": "Cork & bubbles",
+    "seconds": 0.98,
+    "peak_dbfs": -5.19
+  },
+  {
+    "file": "melee_a.wav",
+    "event": "melee",
+    "treatment": "Heavy contact",
+    "seconds": 0.6,
+    "peak_dbfs": -3.1
+  },
+  {
+    "file": "spell_a.wav",
+    "event": "spell",
+    "treatment": "Ember pulse",
+    "seconds": 1.03,
+    "peak_dbfs": -3.74
+  },
+  {
+    "file": "crt_a.wav",
+    "event": "crt",
+    "treatment": "Relay snap",
+    "seconds": 0.24,
+    "peak_dbfs": -6.02
+  },
+  {
+    "file": "ui_b.wav",
+    "event": "ui",
+    "treatment": "Glass switch",
+    "seconds": 0.12,
+    "peak_dbfs": -9.9
+  },
+  {
+    "file": "target_b.wav",
+    "event": "target",
+    "treatment": "Tuning lock",
+    "seconds": 0.3,
+    "peak_dbfs": -7.54
+  },
+  {
+    "file": "potion_b.wav",
+    "event": "potion",
+    "treatment": "Alchemical bubbles",
+    "seconds": 0.98,
+    "peak_dbfs": -5.19
+  },
+  {
+    "file": "melee_b.wav",
+    "event": "melee",
+    "treatment": "Metallic contact",
+    "seconds": 0.6,
+    "peak_dbfs": -3.1
+  },
+  {
+    "file": "spell_b.wav",
+    "event": "spell",
+    "treatment": "Arcane discharge",
+    "seconds": 1.03,
+    "peak_dbfs": -3.74
+  },
+  {
+    "file": "crt_b.wav",
+    "event": "crt",
+    "treatment": "Charged snap",
+    "seconds": 0.24,
+    "peak_dbfs": -6.02
+  }
+]

@@ -1,0 +1,86 @@
+[
+  {
+    "file": "ui_a.wav",
+    "event": "ui",
+    "treatment": "Contact",
+    "reel_start": 0.25,
+    "seconds": 0.075
+  },
+  {
+    "file": "ui_b.wav",
+    "event": "ui",
+    "treatment": "Latch",
+    "reel_start": 0.875,
+    "seconds": 0.075
+  },
+  {
+    "file": "target_a.wav",
+    "event": "target",
+    "treatment": "Acquire",
+    "reel_start": 1.8,
+    "seconds": 0.22
+  },
+  {
+    "file": "target_b.wav",
+    "event": "target",
+    "treatment": "Lock",
+    "reel_start": 2.57,
+    "seconds": 0.22
+  },
+  {
+    "file": "potion_a.wav",
+    "event": "potion",
+    "treatment": "Intake",
+    "reel_start": 3.64,
+    "seconds": 0.39
+  },
+  {
+    "file": "potion_b.wav",
+    "event": "potion",
+    "treatment": "Transfer",
+    "reel_start": 4.58,
+    "seconds": 0.39
+  },
+  {
+    "file": "melee_a.wav",
+    "event": "melee",
+    "treatment": "Fault",
+    "reel_start": 5.82,
+    "seconds": 0.23
+  },
+  {
+    "file": "melee_b.wav",
+    "event": "melee",
+    "treatment": "Fracture",
+    "reel_start": 6.6,
+    "seconds": 0.23
+  },
+  {
+    "file": "spell_a.wav",
+    "event": "spell",
+    "treatment": "Intrusion",
+    "reel_start": 7.68,
+    "seconds": 0.4
+  },
+  {
+    "file": "spell_b.wav",
+    "event": "spell",
+    "treatment": "Discharge",
+    "reel_start": 8.63,
+    "seconds": 0.4
+  },
+  {
+    "file": "crt_a.wav",
+    "event": "crt",
+    "treatment": "Cut power",
+    "reel_start": 9.88,
+    "seconds": 0.17
+  },
+  {
+    "file": "crt_b.wav",
+    "event": "crt",
+    "treatment": "Disconnect",
+    "reel_start": 10.6,
+    "seconds": 0.17
+  }
+]

@@ -38,6 +38,21 @@ target_compile_features(angband-deluxe PRIVATE cxx_std_17)
 target_compile_definitions(angband-deluxe PRIVATE DELUXE_DATA_DIR="${CMAKE_SOURCE_DIR}/lib"
     DELUXE_FONT_FILE="${imgui_SOURCE_DIR}/misc/fonts/Cousine-Regular.ttf")
 target_link_libraries(angband-deluxe PRIVATE deluxe_crt)
+# Stage original audio beside the executable; no source-tree path at runtime.
+add_custom_target(deluxe-audio ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:angband-deluxe>/audio"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/audio/pack.json" "$<TARGET_FILE_DIR:angband-deluxe>/audio/pack.json"
+)
+file(GLOB DELUXE_AUDIO_SAMPLES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/audio/audition-soft-circuit/*_a.wav" "${CMAKE_CURRENT_SOURCE_DIR}/audio/audition-soft-circuit/*_b.wav")
+foreach(sample IN LISTS DELUXE_AUDIO_SAMPLES)
+    add_custom_command(TARGET deluxe-audio POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${sample}" "$<TARGET_FILE_DIR:angband-deluxe>/audio/")
+endforeach()
+add_dependencies(angband-deluxe deluxe-audio)
+add_executable(deluxe-audio-tests EXCLUDE_FROM_ALL test_audio.cpp)
+target_compile_features(deluxe-audio-tests PRIVATE cxx_std_17)
+target_link_libraries(deluxe-audio-tests PRIVATE SDL3::SDL3 nlohmann_json::nlohmann_json)
+add_dependencies(deluxe-audio-tests deluxe-audio)
 if(WIN32)
     set_target_properties(angband-deluxe PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()

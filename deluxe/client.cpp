@@ -63,6 +63,7 @@ static bool matches(std::string text, std::string term) {
  return text.find(term) != std::string::npos;
 }
 #include "engine_options.h"
+#include "audio_player.h"
 
 static std::string utf8(unsigned c) {
  std::string s;
@@ -86,6 +87,7 @@ static ImU32 color(int index) {
  return IM_COL32(c[0],c[1],c[2],255);
 }
 struct Connection {
+ std::vector<std::string> sound_cues;
  RenderGrid game_grid;
  std::unique_ptr<BackendReader> reader;
  std::unique_ptr<SDL_Process,decltype(&SDL_DestroyProcess)> process{nullptr,SDL_DestroyProcess};
@@ -188,6 +190,11 @@ struct Connection {
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
+   if(name=="sound.play") {
+    auto cue=AudioPlayer::engine_cue(j.at("data").value("name",""));
+    if(!cue.empty() && sound_cues.size()<16) sound_cues.push_back(cue);
+    return;
+   }
    if(name=="state.changed" && j.at("data").contains("run")) {
     if(run_report.is_null()) {
      run_report=j["data"]["run"]; prompt=json::object(); pending_prompt=json::object();
@@ -433,6 +440,8 @@ struct UI {
  DevStatusDialog dev_status_dialog;
  int crt=0, draft_crt=0;
  int crt_strength=1, draft_crt_strength=1;
+ AudioSettings audio_settings{}, draft_audio_settings{};
+ AudioPlayer audio;
  CrtSettings crt_settings{}, draft_crt_settings{};
  float draft_scale=1.f;
  std::string settings_error;
@@ -470,6 +479,7 @@ struct UI {
    quick_targeting=j.value("quick_targeting",false);
    quickbar_enabled=j.value("quickbar_enabled",false);
    quickbar.load(j.value("quickbar_profiles",json::object()));
+   audio_settings.load(j.value("audio",json::object()));
    low_animation=j.value("low_health_animation",true); death_animation=j.value("death_animation",true);
    crt=std::clamp(j.value("crt",0),0,2);
    crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
@@ -479,10 +489,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -490,6 +500,7 @@ struct UI {
   if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look,quick_targeting,quickbar_enabled)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
+  draft_audio_settings=audio_settings;
   engine_options.reset(); settings_saving=false;
   c.options_result=nullptr; c.options_saved=nullptr; c.options_request.clear();
   if(c.capabilities.value("options",0)>0 && c.state.contains("player")) c.options_request=c.send("options.get");
@@ -506,10 +517,11 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
+  audio_settings=draft_audio_settings; audio.configure(audio_settings,window_active);
   low_animation=draft_low_animation; death_animation=draft_death_animation;
   proceed_with_click=draft_proceed_with_click;
   click_exits_look=draft_click_exits_look;
@@ -566,6 +578,21 @@ struct UI {
     }
     if(ImGui::BeginTabItem("Angband")) {
      engine_options.draw();
+     ImGui::EndTabItem();
+    }
+    if(ImGui::BeginTabItem("Audio")) {
+     ImGui::Checkbox("Sound enabled",&draft_audio_settings.enabled);
+     ImGui::BeginDisabled(!draft_audio_settings.enabled);
+     auto volume=[](const char *label,float &value) {
+      float percent=value*100;
+      if(ImGui::SliderFloat(label,&percent,0,100,"%.0f%%",ImGuiSliderFlags_AlwaysClamp)) value=percent/100;
+     };
+     volume("Master volume",draft_audio_settings.master);
+     volume("Gameplay",draft_audio_settings.gameplay);
+     volume("Interface",draft_audio_settings.interface_volume);
+     ImGui::EndDisabled();
+     ImGui::TextWrapped("Audio mutes while this window is unfocused. Changes apply with Save and Close.");
+     if(!audio.error.empty()) ImGui::TextWrapped("Audio unavailable: %s",audio.error.c_str());
      ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("Animations")) {
@@ -1521,6 +1548,8 @@ int main(int argc,char **argv) {
   else if(std::string(argv[i])=="--user-dir") user=argv[i+1];
  }
  fs::create_directories(user); ui.settings_path=(fs::path(user)/"settings.json").string(); ui.load_settings();
+ if(!ui.audio.open(fs::path(base?base:".")/"audio")) connection.notice("Audio unavailable: "+ui.audio.error);
+ ui.audio.configure(ui.audio_settings,true);
  if(ui.fullscreen && !SDL_SetWindowFullscreen(window,true)) { ui.fullscreen=false; connection.notice(std::string("Fullscreen unavailable: ")+SDL_GetError()); }
  std::string ini=(fs::path(user)/"layout.ini").string(); io.IniFilename=ini.c_str();
  connection.start(backend,data,user);
@@ -1530,10 +1559,14 @@ int main(int argc,char **argv) {
   const auto phase=connection.state.value("phase","");
   const auto readiness=connection.state.value("readiness","");
   connection.poll();
+  ui.audio.configure(ui.audio_settings,ui.window_active);
+  for(const auto &cue:connection.sound_cues) ui.audio.play(cue);
+  connection.sound_cues.clear();
   if(!connection.run_report.is_null() && ui.shutdown.started<0) {
    ui.run_history.directory=fs::path(ui.settings_path).parent_path()/"run-history";
    ui.run_history.begin(connection.run_report);
    ui.shutdown.start(double(SDL_GetTicksNS())/1e9,ui.crt!=0 && ui.death_animation && crt_renderer.ready());
+   if(ui.shutdown.enabled) ui.audio.play("crt");
    ui.keys.clear(); ui.grid_focus=false;
   }
   if(phase!=connection.state.value("phase","") || readiness!=connection.state.value("readiness","") || !connection.prompt.empty())
@@ -1546,6 +1579,7 @@ int main(int argc,char **argv) {
   poll_backend();
   if(ui.quit_after_run && !connection.connected) { connection.closed=true; break; }
   if(connection.restart_ready && connection.run_report.is_null()) {
+   ui.audio.clear();
    crt_renderer.reset_history();
    health_glitch=HealthGlitch{};
    // A saved return-to-menu or normal post-game completion has exited cleanly.
@@ -1614,6 +1648,8 @@ int main(int argc,char **argv) {
    }
   }
   ImGui::NewFrame(); ui.draw(window);
+  ui.audio.configure(ui.audio_settings,ui.window_active);
+  if(!ui.grid_focus && !ImGui::GetIO().WantTextInput && ((ImGui::GetIO().MouseClicked[0] && GImGui->ActiveId && GImGui->ActiveIdIsJustActivated) || GImGui->NavActivateId)) ui.audio.play("ui");
   ImGui::Render();
   auto *render_data=ImGui::GetDrawData();
   connection.flush_input(); // Dispatch this frame's input before waiting for presentation.
@@ -1639,6 +1675,7 @@ int main(int argc,char **argv) {
   SDL_SubmitGPUCommandBuffer(cmd);
   if(SDL_GetWindowFlags(window)&SDL_WINDOW_MINIMIZED) SDL_Delay(20);
  }
+ ui.audio.close();
  SDL_WaitForGPUIdle(gpu); crt_renderer.shutdown(); ImGui_ImplSDLGPU3_Shutdown(); ImGui_ImplSDL3_Shutdown(); ImGui::DestroyContext();
  connection.close_process();
  SDL_ReleaseWindowFromGPUDevice(gpu,window); SDL_DestroyGPUDevice(gpu); SDL_DestroyWindow(window); SDL_Quit(); return 0;

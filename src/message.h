@@ -56,6 +56,8 @@ int message_lookup_by_name(const char *name);
 int message_lookup_by_sound_name(const char *name);
 const char *message_sound_name(int message);
 void sound(int type);
+/* Optional semantic observer, independent of the legacy audio preference. */
+extern void (*sound_event_hook)(int type);
 void bell(void);
 void msg(const char *fmt, ...);
 void msgt(unsigned int type, const char *fmt, ...);

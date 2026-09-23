@@ -31,6 +31,13 @@ int main(int argc,char **argv) {
   check(!read_test_frames("{bad}\n").error.empty(),"Malformed frame must be reported");
   check(!read_test_frames("{\"seq\":1}").error.empty(),"Incomplete final frame must be reported");
   check(!read_test_frames(std::string(1048577,'x')).error.empty(),"Oversized frame must be rejected");
+  Connection audio_events;
+  for(int i=0;i<100;++i) audio_events.receive({{"kind","event"},{"event","sound.play"},{"data",{{"name","quaff"}}}});
+  check(audio_events.sound_cues.size()==16,"Sound burst queue must be bounded");
+  check(!audio_events.busy && audio_events.outgoing.empty(),"Sound cues must not change input readiness or issue requests");
+  AudioSettings audio_roundtrip; audio_roundtrip.enabled=false; audio_roundtrip.master=.31f;
+  AudioSettings audio_loaded; audio_loaded.load(audio_roundtrip.serialize());
+  check(!audio_loaded.enabled && audio_loaded.master==.31f,"Audio settings must roundtrip");
   DeathTransition shutdown_test;
   shutdown_test.start(10,true);
   check(shutdown_test.progress(10)==0 && !shutdown_test.finished(10.05),"Shutdown must run after acknowledgement");
@@ -221,7 +228,9 @@ int main(int argc,char **argv) {
   ui.draft_crt_strength=3; ui.draft_crt_settings.parts[Hum].enabled=true;
   check(!ui.crt_settings.parts[Hum].enabled,"Hum bar draft applied immediately");
   check(ui.scale==1.25f && ui.crt==0 && !ui.fullscreen,"Draft changed live settings");
+  ui.draft_audio_settings.master=.1f; ui.draft_audio_settings.enabled=false;
   ui.begin_settings(); // Reopening after Cancel discards the draft.
+  check(ui.draft_audio_settings.enabled && ui.draft_audio_settings.master==.8f,"Cancel must discard audio edits");
   check(!ui.draft_proceed_with_click,"Cancelled gameplay draft retained");
   check(!ui.draft_click_exits_look,"Cancelled look click draft retained");
   check(!ui.draft_quick_targeting,"Cancel retained quick targeting draft");
@@ -238,8 +247,10 @@ int main(int argc,char **argv) {
   ui.draft_quick_targeting=true;
   ui.draft_quickbar_enabled=true;
   ui.quickbar.profile="test-character"; ui.quickbar.slots()[0]=Quickbar::command_binding({{"id","core.hold"},{"label","Hold"}});
+  ui.draft_audio_settings.master=.43f; ui.draft_audio_settings.gameplay=.25f;
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
+  check(loaded.audio_settings.master==.43f && loaded.audio_settings.gameplay==.25f,"Audio volumes must persist after Save and Close");
   check(loaded.proceed_with_click,"Gameplay option did not persist");
   check(loaded.click_exits_look,"Click exits look did not persist");
   check(loaded.quick_targeting,"Quick targeting did not persist");

@@ -34,6 +34,7 @@
  * Is the target set?
  */
 static bool target_set;
+void (*target_selected_hook)(void) = NULL;
 
 /**
  * Is the target fixed (for the duration of a spell)?
@@ -156,6 +157,7 @@ bool target_set_monster(struct monster *mon)
 		target_set = true;
 		target.midx = mon->midx;
 		target.grid = mon->grid;
+		if (target_selected_hook) target_selected_hook();
 		return true;
 	} else if (target_fixed) {
 		/* If a monster has died during a spell, this maintains its grid as
@@ -187,6 +189,7 @@ void target_set_location(int y, int x)
 		target_set = true;
 		target.midx = 0;
 		target.grid = grid;
+		if (target_selected_hook) target_selected_hook();
 		return;
 	}
 

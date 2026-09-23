@@ -33,7 +33,6 @@ struct EngineOptions {
    {"show_damage","Messages","Include damage dealt by your attacks in the message log."},
    {"auto_more","Messages","Continue past message pauses automatically. This also removes Deluxe's waiting-for-input ribbon for those pauses."},
    {"notify_recharge","Messages","Report when rods and activatable equipment finish recharging."},
-   {"use_sound","Messages","Enable the engine's sound preference. Deluxe does not currently play engine sound events."},
    {"show_target","Display","Ask the engine to highlight the current target with its cursor."},
    {"highlight_player","Display","Ask the engine to highlight the player between turns."},
    {"solid_walls","Display","Draw solid walls instead of # and % where the display supports them."},
@@ -59,6 +58,7 @@ struct EngineOptions {
    bool heading=false;
    for(auto &row:entries) {
     const auto id=row.at("id").get<std::string>(),label=row.at("label").get<std::string>();
+    if(id=="use_sound") continue; // Deluxe sound is controlled in the Audio tab.
     const auto note=help(id);
     if(std::string(note.group)!=group || !matches(label+" "+id+" "+note.text+" "+group,search)) continue;
     if(!heading) { ImGui::Spacing(); ImGui::SeparatorText(group); heading=true; }

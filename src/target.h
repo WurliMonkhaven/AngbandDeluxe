@@ -45,6 +45,8 @@ void look_mon_desc(char *buf, size_t max, int m_idx);
 bool target_able(struct monster *m);
 bool target_okay(void);
 bool target_set_monster(struct monster *mon);
+/* Optional observer of successful explicit selection (not tracking updates). */
+extern void (*target_selected_hook)(void);
 void target_set_location(int y, int x);
 bool target_is_set(void);
 void target_fix(void);

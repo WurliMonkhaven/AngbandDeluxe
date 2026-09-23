@@ -746,3 +746,17 @@ Capability `run.summary: 1` adds an immutable `run` record to death/finished sta
 ### Character selection presentation
 
 The launcher uses a searchable character-card roster and a selected-character profile, adapting from side-by-side to stacked at narrow widths. Saves are ordered by modification time. Identity, level, depth and last-saved time come from the engine save description and file metadata; browsing never loads or modifies a character. Unknown save descriptions remain readable without invented statistics. Continue, Rename and Delete operate on the selected save; completed saves offer Play Again. New character and Graveyard remain in the header. Each save has a deterministic filename-seeded accent hue, retaining the saturation and brightness of the original muted green; renaming the save changes its accent.
+
+
+### Original sound pack and event-driven playback
+
+Deluxe ships original procedurally synthesized cues for interface activation, confirmed targeting, potion use, successful melee impacts, successful spell casts and the CRT shutdown. Gameplay variants rotate; unknown sound events remain silent. The original audition page remains available separately. No legacy Angband sound assets are used.
+
+The audio.events capability publishes transient sound.play events with a semantic name. An optional sound observer reports engine sound calls independently of the legacy use_sound preference; an optional target observer reports successful explicit target selection, not tracking movement or cancellation. Neither observer changes game rules, random state or actions. State queries, message history and saved games do not replay audio events. Other frontends retain existing sound behaviour.
+
+Settings / Audio provides an enabled switch plus master, gameplay and interface volumes, persisted only by Save and Close. Cancel discards drafts. Deluxe hides the redundant legacy sound checkbox; the underlying engine preference is preserved. Audio mutes and clears queued sounds on focus loss and session restart. The CRT shutdown cue interrupts lingering effects. Missing devices or assets leave the game playable and report an audio availability error.
+
+48 kHz mono PCM samples and pack.json are staged beside the executable in audio/. Samples are preloaded. Four reusable SDL audio streams provide overlap with headroom, a 100 ms per-cue cooldown and bounded event intake; excess sounds are dropped rather than delayed. No synthesis, disk loading, sleeps or audio callbacks run on the gameplay path. The CRT cue fires only when the shutdown animation actually starts.
+
+
+The active audio palette is Soft Circuit (sound studies 04): understated contact clicks and muted grainy buzzes, with softer attacks and reduced bass and peak levels. UI, target and shutdown use treatment A; potion, melee and spell cues rotate A/B. Build staging replaces the previous samples with these approved files while preserving event mappings and saved volume preferences.

@@ -1,0 +1,86 @@
+[
+  {
+    "file": "ui_a.wav",
+    "event": "ui",
+    "treatment": "Contact",
+    "reel_start": 0.25,
+    "seconds": 0.06
+  },
+  {
+    "file": "ui_b.wav",
+    "event": "ui",
+    "treatment": "Felt contact",
+    "reel_start": 0.86,
+    "seconds": 0.06
+  },
+  {
+    "file": "target_a.wav",
+    "event": "target",
+    "treatment": "Latch",
+    "reel_start": 1.77,
+    "seconds": 0.17
+  },
+  {
+    "file": "target_b.wav",
+    "event": "target",
+    "treatment": "Soft latch",
+    "reel_start": 2.49,
+    "seconds": 0.17
+  },
+  {
+    "file": "potion_a.wav",
+    "event": "potion",
+    "treatment": "Intake",
+    "reel_start": 3.51,
+    "seconds": 0.25
+  },
+  {
+    "file": "potion_b.wav",
+    "event": "potion",
+    "treatment": "Transfer",
+    "reel_start": 4.31,
+    "seconds": 0.25
+  },
+  {
+    "file": "melee_a.wav",
+    "event": "melee",
+    "treatment": "Dry contact",
+    "reel_start": 5.41,
+    "seconds": 0.16
+  },
+  {
+    "file": "melee_b.wav",
+    "event": "melee",
+    "treatment": "Damped contact",
+    "reel_start": 6.12,
+    "seconds": 0.16
+  },
+  {
+    "file": "spell_a.wav",
+    "event": "spell",
+    "treatment": "Short activity",
+    "reel_start": 7.13,
+    "seconds": 0.27
+  },
+  {
+    "file": "spell_b.wav",
+    "event": "spell",
+    "treatment": "Muted activity",
+    "reel_start": 7.95,
+    "seconds": 0.27
+  },
+  {
+    "file": "crt_a.wav",
+    "event": "crt",
+    "treatment": "Relay release",
+    "reel_start": 9.07,
+    "seconds": 0.13
+  },
+  {
+    "file": "crt_b.wav",
+    "event": "crt",
+    "treatment": "Power release",
+    "reel_start": 9.75,
+    "seconds": 0.13
+  }
+]

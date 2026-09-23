@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deluxe / CRT shutdown</title><style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{max-width:900px;margin:40px auto;
+padding:0 24px;background:#0b1011;color:#c8d1ca;font:15px/1.6 monospace}
+header{border-bottom:1px solid #34443e;padding-bottom:24px}h1{font-size:36px;margin:8px 0}
+.eyebrow,strong{color:#80a58f}p,footer{color:#91a29a}section{margin:18px 0;padding:20px;
+border:1px solid #293a33;background:#121b18}h2{font-size:17px;margin:0 0 14px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:24px}strong{display:block;margin-bottom:9px}
+audio{width:100%;height:38px}footer{margin-top:30px;font-size:12px}
+@media(max-width:620px){.pair{grid-template-columns:1fr}}
+</style><header><div class="eyebrow">ANGBAND DELUXE / SOUND STUDIES 04</div>
+<h1>CRT shutdown</h1><p>Small contacts and brief, grainy buzzes. Softer attacks, less bass weight, lower playback levels. No melodic notes or pitched sweeps.</p><p>A and B are close variations in contact texture and buzz rate, rather than different musical treatments.</p>
+<strong>Complete reel · A then B for each category below</strong>
+<audio controls preload="metadata" src="audition_reel.wav"></audio></header><section><h2>Interface click</h2><div class="pair"><div><strong>A · Contact</strong><audio controls preload="none" src="ui_a.wav"></audio></div><div><strong>B · Felt contact</strong><audio controls preload="none" src="ui_b.wav"></audio></div></div></section>
+<section><h2>Target confirmed</h2><div class="pair"><div><strong>A · Latch</strong><audio controls preload="none" src="target_a.wav"></audio></div><div><strong>B · Soft latch</strong><audio controls preload="none" src="target_b.wav"></audio></div></div></section>
+<section><h2>Potion use</h2><div class="pair"><div><strong>A · Intake</strong><audio controls preload="none" src="potion_a.wav"></audio></div><div><strong>B · Transfer</strong><audio controls preload="none" src="potion_b.wav"></audio></div></div></section>
+<section><h2>Melee impact</h2><div class="pair"><div><strong>A · Dry contact</strong><audio controls preload="none" src="melee_a.wav"></audio></div><div><strong>B · Damped contact</strong><audio controls preload="none" src="melee_b.wav"></audio></div></div></section>
+<section><h2>Spell cast</h2><div class="pair"><div><strong>A · Short activity</strong><audio controls preload="none" src="spell_a.wav"></audio></div><div><strong>B · Muted activity</strong><audio controls preload="none" src="spell_b.wav"></audio></div></div></section>
+<section><h2>CRT shutdown</h2><div class="pair"><div><strong>A · Relay release</strong><audio controls preload="none" src="crt_a.wav"></audio></div><div><strong>B · Power release</strong><audio controls preload="none" src="crt_b.wav"></audio></div></div></section><footer>Original synthesis only. 48 kHz mono WAV. Audition only;
+the in-game sound pack is unchanged.</footer><script>
+document.addEventListener('play',e=>{if(e.target.tagName==='AUDIO')
+document.querySelectorAll('audio').forEach(a=>{if(a!==e.target)a.pause()})},true);
+</script></html>

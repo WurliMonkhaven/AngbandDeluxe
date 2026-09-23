@@ -23,6 +23,7 @@ class Engine:
         )
         self.incoming = queue.Queue()
         self.errors = []
+        self.sound_events = []
         self.count = 0
         self.state = {}
         self.prompt = None
@@ -57,6 +58,8 @@ class Engine:
         if j.get("kind") == "event":
             if j["event"] == "state.changed":
                 self.state = j["data"]
+            elif j["event"] == "sound.play":
+                self.sound_events.append(j["data"]["name"])
             elif j["event"] == "knowledge.changed":
                 self.knowledge_events.append(j["data"])
             elif j["event"] == "travel.changed":
@@ -248,6 +251,32 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(next(s for s in e.state["player"]["statuses"] if s["id"] == "FAST")["name"], "Haste")
         apply("FAST", 0)
         self.assertEqual(e.state["turn"], before["turn"], "Dev status changes must not spend a gameplay turn")
+
+    def test_audio_events(self):
+        e = self.engine
+        e.hello(); e.birth()
+        # The legacy sound option defaults off; semantic cues still reach Deluxe.
+        prefs = e.call("options.get")["result"]
+        self.assertFalse(next(o["value"] for o in prefs["entries"] if o["id"] == "use_sound"))
+        e.sound_events.clear()
+        potion = next(i for i in e.state["items"] if "core.quaff" in i["actions"])
+        old = e.state["revision"]
+        self.assertIn("result", e.call("command.execute", {"revision":old,"command":"core.quaff","item":potion["id"]}))
+        e.next_state(old)
+        while e.state["readiness"] != "ready": e.key("enter")
+        self.assertEqual(e.sound_events.count("quaff"),1)
+        before = list(e.sound_events)
+        for _ in range(3): e.call("state.get")
+        self.assertEqual(e.sound_events,before,"Queries must not replay sound history")
+        e.sound_events.clear()
+        self.targeting("targeting.set",x=e.state["player"]["x"]+1,y=e.state["player"]["y"])
+        while e.state["readiness"] != "ready": e.key("enter")
+        self.assertEqual(e.sound_events.count("target_confirmed"),1)
+        e.sound_events.clear()
+        self.targeting("targeting.begin",mode="target")
+        e.key("escape")
+        while e.state["readiness"] != "ready": e.key("enter")
+        self.assertNotIn("target_confirmed",e.sound_events,"Cancelling a target must stay silent")
 
     def test_native_status_effects(self):
         e = self.engine

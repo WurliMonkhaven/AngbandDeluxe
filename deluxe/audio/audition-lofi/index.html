@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deluxe / Quiet computing</title><style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{max-width:920px;margin:40px auto;
+padding:0 24px;background:#141815;color:#e2e5db;font:16px/1.6 system-ui,sans-serif}
+header{padding-bottom:24px;border-bottom:1px solid #3b493d}h1{font-size:40px;margin:4px 0}
+.eyebrow,strong{color:#9db89b}.eyebrow{font:12px monospace;letter-spacing:.15em}
+p{color:#aeb7aa;max-width:730px}section{margin:18px 0;padding:20px;background:#1d251e;
+border:1px solid #354436;border-radius:8px}h2{font-size:19px;margin:0 0 14px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:24px}strong{display:block;margin:0 0 10px;
+font-size:14px}audio{width:100%;height:38px}footer{font-size:13px;color:#aeb7aa;margin:30px 0}
+a{color:#b2cbaa}@media(max-width:620px){.pair{grid-template-columns:1fr}h1{font-size:30px}}
+</style><header><div class="eyebrow">ANGBAND DELUXE / SOUND STUDIES 02</div>
+<h1>Quiet computing</h1><p>Understated, warm and a little imperfect. Simple gated tones,
+small-speaker colour and restrained early-DAC texture. No continuous tape hiss,
+long reverb or arcade fanfares.</p><p>A: soft terminal. B: modest home computer.
+These are new auditions; the in-game sound pack is unchanged.</p>
+<strong>Complete reel · A then B within each category below</strong>
+<audio controls preload="metadata" src="audition_reel.wav"></audio></header>
+<section><h2>Interface click</h2><div class="pair"><div><strong>A · Soft key</strong><audio controls preload="none" src="ui_a.wav"></audio></div><div><strong>B · Micro switch</strong><audio controls preload="none" src="ui_b.wav"></audio></div></div></section>
+<section><h2>Target confirmed</h2><div class="pair"><div><strong>A · Terminal ready</strong><audio controls preload="none" src="target_a.wav"></audio></div><div><strong>B · Address locked</strong><audio controls preload="none" src="target_b.wav"></audio></div></div></section>
+<section><h2>Potion use</h2><div class="pair"><div><strong>A · Warm refill</strong><audio controls preload="none" src="potion_a.wav"></audio></div><div><strong>B · Little replenishment</strong><audio controls preload="none" src="potion_b.wav"></audio></div></div></section>
+<section><h2>Melee impact</h2><div class="pair"><div><strong>A · Damped knock</strong><audio controls preload="none" src="melee_a.wav"></audio></div><div><strong>B · Low register hit</strong><audio controls preload="none" src="melee_b.wav"></audio></div></div></section>
+<section><h2>Spell cast</h2><div class="pair"><div><strong>A · Quiet computation</strong><audio controls preload="none" src="spell_a.wav"></audio></div><div><strong>B · Three-channel charm</strong><audio controls preload="none" src="spell_b.wav"></audio></div></div></section>
+<section><h2>CRT shutdown</h2><div class="pair"><div><strong>A · Relay &amp; decay</strong><audio controls preload="none" src="crt_a.wav"></audio></div><div><strong>B · Monitor off</strong><audio controls preload="none" src="crt_b.wav"></audio></div></div></section><footer>Original synthesis only · 48 kHz mono WAV ·
+<a href="../audition/index.html">Compare the first sound studies</a></footer>
+<script>document.addEventListener('play',e=>{if(e.target.tagName==='AUDIO')
+document.querySelectorAll('audio').forEach(a=>{if(a!==e.target)a.pause()})},true)</script></html>
