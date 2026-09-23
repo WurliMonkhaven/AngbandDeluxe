@@ -722,8 +722,8 @@ struct UI {
    const char *label="- more -";
    const ImVec2 text_size=ImGui::CalcTextSize(label);
    const float padding=6.f*display_scale, inset=8.f*display_scale;
-   const ImVec2 end(start.x+viewport.x-inset,start.y+viewport.y-inset);
-   const ImVec2 at(end.x-text_size.x-2*padding,end.y-text_size.y-2*padding);
+   const ImVec2 at(start.x+viewport.x-inset-text_size.x-2*padding,start.y+inset);
+   const ImVec2 end(start.x+viewport.x-inset,at.y+text_size.y+2*padding);
    draw->AddRectFilled(at,end,IM_COL32(0,0,0,255));
    draw->AddText(ImVec2(at.x+padding,at.y+padding),IM_COL32(255,255,255,255),label);
   }

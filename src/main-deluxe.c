@@ -71,6 +71,7 @@ static struct loc look_click_grid;
 static int look_click_mods;
 static char action[80];
 static cJSON *snapshot, *reply_value, *active_prompt;
+static bool native_prompt;
 static cJSON *next_choices;
 static struct object **item_choice_objects;
 static int item_choice_count;
@@ -474,6 +475,7 @@ static void pump(void);
 static cJSON *prompt(const char *type, const char *text, int maximum, const char *initial)
 {
  cJSON *p = cJSON_CreateObject(), *v;
+ native_prompt = true;
  ready = false; publish();
  string(p, "prompt_id", context_text); string(p, "type", type); string(p, "text", text);
  number(p, "maximum", maximum); string(p, "initial", initial);
@@ -496,6 +498,7 @@ static cJSON *prompt(const char *type, const char *text, int maximum, const char
  active_prompt = p; event("prompt.requested", cJSON_Duplicate(p, true));
  while (!reply_value && connected) pump();
  v = reply_value; reply_value = NULL; active_prompt = NULL; cJSON_Delete(p);
+ native_prompt = false;
  return v;
 }
 static bool check_hook(const char *text)

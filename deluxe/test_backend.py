@@ -980,6 +980,8 @@ class BackendTests(unittest.TestCase):
             if e.prompt:
                 self.assertEqual(e.prompt['type'],'confirmation')
                 self.assertIn('Attempt it anyway',e.prompt['text'])
+                self.assertTrue(e.state['native_prompt'])
+                self.assert_semantic_view(e.state)
                 mana=e.state['player']['sp']; turn=e.state['turn']
                 self.store_reply(False)
                 self.assertEqual(e.state['turn'],turn); self.assertEqual(e.state['player']['sp'],mana)

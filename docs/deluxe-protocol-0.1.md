@@ -322,3 +322,7 @@ the original use-target input. Look mode ignores confirmation and only relocates
 movement-direction prompts retain ordinary mouse direction behaviour. Context,
 coordinate and visibility-of-viewport input checks still apply. Missing/false
 `confirm` preserves the previous select-then-confirm interaction.
+
+`native_prompt: true` retains semantic dungeon presentation behind structured
+native dialogs during normal play, including low-mana confirmations. It does
+not override birth, stores, saved terminal screens, or other fallback contexts.

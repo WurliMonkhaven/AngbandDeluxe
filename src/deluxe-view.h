@@ -46,7 +46,7 @@ static void deluxe_capture_view(cJSON *state_record)
  cJSON *view, *rows;
  /* Native targeting/aiming share the dungeon; nested recall screens still own
   * the terminal. Presentation mode never depends on parsing terminal text. */
- if ((!ready && !textui_message_pending && !target_ui_current && !textui_aiming && !textui_direction && !item_choice_objects && !spell_selection) || active_prompt || screen_save_depth || !streq(phase,"playing") || !deluxe_cells) return;
+ if ((!ready && !native_prompt && !textui_message_pending && !target_ui_current && !textui_aiming && !textui_direction && !item_choice_objects && !spell_selection) || (active_prompt && !native_prompt) || screen_save_depth || !streq(phase,"playing") || !deluxe_cells) return;
  width = MIN(SCREEN_WID, cave->width - terminal.offset_x);
  height = MIN(SCREEN_HGT, cave->height - terminal.offset_y);
  if (width < 1 || height < 1 || terminal.offset_x < 0 || terminal.offset_y < 0) return;
@@ -55,6 +55,7 @@ static void deluxe_capture_view(cJSON *state_record)
  view=cJSON_CreateObject(); rows=cJSON_CreateArray();
  json_bool(state_record,"message_pending",textui_message_pending);
  json_bool(state_record,"spell_selection",spell_selection);
+ json_bool(state_record,"native_prompt",native_prompt);
  counter(view,"level_id",deluxe_level); number(view,"x",terminal.offset_x); number(view,"y",terminal.offset_y);
  number(view,"width",width); number(view,"height",height);
  for (y=0;y<height;++y) {

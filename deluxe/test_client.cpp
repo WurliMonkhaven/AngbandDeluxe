@@ -51,6 +51,11 @@ int main(int argc,char **argv) {
   view_state["phase"]="store"; check(!dungeon_view(view_state),"Store must use terminal fallback");
   view_state["phase"]="playing"; view_state["readiness"]="awaiting_prompt";
   check(!dungeon_view(view_state),"Target/prompt must use terminal fallback");
+  view_state["native_prompt"]=true;
+  check(dungeon_view(view_state),"Native confirmations must retain the dungeon view");
+  view_state["phase"]="birth";
+  check(!dungeon_view(view_state),"Birth must retain terminal presentation behind native prompts");
+  view_state["phase"]="playing"; view_state.erase("native_prompt");
   view_state["targeting"]={{"mode","look"}};
   check(dungeon_view(view_state),"Native targeting keeps the dungeon view");
   view_state.erase("targeting"); view_state["aiming"]=true;
