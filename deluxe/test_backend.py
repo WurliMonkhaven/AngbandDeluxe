@@ -174,6 +174,45 @@ class BackendTests(unittest.TestCase):
         cell = view["cells"][player["y"]-view["y"]][player["x"]-view["x"]]
         self.assertTrue(cell[12])
 
+    def test_native_options(self):
+        e = self.engine
+        e.hello()
+        self.assertIn("error", e.call("options.get"))
+        e.birth()
+        before = e.call("state.get")["result"]
+        options = e.call("options.get")["result"]
+        entries = {o["id"]: o for o in options["entries"]}
+        self.assertIn("mouse_movement", entries)
+        self.assertNotIn("birth_no_selling", entries)
+        self.assertNotIn("cheat_live", entries)
+        changed = not entries["show_damage"]["value"]
+        for values in ({"show_damage": changed, "cheat_live": True},
+                       {"show_damage": changed, "hitpoint_warn": 10},
+                       {"delay_factor": -1}, {"delay_factor": 256},
+                       {"lazymove_delay": 1.5}, {"show_damage": 1},
+                       {"unknown": True}, {"hitpoint_warn": "3"}):
+            result = e.call("options.set", {"context": options["context"], "values": values})
+            self.assertEqual(result["error"]["code"], "invalid_argument")
+            self.assertEqual(e.call("options.get")["result"], options)
+        self.assertEqual(e.call("options.set", {"context": "stale", "values": {"show_damage": changed}})["error"]["code"], "stale_revision")
+        values = {"show_damage": changed, "mouse_movement": False, "hitpoint_warn": 7, "delay_factor": 0, "lazymove_delay": 0}
+        self.assertIn("result", e.call("options.set", {"context": options["context"], "values": values}))
+        e.next_state(before["revision"])
+        self.assertEqual(e.state["turn"], before["turn"], "Options must not spend a turn")
+        self.assertEqual(e.state["readiness"], "ready")
+        def verify():
+            current = e.call("options.get")["result"]
+            actual = {o["id"]: o["value"] for o in current["entries"]}
+            actual.update({k: current[k] for k in ("hitpoint_warn", "delay_factor", "lazymove_delay")})
+            for key, value in values.items(): self.assertEqual(actual[key], value)
+        verify()
+        self.assertIn("result", e.call("session.close"))
+        e.process.wait(timeout=10); e.stop()
+        self.engine = e = Engine(self.temp.name)
+        e.hello(); e.call("session.load", {"save": "ProtocolTest"}); e.next_state(None)
+        while e.state["readiness"] != "ready": e.key("enter")
+        verify()
+
     def test_debug_status_effects(self):
         e = self.engine
         e.hello()

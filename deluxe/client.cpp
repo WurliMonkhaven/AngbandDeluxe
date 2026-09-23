@@ -59,6 +59,8 @@ static bool matches(std::string text, std::string term) {
  std::transform(term.begin(), term.end(), term.begin(), lower);
  return text.find(term) != std::string::npos;
 }
+#include "engine_options.h"
+
 static std::string utf8(unsigned c) {
  std::string s;
  if (c < 128) s += char(c ? c : ' ');
@@ -91,6 +93,8 @@ struct Connection {
  json comparisons = json::object();
  json item_rules=nullptr;
  json debug_status_catalog=nullptr;
+ json options_result=nullptr,options_saved=nullptr;
+ std::string options_request;
  json knowledge_list=nullptr,knowledge_detail=nullptr;
  json creature_detail=nullptr;
  int creature_race=-1;
@@ -192,6 +196,15 @@ struct Connection {
   auto id = j.value("id",""); auto it = requests.find(id);
   if (it == requests.end()) return;
   auto method = it->second; requests.erase(it);
+  if(method=="options.get") {
+   if(id==options_request) options_result=j.contains("error")?json{{"error",j["error"].value("message","Options unavailable.")}}:j["result"];
+   return;
+  }
+  if(method=="options.set") {
+   options_saved=j.contains("error")?json{{"error",j["error"].value("message","Options could not be applied.")}}:j["result"];
+   if(j.contains("error")) busy=false;
+   return;
+  }
   if(method=="debug.status.list") {
    debug_status_catalog=j.contains("error")?json{{"error",j["error"].value("message","Effects unavailable.")}}:j["result"];
    if(debug_status_catalog.is_array()) std::sort(debug_status_catalog.begin(),debug_status_catalog.end(),[](const json &a,const json &b) { return a.value("name","")<b.value("name",""); });
@@ -392,6 +405,8 @@ struct UI {
  CrtSettings crt_settings{}, draft_crt_settings{};
  float draft_scale=1.f;
  std::string settings_error;
+ EngineOptions engine_options;
+ bool settings_saving=false;
  ImDrawList *game_draw_list=nullptr;
  ImVec2 game_pos{},game_size{};
  float split_drag_y = 0.f, split_drag_fraction = .72f;
@@ -444,6 +459,10 @@ struct UI {
   if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look,quick_targeting,quickbar_enabled)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
+  engine_options.reset(); settings_saving=false;
+  c.options_result=nullptr; c.options_saved=nullptr; c.options_request.clear();
+  if(c.capabilities.value("options",0)>0 && c.state.contains("player")) c.options_request=c.send("options.get");
+  else { engine_options.loaded=true; engine_options.error="Angband options are available after starting a character with a supported backend."; }
   draft_proceed_with_click=proceed_with_click;
   draft_click_exits_look=click_exits_look;
   draft_quick_targeting=quick_targeting;
@@ -475,6 +494,18 @@ struct UI {
   ImGui::SetNextWindowSize(ImVec2(std::min(vp->WorkSize.x-24.f,ImGui::GetFontSize()*28),
    std::min(vp->WorkSize.y-24.f,ImGui::GetFontSize()*34)),ImGuiCond_Appearing);
   if(ImGui::BeginPopupModal("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings)) {
+   if(!engine_options.loaded && !c.options_result.is_null()) engine_options.load(c.options_result);
+   if(settings_saving && (!c.options_saved.is_null() || !c.connected)) {
+    settings_saving=false;
+    if(!c.connected) settings_error="Backend disconnected. Angband options could not be confirmed.";
+    else if(c.options_saved.contains("error")) settings_error=c.options_saved.value("error","");
+    else {
+     engine_options.original=engine_options.values;
+     if(apply_settings(window)) ImGui::CloseCurrentPopup();
+     else settings_error="Angband options applied, but Deluxe settings could not be saved. Please retry Save and Close.";
+    }
+   }
+   ImGui::BeginDisabled(settings_saving);
    const float footer=ImGui::GetFrameHeightWithSpacing()+ImGui::GetStyle().ItemSpacing.y;
    ImGui::BeginChild("Settings contents",ImVec2(0,-footer));
    if(ImGui::BeginTabBar("Settings tabs")) {
@@ -500,6 +531,10 @@ struct UI {
      ImGui::Spacing(); ImGui::Checkbox("Quick targeting",&draft_quick_targeting);
      if(ImGui::IsItemHovered()) ImGui::SetTooltip("Click to confirm a target and continue casting, shooting or another aimed action.");
      ImGui::Spacing(); ImGui::Checkbox("Click exits look",&draft_click_exits_look);
+     ImGui::EndTabItem();
+    }
+    if(ImGui::BeginTabItem("Angband")) {
+     engine_options.draw();
      ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("Animations")) {
@@ -552,13 +587,21 @@ struct UI {
    }
    if(!settings_error.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",settings_error.c_str()); }
    ImGui::EndChild();
-   if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+   if(ImGui::Button("Cancel")||(!settings_saving && ImGui::IsKeyPressed(ImGuiKey_Escape))) ImGui::CloseCurrentPopup();
    ImGui::SameLine();
    const float button_width=ImGui::CalcTextSize("Save and Close").x+2*ImGui::GetStyle().FramePadding.x;
    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowWidth()-ImGui::GetStyle().WindowPadding.x-button_width));
    if(ImGui::Button("Save and Close")) {
-    if(apply_settings(window)) ImGui::CloseCurrentPopup();
+    if(!engine_options.changes().empty()) {
+     if(!c.ready() || c.state.value("phase","")!="playing") settings_error="Return to normal play before changing Angband options.";
+     else {
+      c.options_saved=nullptr; settings_error.clear();
+      c.send("options.set",{{"context",engine_options.context},{"values",engine_options.changes()}});
+      c.busy=true; settings_saving=true;
+     }
+    } else if(apply_settings(window)) ImGui::CloseCurrentPopup();
    }
+   ImGui::EndDisabled();
    ImGui::EndPopup();
   }
  }

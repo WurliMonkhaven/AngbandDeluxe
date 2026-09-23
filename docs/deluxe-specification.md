@@ -725,3 +725,10 @@ New levels reset to fit. No map gesture moves, targets or acts in the game.
 The map renderer accepts immutable state/catalog data and has no command access.
 Catalog features add map_kind (up/down/shop/door/floor/wall), derived from
 engine terrain flags; map adds level_id for resetting the local camera.
+
+
+### Native Angband options (implemented)
+
+Settings includes an Angband tab for the current character, with searchable grouped interface options, explanatory hover text, and native low-hitpoint warning, animation delay, and movement-key delay controls. Editing is draft-only; Cancel discards changes, while Save and Close validates and applies the complete changed batch at a normal gameplay input boundary without consuming a turn. Options persist through the existing character save format when the game is saved, not in Deluxe preferences or new-character defaults. Birth options remain in character creation; keymaps, visual configuration, and other advanced options retain their engine UI. Engine preferences without current Deluxe support are described explicitly.
+
+The optional `options: 1` capability exposes `options.get` (interface option IDs, engine labels, boolean values, three numeric values, and input context) and `options.set` (`context`, `values` keyed by stable option ID). The adapter rejects stale contexts, busy states, non-interface options, wrong value types, duplicate keys, and out-of-range numeric values before applying any change. Native option setters and the standard engine redraw path retain ownership of behavior.

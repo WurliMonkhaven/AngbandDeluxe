@@ -372,6 +372,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  return j;
 }
 #include "deluxe-character.h"
+#include "deluxe-options.h"
 #include "deluxe-status.h"
 #include "deluxe-knowledge.h"
 #include "deluxe-view.h"
@@ -640,7 +641,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -934,6 +935,19 @@ static void pump(void)
   /* Deliberately bypass close_game(), which saves a living character.
    * Loading opens the save read-only; leave that existing file untouched. */
   response(id,cJSON_CreateObject()); closing=true; exit(0);
+ } else if(streq(method,"options.get")) {
+  if(!character_generated || player->is_dead) error(id,"wrong_phase","Start a living character first.");
+  else response(id,deluxe_options());
+ } else if(streq(method,"options.set")) {
+  if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing"))
+   error(id,"busy","Return to normal play before changing Angband options.");
+  else if(!streq(str(p,"context"),context_text)) error(id,"stale_revision","Input context changed. Reopen Settings and try again.");
+  else if(!deluxe_options_apply(cJSON_GetObjectItem(p,"values")))
+   error(id,"invalid_argument","Invalid option, value or range. No options were changed.");
+  else {
+   options_redraw=true; ready=false;
+   response(id,deluxe_options()); Term_keypress(ESCAPE,0);
+  }
  } else if(streq(method,"debug.status.list")) {
   if(!character_generated) error(id,"wrong_phase","Start a character first.");
   else response(id,deluxe_debug_status_catalog());
@@ -1011,6 +1025,7 @@ static errr get_command(cmd_context context)
    else if(target_set_interactive(mode,native_target_grid.x,native_target_grid.y,true)) msg("Target Selected.");
    else if(mode&TARGET_KILL) msg("Target Aborted.");
   }
+  if(options_redraw) { options_redraw=false; ready=false; do_cmd_redraw(); }
   if(debug_status>=0) {
    int idx=debug_status,amount=debug_status_amount; debug_status=-1; ready=false;
    player_set_timed(player,idx,amount,true,true);

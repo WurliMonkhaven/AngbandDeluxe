@@ -31,6 +31,19 @@ int main(int argc,char **argv) {
   check(!read_test_frames("{bad}\n").error.empty(),"Malformed frame must be reported");
   check(!read_test_frames("{\"seq\":1}").error.empty(),"Incomplete final frame must be reported");
   check(!read_test_frames(std::string(1048577,'x')).error.empty(),"Oversized frame must be rejected");
+  EngineOptions option_draft;
+  json option_data={{"context","context-1"},{"entries",json::array({{{"id","show_damage"},{"label","Show damage"},{"value",false}}})},{"hitpoint_warn",3},{"delay_factor",40},{"lazymove_delay",0}};
+  option_draft.load(option_data);
+  check(option_draft.changes().empty(),"Opening engine settings must not change options");
+  option_draft.values["show_damage"]=true;
+  check(option_draft.changes()==json{{"show_damage",true}},"Only changed engine options should be submitted");
+  option_draft.reset(); option_draft.load(option_data);
+  check(option_draft.changes().empty() && !option_draft.values["show_damage"].get<bool>(),"Cancel/reopen must discard engine option edits");
+  Connection option_connection;
+  option_connection.connected=true; option_connection.busy=true;
+  option_connection.options_request=option_connection.send("options.get");
+  option_connection.receive({{"id",option_connection.options_request},{"result",option_data}});
+  check(option_connection.busy && option_connection.options_result==option_data,"Options query must not unlock gameplay");
   json view_state={{"phase","playing"},{"readiness","ready"},{"dungeon",{{"width",1},{"height",1},{"cells",json::array({json::array({json::array({46,1,0,0,0,0,64,1,1,0,1,0,1})})})}}}};
   check(dungeon_view(view_state),"Semantic dungeon selection");
   RenderGrid decoded;
@@ -256,6 +269,15 @@ int main(int argc,char **argv) {
   auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(1280,800);
   unsigned char *pixels; int atlas_w,atlas_h;
   io.Fonts->GetTexDataAsRGBA32(&pixels,&atlas_w,&atlas_h); io.Fonts->SetTexID(1);
+  for(float width:{240.f,500.f}) {
+   ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(width,650));
+   ImGui::Begin("Engine options layout");
+   option_draft.draw();
+   ImGui::End(); ImGui::Render();
+   check(option_draft.changes().empty(),"Rendering native options must not edit them");
+  }
+  SDL_strlcpy(option_draft.search,"no matching setting",sizeof(option_draft.search));
+  ImGui::NewFrame(); ImGui::Begin("Options empty search"); option_draft.draw(); ImGui::End(); ImGui::Render();
   {
   ImGui::NewFrame(); ImGui::Begin("Quickbar text layout");
   const float text_size=ImGui::GetFontSize();
