@@ -93,6 +93,7 @@ static void deluxe_capture_view(cJSON *state_record)
 }
 static void deluxe_character_details(cJSON *p)
 {
+ char feeling_description[256];
  const struct trap *trap = square_trap(cave,player->grid);
  const char *title = player->class->title[MIN((player->lev-1)/5,9)];
  if (player->wizard) title="Wizard";
@@ -102,6 +103,9 @@ static void deluxe_character_details(cJSON *p)
  number(p,"experience",player->exp); number(p,"max_experience",player->max_exp);
  number(p,"level_start_experience",player->lev>1 ? (int)((int64_t)player_exp[player->lev-2]*player->expfact/100) : 0);
  number(p,"next_level_experience",player->lev<PY_MAX_LEVEL ? (int)((int64_t)player_exp[player->lev-1]*player->expfact/100) : 0);
+ format_level_feeling(feeling_description,sizeof(feeling_description));
+ string(p,"feeling_description",feeling_description);
+ number(p,"depth_feet",player->depth*50);
  number(p,"light",square_light(cave,player->grid));
  string(p,"floor",trap && !square_isinvis(cave,player->grid) ? trap->kind->name : square_feat(cave,player->grid)->name);
  number(p,"recall",player->word_recall); number(p,"descent",player->deep_descent);

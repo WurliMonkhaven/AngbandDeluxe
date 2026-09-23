@@ -14,13 +14,13 @@ struct CharacterOverview {
   draw->AddText(ImVec2(std::max(a.x+pad,b.x-pad-value_width),y),ink,value.c_str());
   draw->PopClipRect(); ImGui::PopStyleColor(2);
  }
- static void metric(const char *label,const std::string &value) {
+ static void metric(const char *label,const std::string &value,const std::string &tooltip="") {
   // Keep each label/value pair together inside its own quiet, bounded tile.
   const auto a=ImGui::GetCursorScreenPos();
   const float width=ImGui::GetContentRegionAvail().x,pad=ImGui::GetFontSize()*.4f;
   const float label_width=ImGui::CalcTextSize(label).x,value_width=ImGui::CalcTextSize(value.c_str()).x;
-  const float gap=ImGui::GetFontSize()*.6f;
-  const bool stacked=label_width+gap+value_width+2*pad>width;
+  const float gap=*label?ImGui::GetFontSize()*.6f:0.f;
+  const bool stacked=*label && label_width+gap+value_width+2*pad>width;
   const float height=ImGui::GetFontSize()*(stacked?2.f:1.f)+2*pad;
   const ImVec2 b(a.x+width,a.y+height);
   auto *draw=ImGui::GetWindowDrawList();
@@ -30,7 +30,11 @@ struct CharacterOverview {
   draw->AddText(ImVec2(a.x+pad,a.y+pad),ImGui::GetColorU32(ImGuiCol_TextDisabled),label);
   draw->AddText(ImVec2(a.x+pad+(stacked?0:label_width+gap),a.y+pad+(stacked?ImGui::GetFontSize():0)),ImGui::GetColorU32(ImGuiCol_Text),value.c_str());
   draw->PopClipRect(); ImGui::Dummy(ImVec2(width,height));
-  if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s: %s",label,value.c_str());
+  if(ImGui::IsItemHovered()) {
+   ImGui::BeginTooltip(); ImGui::PushTextWrapPos(ImGui::GetFontSize()*28.f);
+   const auto text=tooltip.empty()?(*label?std::string(label)+": "+value:value):tooltip;
+   ImGui::TextUnformatted(text.c_str()); ImGui::PopTextWrapPos(); ImGui::EndTooltip();
+  }
  }
  static void section(const char *label) {
   ImGui::Dummy(ImVec2(0,ImGui::GetFontSize()*.55f));
@@ -110,13 +114,13 @@ struct CharacterOverview {
   if(p.value("study",0)) ImGui::Text("Spells to learn: %d",p.value("study",0));
   if(p.value("extra_moves",0)) ImGui::Text("Extra moves: %+d",p.value("extra_moves",0));
   section("Dungeon");
-  if(ImGui::BeginTable("Dungeon overview",3,ImGuiTableFlags_SizingStretchSame)) {
-   ImGui::TableNextRow(); ImGui::TableNextColumn(); metric("Depth",std::to_string(p.value("depth",0)));
+  if(ImGui::BeginTable("Dungeon overview",4,ImGuiTableFlags_SizingStretchSame)) {
+   ImGui::TableNextRow(); ImGui::TableNextColumn(); metric("Depth",std::to_string(p.value("depth",0)),"Depth: "+std::to_string(p.value("depth_feet",p.value("depth",0)*50))+" feet");
    ImGui::TableNextColumn(); metric("Light",std::to_string(p.value("light",0)));
-   ImGui::TableNextColumn(); metric("Feeling",p.value("feeling","—"));
+   ImGui::TableNextColumn(); metric("Feel",p.value("feeling","—"),p.value("feeling_description",""));
+   ImGui::TableNextColumn(); metric("",display_label(p.value("floor","")));
    ImGui::EndTable();
   }
-  if(p.contains("floor")) ImGui::TextWrapped("%s",display_label(p.value("floor","")).c_str());
   if(p.value("trap_detected",false)) ImGui::TextUnformatted("Trap-detected area");
   if(p.value("recall",0)) ImGui::TextUnformatted("Recall pending");
   if(p.value("descent",0)) ImGui::TextUnformatted("Descent pending");

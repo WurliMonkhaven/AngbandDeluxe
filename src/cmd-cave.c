@@ -1726,51 +1726,41 @@ static const char *mon_feeling_text[] =
  * Object feelings are delayed until the player has explored some
  * of the level.
  */
+void format_level_feeling(char *buf, size_t size)
+{
+ uint16_t obj_feeling = MIN(cave->feeling / 10, N_ELEMENTS(obj_feeling_text) - 1);
+ uint16_t mon_feeling = MIN(cave->feeling % 10, N_ELEMENTS(mon_feeling_text) - 1);
+ const char *join;
+ if (!OPT(player, birth_feelings)) {
+  my_strcpy(buf, "Level feelings are disabled.", size);
+  return;
+ }
+ if (!player->depth) {
+  my_strcpy(buf, "Looks like a typical town.", size);
+  return;
+ }
+ if (cave->feeling_squares < z_info->feeling_need) {
+  strnfmt(buf, size, "%s.", mon_feeling_text[mon_feeling]);
+  return;
+ }
+ join = ((mon_feeling <= 5 && obj_feeling > 6) ||
+  (mon_feeling > 5 && obj_feeling <= 6)) ? ", yet" : ", and";
+ strnfmt(buf, size, "%s%s %s", mon_feeling_text[mon_feeling], join,
+  obj_feeling_text[obj_feeling]);
+}
+
 void display_feeling(bool obj_only)
 {
-	uint16_t obj_feeling = cave->feeling / 10;
-	uint16_t mon_feeling = cave->feeling - (10 * obj_feeling);
-	const char *join;
-
-	/* Don't show feelings for cold-hearted characters */
-	if (!OPT(player, birth_feelings)) return;
-
-	/* No useful feeling in town */
-	if (!player->depth) {
-		msg("Looks like a typical town.");
-		return;
-	}
-
-	/* Display only the object feeling when it's first discovered. */
-	if (obj_only) {
-		disturb(player);
-		msg("You feel that %s", obj_feeling_text[obj_feeling]);
-		return;
-	}
-
-	/* Players automatically get a monster feeling. */
-	if (cave->feeling_squares < z_info->feeling_need) {
-		msg("%s.", mon_feeling_text[mon_feeling]);
-		return;
-	}
-
-	/* Verify the feelings */
-	if (obj_feeling >= N_ELEMENTS(obj_feeling_text))
-		obj_feeling = N_ELEMENTS(obj_feeling_text) - 1;
-
-	if (mon_feeling >= N_ELEMENTS(mon_feeling_text))
-		mon_feeling = N_ELEMENTS(mon_feeling_text) - 1;
-
-	/* Decide the conjunction */
-	if ((mon_feeling <= 5 && obj_feeling > 6) ||
-			(mon_feeling > 5 && obj_feeling <= 6))
-		join = ", yet";
-	else
-		join = ", and";
-
-	/* Display the feeling */
-	msg("%s%s %s", mon_feeling_text[mon_feeling], join,
-		obj_feeling_text[obj_feeling]);
+ char feeling[256];
+ if (!OPT(player, birth_feelings)) return;
+ if (obj_only && player->depth) {
+  uint16_t obj_feeling = MIN(cave->feeling / 10, N_ELEMENTS(obj_feeling_text) - 1);
+  disturb(player);
+  msg("You feel that %s", obj_feeling_text[obj_feeling]);
+  return;
+ }
+ format_level_feeling(feeling, sizeof(feeling));
+ msg("%s", feeling);
 }
 
 
