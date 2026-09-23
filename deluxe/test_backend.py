@@ -939,6 +939,43 @@ class BackendTests(unittest.TestCase):
         while e.state['readiness']!='ready': e.key('enter')
         self.assertEqual(e.state['player']['hp'],saved_hp)
 
+    def test_run_summary_and_replay(self):
+        e = self.engine
+        e.hello(); e.birth()
+        self.assertIn("error", e.call("run.finish"))
+        old = e.state["revision"]
+        e.call("debug.damage", {"amount": 30000}); e.next_state(old)
+        self.assertNotIn("run", e.state, "Fatal message must precede the post-mortem")
+        for _ in range(12):
+            if e.state["phase"] == "dead": break
+            e.key("enter")
+        self.assertEqual(e.state["phase"], "dead")
+        report = e.state["run"]
+        self.assertEqual(report["player"]["name"], e.state["player"]["name"])
+        self.assertEqual(report["cause"], "Deluxe developer tools")
+        self.assertIn("character_sheet", report["player"])
+        self.assertGreaterEqual(report["score"], 0)
+        self.assertTrue(report["items"])
+        self.assertTrue(report["messages"])
+        self.assertTrue(all(i["location"] != "Floor" and "actions" not in i and "id" not in i for i in report["items"]))
+        self.assertTrue(all(i["player_known"]["identified"] for i in report["items"]))
+        self.assertEqual(e.call("state.get")["result"]["run"], report)
+        self.assertIn("result", e.call("run.finish"))
+        for _ in range(20):
+            if e.state["phase"] == "finished": break
+            e.receive()
+        self.assertEqual(e.state["phase"], "finished")
+        self.assertEqual(e.state["run"], report)
+        self.assertEqual(e.process.wait(timeout=10), 0); e.stop()
+        self.assertTrue((Path(self.temp.name)/"save"/"ProtocolTest").exists(), "Engine must save the dead character normally")
+        self.engine = e = Engine(self.temp.name)
+        e.hello()
+        e.call("session.new", {"save":"Replay", "native_birth":True, "race":"Elf", "class":"Mage"})
+        e.next_state(None)
+        b=e.state["birth"]
+        self.assertEqual(next(r["name"] for r in b["races"] if r["id"]==b["race"]), "Elf")
+        self.assertEqual(next(r["name"] for r in b["classes"] if r["id"]==b["class"]), "Mage")
+
     def test_debug_damage(self):
         e = self.engine
         e.hello()

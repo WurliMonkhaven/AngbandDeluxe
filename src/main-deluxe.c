@@ -29,6 +29,7 @@
 #include "player-util.h"
 #include "player-timed.h"
 #include "store.h"
+#include "score.h"
 #include "ui-store.h"
 #include "ui-command.h"
 #include "ui-context.h"
@@ -91,6 +92,9 @@ static char *seen_ids[32768];
 static size_t seen_count;
 static int launch_mode = -1;
 static bool use_native_birth;
+static char birth_race[80],birth_class[80];
+static cJSON *run_report;
+static bool run_finishing;
 
 struct command_entry { const char *id, *label; char key; };
 static const struct command_entry commands[] = {
@@ -373,6 +377,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
 }
 #include "deluxe-character.h"
 #include "deluxe-options.h"
+#include "deluxe-run.h"
 #include "deluxe-status.h"
 #include "deluxe-knowledge.h"
 #include "deluxe-view.h"
@@ -495,6 +500,8 @@ static cJSON *capture(void)
  }
  cJSON_AddItemToObject(s, "items", items); cJSON_AddItemToObject(s, "monsters", monsters);
  cJSON_AddItemToObject(s, "messages", messages);
+ if(streq(phase,"dead") && !run_report) run_report=deluxe_run_record(s);
+ if(run_report) cJSON_AddItemToObject(s,"run",cJSON_Duplicate(run_report,true));
 #ifndef NDEBUG
  assert(state_i == rng_index && Rand_value == rng_value && Rand_quick == rng_quick);
  assert(memcmp(rng_state, STATE, sizeof(rng_state)) == 0);
@@ -641,7 +648,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"run.summary\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -729,6 +736,8 @@ static void pump(void)
       (streq(method, "session.load") && !file_exists(savefile))) {
    error(id, "invalid_argument", "Save already exists for New, or is missing for Load."); goto done;
   }
+  my_strcpy(birth_race,str(p,"race"),sizeof(birth_race));
+  my_strcpy(birth_class,str(p,"class"),sizeof(birth_class));
   use_native_birth=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_birth"));
   launch_mode = streq(method, "session.new") ? GAME_NEW : GAME_LOAD;
   response(id, cJSON_CreateObject());
@@ -935,6 +944,15 @@ static void pump(void)
   /* Deliberately bypass close_game(), which saves a living character.
    * Loading opens the save read-only; leave that existing file untouched. */
   response(id,cJSON_CreateObject()); closing=true; exit(0);
+ } else if(streq(method,"run.finish")) {
+  if(!run_report || !streq(phase,"dead") || active_prompt || run_finishing)
+   error(id,"wrong_phase","The final run summary is not awaiting completion.");
+  else {
+   run_finishing=true; response(id,cJSON_CreateObject());
+   /* Leave the existing death menu normally: close_game still saves the dead
+    * character and performs all engine cleanup. Never bypass it with exit(). */
+   Term_keypress(KTRL('X'),0);
+  }
  } else if(streq(method,"options.get")) {
   if(!character_generated || player->is_dead) error(id,"wrong_phase","Start a living character first.");
   else response(id,deluxe_options());
@@ -989,6 +1007,10 @@ static errr xtra(int n, int v)
   deluxe_travel_finish();
   travel_stage=TRAVEL_IDLE; /* Never resume an intent after a user-input prompt. */
   publish(); if (ready) complete();
+  /* Native post-mortems already own the message log. Do not leave cleanup
+   * waiting on a terminal -more- after the user has finished the death menu.
+   * Confirmation prompts still go through their normal semantic hook. */
+  if(run_finishing && textui_message_pending && !active_prompt) Term_keypress(' ',0);
   while (terminal.key_head == terminal.key_tail && connected) pump();
   ready = false;
  }

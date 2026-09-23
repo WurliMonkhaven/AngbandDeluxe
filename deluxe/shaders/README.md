@@ -153,3 +153,7 @@ Direct3D and Vulkan pixel tests were run on Windows. Metal source generation and
 binding layout were checked, but a Mac build/runtime test is still required.
 The Gaussian shader effects can differ slightly from the old per-glyph halos;
 the preference names, saved values and scope semantics are preserved.
+
+## CRT shutdown transition
+
+CrtFrame.shutdown is -1 for normal rendering or a normalized one-shot power-off timeline. The composite shader compresses tube coordinates before barrel/raster evaluation, then adds a horizontal beam and fading phosphor spot. It uses the existing scope, scene and pipeline; no readback, CPU geometry effect or extra render target is introduced. Temporal persistence is disabled throughout shutdown so old bright images cannot linger over the black frame. The client starts the timeline only once a post-death summary arrives, holds the last gameplay state while rendering, and waits for completion before drawing the native post-mortem. Offscreen tests cover beam/spot/black phases, CRT Off, scope boundaries and unaffected overlay layers.

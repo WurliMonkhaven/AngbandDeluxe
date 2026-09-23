@@ -129,6 +129,16 @@ static int deluxe_birth_session(void)
  event_add_handler(EVENT_BIRTHPOINTS,birth_event,NULL);
  cmdq_push(CMD_BIRTH_INIT); cmdq_execute(CTX_BIRTH);
  cmdq_push(CMD_BIRTH_RESET); cmdq_execute(CTX_BIRTH);
+ /* A replay suggests identity choices only; all stats/options remain under
+  * the normal creation workflow and can be changed before accepting. */
+ if(*birth_race) {
+  struct player_race *r;
+  for(r=races;r;r=r->next) if(streq(r->name,birth_race)) { birth_queue(CMD_CHOOSE_RACE,r->ridx); cmdq_execute(CTX_BIRTH); break; }
+ }
+ if(*birth_class) {
+  struct player_class *cl;
+  for(cl=classes;cl;cl=cl->next) if(streq(cl->name,birth_class)) { birth_queue(CMD_CHOOSE_CLASS,cl->cidx); cmdq_execute(CTX_BIRTH); break; }
+ }
  birth_active=true; birth_rolled=birth_previous=false;
  birth_queue(CMD_RESET_STATS,1); cmdq_execute(CTX_BIRTH);
  while(!character_generated && connected) {

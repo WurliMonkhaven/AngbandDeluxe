@@ -31,6 +31,32 @@ int main(int argc,char **argv) {
   check(!read_test_frames("{bad}\n").error.empty(),"Malformed frame must be reported");
   check(!read_test_frames("{\"seq\":1}").error.empty(),"Incomplete final frame must be reported");
   check(!read_test_frames(std::string(1048577,'x')).error.empty(),"Oversized frame must be rejected");
+  DeathTransition shutdown_test;
+  shutdown_test.start(10,true);
+  check(shutdown_test.progress(10)==0 && !shutdown_test.finished(10.05),"Shutdown must run after acknowledgement");
+  check(shutdown_test.finished(10.15) && shutdown_test.progress(12)==1,"Shutdown must finish even after a slow frame");
+  shutdown_test.start(20,false);
+  check(shutdown_test.finished(20) && shutdown_test.progress(20)==-1,"Disabled CRT/death animation must skip shutdown");
+  json run={{"player",{{"name","Test"},{"race","Elf"},{"class","Mage"},{"level",3}}},{"items",json::array()},{"messages",json::array({{{"text","You die."},{"count",1}}})},{"cause","a test"},{"ended","2026-09-23"}};
+  RunHistory history;
+  history.directory=std::string(argv[1])+"-runs";
+  check(!fs::exists(history.directory),"Use a fresh run-history test directory");
+  history.begin(run);
+  check(history.error.empty(),"Run archive must save");
+  const auto archived=history.current;
+  history.load(); check(history.records.size()==1 && history.records[0]==archived,"Run archive must retain complete final state");
+  { std::ofstream bad(history.directory/"broken.json"); bad<<"broken"; }
+  history.load(); check(history.records.size()==1 && !history.error.empty(),"A corrupt archive must not hide readable runs");
+  fs::remove_all(history.directory); // This directory was verified absent before this test created it.
+  Connection postgame; postgame.connected=true;
+  postgame.state={{"phase","playing"},{"readiness","ready"}};
+  postgame.receive({{"kind","event"},{"event","state.changed"},{"data",{{"phase","dead"},{"run",run}}}});
+  check(!postgame.ready() && postgame.state["phase"]=="playing" && postgame.run_report==run,"Post-mortem must freeze gameplay and block commands");
+  const auto finish_request=postgame.outgoing;
+  postgame.receive({{"kind","event"},{"event","state.changed"},{"data",{{"phase","finished"},{"run",run}}}});
+  check(postgame.outgoing==finish_request && postgame.postgame_finished,"Death completion must only be requested once");
+  postgame.process_stopped(0);
+  check(postgame.restart_ready && postgame.run_report==run,"Backend completion must preserve the native death screen");
   EngineOptions option_draft;
   json option_data={{"context","context-1"},{"entries",json::array({{{"id","show_damage"},{"label","Show damage"},{"value",false}}})},{"hitpoint_warn",3},{"delay_factor",40},{"lazymove_delay",0}};
   option_draft.load(option_data);
@@ -269,6 +295,39 @@ int main(int argc,char **argv) {
   auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(1280,800);
   unsigned char *pixels; int atlas_w,atlas_h;
   io.Fonts->GetTexDataAsRGBA32(&pixels,&atlas_w,&atlas_h); io.Fonts->SetTexID(1);
+  {
+   UI final_ui{postgame}; final_ui.shutdown.start(0,false); final_ui.run_history.current=archived;
+   ImGui::NewFrame(); ImGui::Begin("Old gameplay popup"); ImGui::OpenPopup("Stale menu"); ImGui::End();
+   final_ui.draw(nullptr);
+   check(!ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel),"Death screen must dismiss stale gameplay popups");
+   ImGui::Render();
+   auto draw_final=[&] { ImGui::NewFrame(); final_ui.draw(nullptr); ImGui::Render(); };
+   final_ui.run_history.current["items"]=json::array({{{"label","a Dagger"},{"location","weapon"},{"quantity",1},{"description","A test weapon."}}});
+   // A click acknowledges death, then its release arrives during shutdown.
+   // Keep feeding input to ImGui even while the transition UI is disabled.
+   final_ui.shutdown.start(double(SDL_GetTicksNS())/1e9,true);
+   io.AddMousePosEvent(500,300); io.AddMouseButtonEvent(0,true); draw_final();
+   io.AddMouseButtonEvent(0,false); draw_final();
+   check(!io.MouseDown[0],"Shutdown must not retain the acknowledgement mouse press");
+   final_ui.shutdown.enabled=false; draw_final(); draw_final();
+   ImGuiID bar_id=0,tab_id=0; ImVec2 tab_pos;
+   for(int i=0;i<GImGui->TabBars.GetMapSize();++i) if(auto *bar=GImGui->TabBars.TryGetMapData(i)) {
+    if(bar->CurrFrameVisible!=GImGui->FrameCount) continue;
+    for(auto &tab:bar->Tabs) if(std::string(ImGui::TabBarGetTabName(bar,&tab))=="Final belongings") {
+     bar_id=bar->ID; tab_id=tab.ID;
+     tab_pos=ImVec2(bar->BarRect.Min.x+tab.Offset+tab.Width*.5f,bar->BarRect.GetCenter().y);
+    }
+   }
+   check(tab_id!=0,"Final belongings tab must be visible");
+   io.AddMousePosEvent(tab_pos.x,tab_pos.y); draw_final();
+   io.AddMouseButtonEvent(0,true); draw_final();
+   io.AddMouseButtonEvent(0,false); draw_final();
+   check(GImGui->TabBars.GetByKey(bar_id)->SelectedTabId==tab_id,"The first post-shutdown click must switch tabs");
+  }
+  for(float width:{600.f,1200.f}) {
+   ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(width,750));
+   ImGui::Begin("Post-mortem layout"); history.error.clear(); history.draw(); ImGui::End(); ImGui::Render();
+  }
   for(float width:{240.f,500.f}) {
    ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(width,650));
    ImGui::Begin("Engine options layout");

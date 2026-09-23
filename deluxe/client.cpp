@@ -2,6 +2,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include "imgui.h"
+#include "imgui_internal.h" // Close stale popups when replacing gameplay with the post-mortem.
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 #include "crt_renderer.h"
@@ -12,6 +13,8 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <chrono>
+#include <stdexcept>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -93,6 +96,8 @@ struct Connection {
  json comparisons = json::object();
  json item_rules=nullptr;
  json debug_status_catalog=nullptr;
+ json run_report=nullptr;
+ bool postgame_finished=false;
  json options_result=nullptr,options_saved=nullptr;
  std::string options_request;
  json knowledge_list=nullptr,knowledge_detail=nullptr;
@@ -183,6 +188,14 @@ struct Connection {
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
+   if(name=="state.changed" && j.at("data").contains("run")) {
+    if(run_report.is_null()) {
+     run_report=j["data"]["run"]; prompt=json::object(); pending_prompt=json::object();
+     if(j["data"].value("phase","")=="dead") send("run.finish");
+    }
+    postgame_finished=j["data"].value("phase","")=="finished";
+    busy=false; return; // Keep the last gameplay image for the shutdown transition.
+   }
    if (name == "state.changed") { state = std::move(j.at("data")); comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
    if(name=="knowledge.changed" && creature_race>=0 && j["data"].value("category","")=="creatures" && j["data"].value("id",-1)==creature_race) creature_detail=j["data"];
    if(name=="travel.changed") {
@@ -277,7 +290,7 @@ struct Connection {
   connected=false; busy=false; pickup_travel=false;
   // Death/post-game screens remain interactive until the engine reports that
   // play_game completed. A crash must not masquerade as a normal game ending.
-  const bool finished=state.value("phase","")=="finished";
+  const bool finished=postgame_finished || state.value("phase","")=="finished";
   if(exit_code==0 && !closed && ((close_confirmed && return_to_menu) || finished)) restart_ready=true;
   else if(!closed) {
    notice("Backend stopped (" + std::to_string(exit_code) + "). " + diagnostic);
@@ -298,7 +311,7 @@ struct Connection {
   // EOF must be drained by the reader before interpreting the final game state.
   else if(batch.finished) process_stopped(exit_code);
  }
- bool ready() const { return connected && !busy && prompt.empty() && state.value("readiness","") == "ready"; }
+ bool ready() const { return run_report.is_null() && connected && !busy && prompt.empty() && state.value("readiness","") == "ready"; }
  bool native_targeting() const { return capabilities.value("interaction.targeting",0)>0; }
  bool mouse_movement() const { return capabilities.value("interaction.mouse",0)>0; }
  bool key(const json &k) {
@@ -380,8 +393,15 @@ static void properties(const json &value) {
 #include "item_comparison.h"
 #include "item_rules.h"
 #include "store_panel.h"
+#include "run_history.h"
 struct UI {
  Connection &c;
+ RunHistory run_history;
+ DeathTransition shutdown;
+ float shutdown_frame=-1;
+ bool showing_postgame=false;
+ json replay_profile=json::object();
+ bool replay_prompt=false,run_ui_reset=false,quit_after_run=false;
  BirthPanel birth_panel;
  Quickbar quickbar;
  bool quickbar_enabled=false, draft_quickbar_enabled=false;
@@ -648,7 +668,7 @@ struct UI {
   focus_game();
  }
  bool owns_keyboard() const {
-  return c.state.contains("terminal") && !c.state.contains("birth") && !c.state.contains("store") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
+  return c.run_report.is_null() && c.state.contains("terminal") && !c.state.contains("birth") && !c.state.contains("store") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
    && !quit_dialog && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId);
  }
  void prepare_frame(SDL_Window *window) {
@@ -665,6 +685,12 @@ struct UI {
   else if(return_from_prompt && c.pending_prompt.empty()) { return_from_prompt=false; focus_game(); }
  }
  void launcher() {
+  if(replay_prompt && c.negotiated && !c.busy) { replay_prompt=false; ImGui::OpenPopup("New character"); }
+  if(ImGui::Button("Graveyard")) {
+   run_history.directory=fs::path(settings_path).parent_path()/"run-history";
+   run_history.load(); run_history.browsing=true; run_history.current=nullptr;
+  }
+  ImGui::Spacing();
   const float heading_right=ImGui::GetCursorPosX()+ImGui::GetContentRegionAvail().x;
   ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Characters");
   ImGui::SameLine();
@@ -731,7 +757,7 @@ struct UI {
    else if(exists) ImGui::TextUnformatted("That save name is already in use.");
    ImGui::BeginDisabled(!valid||exists||!c.negotiated||c.busy);
    if(ImGui::Button("Create") || (entered&&valid&&!exists&&c.negotiated&&!c.busy)) {
-    c.menu_error.clear(); c.send("session.new",{{"save",name}}); c.busy=true; focus_game(); ImGui::CloseCurrentPopup();
+    c.menu_error.clear(); c.send("session.new",{{"save",name},{"race",replay_profile.value("race","")},{"class",replay_profile.value("class","")}}); replay_profile=json::object(); c.busy=true; focus_game(); ImGui::CloseCurrentPopup();
    }
    ImGui::EndDisabled(); ImGui::SameLine();
    if(ImGui::Button("Cancel")||ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
@@ -1219,10 +1245,38 @@ struct UI {
  void draw(SDL_Window *window) {
   quickbar.sync_saves(c.save_changes);
   quickbar.profile=c.character_save;
-  game_draw_list=nullptr;
+  game_draw_list=nullptr; shutdown_frame=-1; showing_postgame=false;
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(vp->WorkPos); ImGui::SetNextWindowSize(vp->WorkSize);
   ImGui::Begin("Angband Deluxe",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
+  const double now=double(SDL_GetTicksNS())/1e9;
+  const bool ending=!c.run_report.is_null();
+  if(ending && !run_ui_reset) {
+   ImGui::ClosePopupsOverWindow(nullptr,false);
+   open_character_sheet=false; quickbar.open_customize=false;
+   knowledge_browser.request_open=false; item_rules_panel.open=item_rules_panel.auto_open=false;
+   quit_dialog=false; run_ui_reset=true;
+  }
+  if(!ending) run_ui_reset=false;
+  if(ending && !shutdown.finished(now)) shutdown_frame=shutdown.progress(now);
+  if((ending && shutdown.finished(now)) || run_history.browsing) {
+   showing_postgame=ending;
+   grid_focus=false; keys.clear();
+   if(ending && !c.connected && !c.postgame_finished)
+    ImGui::TextWrapped("The engine stopped before confirming its final save. The run summary has been retained.");
+   const int action=run_history.draw(!ending || !c.connected);
+   if(action) {
+    if(action==2) { replay_profile=run_history.current.value("player",json::object()); replay_prompt=true; }
+    if(run_history.archived && action==1) { run_history.current=nullptr; run_history.archived=false; }
+    else {
+     run_history.current=nullptr; run_history.browsing=false;
+     if(ending) { c.run_report=nullptr; c.restart_ready=true; shutdown=DeathTransition{}; }
+    }
+   }
+   if(ending) prompts();
+   ImGui::End(); return;
+  }
+  ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha,1.f); ImGui::BeginDisabled(ending);
   const bool in_game=c.state.contains("terminal");
   if(in_game && !c.state.contains("birth")) {
    if(ImGui::Button("Save and...")) ImGui::OpenPopup("Save menu");
@@ -1384,6 +1438,7 @@ struct UI {
    targeting_was_active=targeting_active;
    ImGui::EndChild(); ImGui::EndTable();
   }
+  if(!ending) {
   if(quickbar.customize_window()) focus_game();
   if(quickbar.dirty) { quickbar.dirty=false; save_settings(); }
   if(item_rules_panel.draw(c)) focus_game();
@@ -1402,7 +1457,9 @@ struct UI {
    if(!c.state.contains("player") || !c.connected) if(ImGui::Button("Close")) { c.closed=true; if(c.process) SDL_KillProcess(c.process.get(),true); }
    ImGui::EndPopup();
   }
-  prompts(); ImGui::End();
+  }
+  ImGui::EndDisabled(); ImGui::PopStyleVar();
+  if(!ending) prompts(); ImGui::End();
   dispatch_keys();
  }
  void dispatch_keys() {
@@ -1471,6 +1528,12 @@ int main(int argc,char **argv) {
   const auto phase=connection.state.value("phase","");
   const auto readiness=connection.state.value("readiness","");
   connection.poll();
+  if(!connection.run_report.is_null() && ui.shutdown.started<0) {
+   ui.run_history.directory=fs::path(ui.settings_path).parent_path()/"run-history";
+   ui.run_history.begin(connection.run_report);
+   ui.shutdown.start(double(SDL_GetTicksNS())/1e9,ui.crt!=0 && ui.death_animation && crt_renderer.ready());
+   ui.keys.clear(); ui.grid_focus=false;
+  }
   if(phase!=connection.state.value("phase","") || readiness!=connection.state.value("readiness","") || !connection.prompt.empty())
    ui.keys.clear(); // Buffered movement must not answer a newly opened menu/prompt.
  };
@@ -1479,7 +1542,8 @@ int main(int argc,char **argv) {
   // wait produces stale, uneven animation times even when GPU work is fast.
   if(!SDL_WaitForGPUSwapchain(gpu,window)) break;
   poll_backend();
-  if(connection.restart_ready) {
+  if(ui.quit_after_run && !connection.connected) { connection.closed=true; break; }
+  if(connection.restart_ready && connection.run_report.is_null()) {
    crt_renderer.reset_history();
    health_glitch=HealthGlitch{};
    // A saved return-to-menu or normal post-game completion has exited cleanly.
@@ -1497,17 +1561,21 @@ int main(int argc,char **argv) {
    if(e.type==SDL_EVENT_WINDOW_FOCUS_LOST) { ui.window_active=false; ui.keys.clear(); }
    if(e.type==SDL_EVENT_WINDOW_FOCUS_GAINED) ui.window_active=true;
    if(e.type==SDL_EVENT_MOUSE_BUTTON_DOWN) { ui.grid_focus=false; ui.keys.clear(); }
-   if(e.type==SDL_EVENT_MOUSE_MOTION && ui.crt!=0 && crt_renderer.ready()) {
+   if(e.type==SDL_EVENT_MOUSE_MOTION && ui.crt!=0 && (ui.crt==2 || ui.game_draw_list) && crt_renderer.ready()) {
     auto vp=ImGui::GetMainViewport();
     CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_settings);
     if(e.motion.x>=curve.pos.x && e.motion.x<=curve.pos.x+curve.size.x && e.motion.y>=curve.pos.y && e.motion.y<=curve.pos.y+curve.size.y) {
      auto p=curve.map(ImVec2(e.motion.x,e.motion.y),true); e.motion.x=p.x; e.motion.y=p.y;
     }
    }
-   if(ui.quickbar_event(e)) continue;
+   // Always forward releases/focus updates to ImGui, including during shutdown.
+   // The disabled transition UI and owns_keyboard() block actions, while input
+   // state stays balanced after a click or key acknowledges the fatal message.
+   if(connection.run_report.is_null() && ui.quickbar_event(e)) continue;
    ImGui_ImplSDL3_ProcessEvent(&e);
    if(e.type==SDL_EVENT_QUIT) {
-    if(!connection.state.contains("terminal")) { connection.closed=true; if(connection.process) SDL_KillProcess(connection.process.get(),true); }
+    if(!connection.run_report.is_null()) { ui.quit_after_run=true; continue; }
+    if(!connection.state.contains("terminal") || (!connection.run_report.is_null() && !connection.connected)) { connection.closed=true; if(connection.process) SDL_KillProcess(connection.process.get(),true); }
     else ui.quit_dialog=true;
    }
    if(e.type==SDL_EVENT_KEY_DOWN && ui.owns_keyboard()) {
@@ -1532,7 +1600,7 @@ int main(int argc,char **argv) {
   ui.dispatch_keys();
   poll_backend();
   ImGui_ImplSDLGPU3_NewFrame(); ImGui_ImplSDL3_NewFrame();
-  if(ui.crt!=0 && crt_renderer.ready() && SDL_GetMouseFocus()==window) {
+  if(ui.crt!=0 && (ui.crt==2 || ui.game_draw_list) && crt_renderer.ready() && SDL_GetMouseFocus()==window) {
    float x,y; SDL_GetMouseState(&x,&y);
    auto vp=ImGui::GetMainViewport();
    CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_settings);
@@ -1555,7 +1623,9 @@ int main(int argc,char **argv) {
    frame.scope=ui.crt; frame.settings=ui.crt_settings;
    frame.game=ui.game_draw_list; frame.game_pos=ui.game_pos; frame.game_size=ui.game_size;
    frame.seconds=double(SDL_GetTicksNS())/1e9; frame.ui_scale=ui.scale*ui.display_scale; frame.session=connection.state.value("phase","");
-   frame.health_glitch=health_glitch.update(connection.state,frame.seconds,ui.low_animation,ui.death_animation);
+   frame.health_glitch=health_glitch.update(connection.state,frame.seconds,ui.low_animation,false);
+   frame.shutdown=ui.shutdown_frame;
+   if(ui.showing_postgame) frame.session="postgame";
    crt_renderer.render(cmd,surface,surface_width,surface_height,render_data,frame);
    if(renderer_error!=crt_renderer.error()) {
     renderer_error=crt_renderer.error(); if(!renderer_error.empty()) connection.notice(renderer_error);
