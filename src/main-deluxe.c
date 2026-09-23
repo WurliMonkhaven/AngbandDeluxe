@@ -35,6 +35,7 @@
 #include "ui-init.h"
 #include "ui-input.h"
 #include "ui-object.h"
+#include "ui-options.h"
 #include "ui-keymap.h"
 #include "ui-map.h"
 #include "ui-menu.h"
@@ -295,6 +296,7 @@ static void inspection_description(cJSON *record, const struct object *obj)
 #endif
 }
 #include "deluxe-spells.h"
+#include "deluxe-item-rules.h"
 static cJSON *item_record(const struct object *o, const char *location, int index)
 {
  char name[512], id[80]; int i;
@@ -346,6 +348,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
   tval_is_book_k(o->kind) && !player_object_to_book(player,o) ? COLOUR_SLATE : o->kind->base->attr);
  string(j, "inscription", quark_str(o->note));
  inspection_description(j, o);
+ if(item_is_available((struct object *)o)) deluxe_item_preferences(j,o);
  deluxe_book_record(j,o);
  if (object_is_carried(player, o)) {
   char label[2] = { gear_to_label(player, (struct object *)o), 0 };
@@ -619,12 +622,52 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"item.compare\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
  if (streq(method, "commands.list")) response(id, command_list());
  else if (streq(method, "state.get")) response(id, snapshot ? cJSON_CreateObjectReference(snapshot->child) : cJSON_CreateObject());
+ else if(streq(method,"item.rules.list")) {
+  if(!character_generated) error(id,"wrong_phase","Start a character first.");
+  else response(id,deluxe_item_rules());
+ }
+ else if(streq(method,"item.preferences") || streq(method,"item.rules.clear")) {
+  bool changed=false;
+  if(!ready || active_prompt || !streq(phase,"playing")) { error(id,"busy","Return to normal play first."); goto done; }
+  if(!streq(str(p,"revision"),revision_text)) { error(id,"stale_revision","State changed; choose again."); goto done; }
+  if(streq(method,"item.rules.clear")) {
+   cJSON *rules=deluxe_item_rules(),*r;
+   cJSON_ArrayForEach(r,cJSON_GetObjectItem(rules,"rules")) if(streq(str(r,"id"),str(p,"rule"))) {
+    deluxe_clear_rule(r); changed=true; break;
+   }
+   cJSON_Delete(rules);
+  } else {
+   struct object *obj=NULL; cJSON *r; int ix=0;
+   cJSON_ArrayForEach(r,cJSON_GetObjectItem(snapshot,"items")) {
+    ++ix; if(streq(str(r,"id"),str(p,"item")) && ix<(int)item_handle_count) obj=item_handles[ix];
+   }
+   if(!obj || !obj->known || !item_is_available(obj)) { error(id,"stale_handle","Select an available item."); goto done; }
+   if(streq(str(p,"operation"),"ignore_item") && cJSON_IsBool(cJSON_GetObjectItem(p,"enabled"))) {
+    if(cJSON_IsTrue(cJSON_GetObjectItem(p,"enabled"))) obj->known->notice|=OBJ_NOTICE_IGNORE;
+    else obj->known->notice&=~OBJ_NOTICE_IGNORE;
+    changed=true;
+   } else if(streq(str(p,"operation"),"ignore_kind") && deluxe_kind_ignore_allowed(obj) && cJSON_IsBool(cJSON_GetObjectItem(p,"enabled"))) {
+    if(cJSON_IsTrue(cJSON_GetObjectItem(p,"enabled"))) object_ignore_flavor_of(obj); else kind_ignore_clear(obj->kind);
+    changed=true;
+   } else if(streq(str(p,"operation"),"autoinscribe") && cJSON_IsString(cJSON_GetObjectItem(p,"text")) && strlen(str(p,"text"))<80) {
+    if(*str(p,"text")) add_autoinscription(obj->kind->kidx,str(p,"text"),object_flavor_is_aware(obj));
+    else remove_autoinscription(obj->kind->kidx);
+    autoinscribe_pack(player); autoinscribe_ground(player); changed=true;
+   }
+  }
+  if(!changed) error(id,"invalid_argument","That item rule is not available.");
+  else {
+   player->upkeep->notice|=PN_IGNORE;
+   player->upkeep->redraw|=PR_INVEN|PR_EQUIP|PR_ITEMLIST|PR_MAP;
+   ready=false; Term_keypress(ESCAPE,0); response(id,cJSON_CreateObject());
+  }
+ }
  else if(streq(method,"item.compare")) {
   const struct object *obj=NULL; cJSON *record; int ix=0;
   if(!player || !player->race || !snapshot || (!ready && !(active_store && !store_busy)) || active_prompt) {

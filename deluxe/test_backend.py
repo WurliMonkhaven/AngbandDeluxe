@@ -958,6 +958,46 @@ class BackendTests(unittest.TestCase):
                 self.assertEqual(records[handle]['location'],'weapon')
                 self.assertTrue(records[handle]['description'])
 
+    def test_native_item_preferences(self):
+        e = self.engine
+        e.hello(); e.birth()
+        potion = next(o for o in e.state["items"] if "Potion" in o["label"])
+        kind = potion["actual"]["kind"]
+        def current():
+            return next(o for o in e.state["items"] if o["actual"]["kind"] == kind)
+        def apply(operation, **values):
+            old = e.state["revision"]
+            result = e.call("item.preferences", {"revision": old, "item": current()["id"], "operation": operation, **values})
+            self.assertIn("result", result)
+            e.next_state(old)
+            while e.state["readiness"] != "ready": e.key("enter")
+        apply("autoinscribe", text="!d")
+        self.assertEqual(current()["inscription"], "!d")
+        self.assertEqual(current()["preferences"]["autoinscription"], "!d")
+        # Updating the auto rule preserves an existing manual/nonempty inscription.
+        apply("autoinscribe", text="!q")
+        self.assertEqual(current()["inscription"], "!d")
+        self.assertEqual(current()["preferences"]["autoinscription"], "!q")
+        apply("ignore_item", enabled=True)
+        self.assertTrue(current()["preferences"]["item_ignored"])
+        apply("ignore_item", enabled=False)
+        self.assertFalse(current()["preferences"]["item_ignored"])
+        self.assertTrue(current()["preferences"]["kind_allowed"])
+        apply("ignore_kind", enabled=True)
+        self.assertTrue(current()["preferences"]["kind_ignored"])
+        rules = e.call("item.rules.list")["result"]
+        ignored = next(r for r in rules["rules"] if r["type"] == "kind")
+        old = e.state["revision"]
+        self.assertIn("result", e.call("item.rules.clear", {"revision": old, "rule": ignored["id"]}))
+        e.next_state(old)
+        while e.state["readiness"] != "ready": e.key("enter")
+        self.assertFalse(current()["preferences"]["kind_ignored"])
+        self.assertTrue(any(r["type"] == "auto" for r in e.call("item.rules.list")["result"]["rules"]))
+        apply("autoinscribe", text="")
+        self.assertFalse(any(r["type"] == "auto" for r in e.call("item.rules.list")["result"]["rules"]))
+        self.assertEqual(current()["inscription"], "!d")
+        self.assertEqual(e.call("item.preferences", {"revision": "0", "item": current()["id"], "operation": "ignore_item", "enabled": True})["error"]["code"], "stale_revision")
+
     def test_native_item_comparison(self):
         e = self.engine
         e.hello(); e.birth()

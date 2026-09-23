@@ -89,6 +89,7 @@ struct Connection {
  json previous_messages = json::array();
  json capabilities = json::object();
  json comparisons = json::object();
+ json item_rules=nullptr;
  std::map<std::string,std::string> comparison_requests;
  std::map<std::string,std::string> requests;
  unsigned long next = 0;
@@ -166,7 +167,7 @@ struct Connection {
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
-   if (name == "state.changed") { state = std::move(j.at("data")); comparisons=json::object(); game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
+   if (name == "state.changed") { state = std::move(j.at("data")); comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
    if (name == "prompt.requested") { prompt = j.at("data"); busy = false; pickup_travel=false; }
    return;
   }
@@ -199,6 +200,7 @@ struct Connection {
   else if (method == "saves.rename" || method == "saves.delete") { menu_error.clear(); send("saves.list"); }
   else if (method == "commands.list") commands = result;
   else if (method == "catalog.get") catalog = result;
+  else if (method == "item.rules.list") item_rules=result;
   else if (method == "session.new" || method == "session.load") { menu_error.clear(); send("catalog.get"); }
   else if (method == "session.save") { busy = false; notice("Game saved."); }
   else if (method == "session.close" || method == "debug.quit") { close_confirmed=true; closed = !return_to_menu; busy = false; }
@@ -302,10 +304,13 @@ static void properties(const json &value) {
 #include "spell_panel.h"
 #include "item_description.h"
 #include "item_comparison.h"
+#include "item_rules.h"
 #include "store_panel.h"
 struct UI {
  Connection &c;
  bool open_character_sheet=false;
+ bool inscription_edit=false;
+ ItemRules item_rules_panel;
  StorePanel store_panel;
  SpellPanel spell_panel;
  bool was_store=false;
@@ -487,6 +492,7 @@ struct UI {
   focus_game(); return true;
  }
  void execute(const std::string &id,const std::string &item="") {
+  if(id=="core.inscribe" && c.ready()) inscription_edit=true;
   if(id=="core.character" && c.state.contains("player") && c.state["player"].contains("character_sheet")) { keys.clear(); open_character_sheet=true; return; }
   if(c.native_targeting() && (id=="core.look" || id=="core.target")) c.target("targeting.begin",{{"mode",id=="core.look"?"look":"target"}});
   else c.command(id,item);
@@ -851,6 +857,7 @@ struct UI {
       const auto command=action.get<std::string>();
       if(ImGui::MenuItem(item_action_label(command))) execute(command,id);
      }
+     item_rules_panel.context(c,o);
      ImGui::EndDisabled(); ImGui::EndPopup();
     }
 
@@ -1007,9 +1014,11 @@ struct UI {
   const bool item_selection=c.prompt.value("selection_kind","")=="item";
   const bool spell_selection=c.prompt.value("selection_kind","")=="spell";
   if(fresh) { last_prompt=id; SDL_strlcpy(prompt_text,c.prompt.value("initial","").c_str(),sizeof(prompt_text)); }
-  if(!ImGui::IsPopupOpen("Angband asks")) ImGui::OpenPopup("Angband asks");
+  const bool editing_inscription=inscription_edit && c.prompt.value("type","")=="text";
+  const char *prompt_title=editing_inscription?"Item inscription":"Angband asks";
+  if(!ImGui::IsPopupOpen(prompt_title)) ImGui::OpenPopup(prompt_title);
   if(item_selection || spell_selection) ImGui::SetNextWindowSize(ImVec2(std::min(ImGui::GetMainViewport()->WorkSize.x-24,ImGui::GetFontSize()*48),0),ImGuiCond_Always);
-  if(ImGui::BeginPopupModal("Angband asks",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+  if(ImGui::BeginPopupModal(prompt_title,nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
    ImGui::TextWrapped("%s",c.prompt.value("text","").c_str());
    auto type=c.prompt.value("type",""); bool answered=false;
    if(type=="confirmation") {
@@ -1024,16 +1033,20 @@ struct UI {
      if(ImGui::Selectable(option.value("label","").c_str())) { c.answer(option.at("id")); answered=true; break; }
     }
    } else {
+    if(editing_inscription) {
+     ImGui::TextDisabled("Current: %s",c.prompt.value("initial","").c_str());
+     ItemRules::inscription_help();
+    }
     if(fresh) ImGui::SetKeyboardFocusHere();
-    const bool submitted=ImGui::InputText("##answer",prompt_text,sizeof(prompt_text),ImGuiInputTextFlags_EnterReturnsTrue);
-    if(ImGui::Button("OK") || submitted) {
+    const bool submitted=ImGui::InputText("##answer",prompt_text,std::min(sizeof(prompt_text),size_t(std::max(0,c.prompt.value("maximum",4095)))+1),ImGuiInputTextFlags_EnterReturnsTrue);
+    if(ImGui::Button(editing_inscription?"Save inscription":"OK") || submitted) {
      if(type=="quantity") { try { c.answer(std::stoi(prompt_text)); answered=true; } catch(...) { c.notice("Enter a number."); } }
      else { c.answer(std::string(prompt_text)); answered=true; }
     }
    }
    if(type!="choice") ImGui::SameLine();
-   if(!answered && !spell_selection && (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))) { c.answer(nullptr); answered=true; }
-   if(answered) ImGui::CloseCurrentPopup(); ImGui::EndPopup();
+   if(!answered && !spell_selection && (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))) { inscription_edit=false; c.answer(nullptr); answered=true; }
+   if(answered) { if(editing_inscription) inscription_edit=false; ImGui::CloseCurrentPopup(); } ImGui::EndPopup();
   }
  }
  void draw(SDL_Window *window) {
@@ -1175,11 +1188,17 @@ struct UI {
      }
      ImGui::EndDisabled(); ImGui::EndChild(); ImGui::EndTabItem();
     }
+    if(ImGui::BeginTabItem("More")) {
+     ImGui::BeginChild("More content");
+     if(c.capabilities.value("item.rules",0)>0 && ImGui::Button("Item rules")) item_rules_panel.open=true;
+     ImGui::EndChild(); ImGui::EndTabItem();
+    }
     ImGui::EndTabBar();
    }
    targeting_was_active=targeting_active;
    ImGui::EndChild(); ImGui::EndTable();
   }
+  if(item_rules_panel.draw(c)) focus_game();
   if(c.state.contains("player")) {
    if(CharacterSheet::draw(c.state["player"],open_character_sheet)) focus_game();
   }

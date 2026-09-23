@@ -336,6 +336,14 @@ int main(int argc,char **argv) {
    ImGui::NewFrame(); ImGui::Begin("Comparison test"); ItemComparison::draw(preview,candidate); ImGui::End(); ImGui::Render();
   }
   check(preview.next==1 && !preview.busy,"Cached comparison must not resend or block gameplay");
+  ItemRules rules_panel; rules_panel.open=true;
+  for(int frame=0;frame<3;++frame) {
+   if(frame==1) preview.item_rules={{"revision","1"},{"rules",json::array({{{"id","kind-1-1"},{"type","kind"},{"label","Potions"},{"value","Ignore when known"}}})}};
+   if(frame==2) io.AddKeyEvent(ImGuiKey_Escape,true);
+   ImGui::NewFrame(); ImGui::Begin("Rules host"); bool closed=rules_panel.draw(preview); ImGui::End(); ImGui::Render();
+   if(frame==2) check(closed,"Escape should close rules without mutation");
+  }
+  for(const auto &request:preview.requests) check(request.second=="item.rules.list","Browsing rules must not mutate item preferences");
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";
