@@ -283,6 +283,22 @@ int main(int argc,char **argv) {
   ImGui::End(); ImGui::Render();
   const auto cancelled=json::parse(magic.outgoing);
   check(cancelled["method"]=="prompt.reply" && cancelled["params"]["value"].is_null(),"Spell cancellation must use the engine prompt");
+  io.AddKeyEvent(ImGuiKey_Escape,false);
+  json overview={{"name",""},{"race","Elf"},{"class","Mage"},{"title","Novice"},{"level",1},
+   {"hp",9},{"max_hp",9},{"sp",0},{"max_sp",2},{"food",8989},{"food_max",10000},
+   {"experience",4},{"level_start_experience",0},{"next_level_experience",12},
+   {"stats",{13,48,9,11,13}},{"gold",322},{"floor","open floor"},
+   {"tracked_creature",{{"name","aimless-looking merchant"},{"visible",true},{"hp",2},{"max_hp",5}}}};
+  for(int frame=0;frame<4;++frame) {
+   if(frame==1) { overview["hp"]=-3; overview["feeling"]="9 / ?"; }
+   if(frame==2) { overview["name"]="A longer character name"; overview["level"]=50; overview["next_level_experience"]=0; }
+   if(frame==3) overview["tracked_creature"]["visible"]=false;
+   ImGui::NewFrame(); ImGui::SetNextWindowPos(ImVec2(0,0)); ImGui::SetNextWindowSize(ImVec2(frame%2?320.f:600.f,700));
+   ImGui::Begin("Overview test");
+   check(!CharacterOverview::draw(overview,frame!=1),"Rendering overview must not open character details");
+   ImGui::End(); ImGui::Render();
+   check(ImGui::GetDrawData()->TotalVtxCount>0,"Overview did not produce UI geometry");
+  }
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";

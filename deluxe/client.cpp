@@ -284,6 +284,7 @@ static void properties(const json &value) {
   }
  }
 }
+#include "character_overview.h"
 #include "spell_panel.h"
 #include "store_panel.h"
 struct UI {
@@ -732,68 +733,7 @@ struct UI {
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
  void character() {
-  if (!c.state.contains("player")) return;
-  const auto &p=c.state["player"];
-  ImGui::Text("%s",p.value("name","").c_str());
-  ImGui::TextWrapped("%s %s · Level %d",p.value("race","").c_str(),p.value("class","").c_str(),p.value("level",0));
-  if(p.contains("title")) ImGui::TextWrapped("%s",display_label(p.value("title","")).c_str());
-  auto bar=[&](const char *name,const char *cur,const char *max,ImVec4 fill) {
-   char b[80]; int v=p.value(cur,0),m=p.value(max,0); SDL_snprintf(b,sizeof(b),"%s %d / %d",name,std::max(0,v),std::max(0,m));
-   ImGui::PushStyleColor(ImGuiCol_PlotHistogram,fill);
-   ImGui::PushStyleColor(ImGuiCol_FrameBg,ImVec4(fill.x*.3f,fill.y*.3f,fill.z*.3f,1));
-   ImGui::ProgressBar(resource_fraction(v,m),ImVec2(-1,0),b);
-   ImGui::PopStyleColor(2);
-  };
-  bar("HP","hp","max_hp",ImVec4(.68f,.16f,.20f,1));
-  bar("SP","sp","max_sp",ImVec4(.16f,.36f,.72f,1));
-  const int food=p.value("food",0), food_max=p.value("food_max",0);
-  const float food_fraction=food_max>0?float(food)/float(food_max):0.f;
-  char food_label[80];
-  SDL_snprintf(food_label,sizeof(food_label),"Food %.1f%% (%d)",100.f*food_fraction,food);
-  ImGui::PushStyleColor(ImGuiCol_PlotHistogram,ImVec4(.16f,.48f,.27f,1));
-  ImGui::PushStyleColor(ImGuiCol_FrameBg,ImVec4(.05f,.14f,.08f,1));
-  ImGui::ProgressBar(std::clamp(food_fraction,0.f,1.f),ImVec2(-1,0),food_label);
-  ImGui::PopStyleColor(2);
-  ImGui::TextWrapped("Depth %d · Gold %d",p.value("depth",0),p.value("gold",0));
-  ImGui::TextWrapped("Armour %d · Speed %+d",p.value("armour",0),p.value("speed",0));
-  if(p.contains("experience")) {
-   const int xp=p.value("experience",0),next=p.value("next_level_experience",0);
-   if(next>0) ImGui::TextWrapped("XP %d · Next level %d",xp,std::max(0,next-xp));
-   else ImGui::TextWrapped("XP %d · Maximum level",xp);
-  }
-  static const char *stats[]={"STR","INT","WIS","DEX","CON"};
-  if(p.contains("stats")) for(size_t i=0;i<p["stats"].size();++i) {
-   int v=p["stats"][i];
-   char label[40];
-   if(v>18) SDL_snprintf(label,sizeof(label),"%s 18/%02d",i<std::size(stats)?stats[i]:"Stat",v-18);
-   else SDL_snprintf(label,sizeof(label),"%s %d",i<std::size(stats)?stats[i]:"Stat",v);
-   const float right=ImGui::GetCursorScreenPos().x+ImGui::GetContentRegionAvail().x;
-   if(i && ImGui::GetItemRectMax().x+ImGui::CalcTextSize(label).x+ImGui::GetStyle().ItemSpacing.x<right) ImGui::SameLine();
-   ImGui::TextUnformatted(label);
-  }
-  for(const auto &s:p.value("statuses",json::array())) {
-   if(s.value("label","")=="FOOD") continue;
-   ImGui::TextWrapped("%s (%d)",display_label(s.value("label","")).c_str(),s.value("duration",0));
-  }
-  if(p.contains("floor")) ImGui::TextWrapped("Light %d · %s",p.value("light",0),display_label(p.value("floor","")).c_str());
-  if(p.contains("feeling")) ImGui::TextWrapped("Level feeling %s",p.value("feeling","").c_str());
-  if(p.value("trap_detected",false)) ImGui::TextUnformatted("Trap-detected area");
-  if(p.value("recall",0)) ImGui::TextUnformatted("Recall pending");
-  if(p.value("descent",0)) ImGui::TextUnformatted("Descent pending");
-  if(p.value("resting",0)) ImGui::TextUnformatted("Resting");
-  if(p.value("running",0)) ImGui::TextUnformatted("Running");
-  if(p.value("repeat",0)) ImGui::Text("Repeating: %d",p.value("repeat",0));
-  if(p.value("study",0)) ImGui::Text("Spells to learn: %d",p.value("study",0));
-  if(p.value("extra_moves",0)) ImGui::Text("Extra moves: %+d",p.value("extra_moves",0));
-  if(p.value("unignoring",false)) ImGui::TextUnformatted("Showing ignored items");
-  if(p.contains("tracked_creature")) {
-   const auto &m=p["tracked_creature"];
-   if(m.value("visible",false)) {
-    ImGui::TextWrapped("%s",m.value("name","").c_str());
-    char text[64]; SDL_snprintf(text,sizeof(text),"%d / %d",std::max(0,m.value("hp",0)),m.value("max_hp",0));
-    ImGui::ProgressBar(resource_fraction(m.value("hp",0),m.value("max_hp",0)),ImVec2(-1,0),text);
-   } else ImGui::TextUnformatted("Tracked creature: out of sight");
-  }
+  if(c.state.contains("player") && CharacterOverview::draw(c.state["player"],c.ready())) execute("core.character");
  }
  void tile_details(int x,int y,bool full) {
   ImGui::Text("Tile %d, %d",x,y);

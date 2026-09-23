@@ -100,6 +100,7 @@ static void deluxe_character_details(cJSON *p)
  else if (player_is_shapechanged(player)) title=player->shape->name;
  string(p,"title",title); number(p,"max_level",player->max_lev);
  number(p,"experience",player->exp); number(p,"max_experience",player->max_exp);
+ number(p,"level_start_experience",player->lev>1 ? (int)((int64_t)player_exp[player->lev-2]*player->expfact/100) : 0);
  number(p,"next_level_experience",player->lev<PY_MAX_LEVEL ? (int)((int64_t)player_exp[player->lev-1]*player->expfact/100) : 0);
  number(p,"light",square_light(cave,player->grid));
  string(p,"floor",trap && !square_isinvis(cave,player->grid) ? trap->kind->name : square_feat(cave,player->grid)->name);

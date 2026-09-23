@@ -505,3 +505,8 @@ Aim-direction prompts immediately show a mouse-following targeting box and
 edge connector, before entering a separate targeting mode. With Quick targeting
 enabled, the first click at that preview resumes the aimed action. Hover is
 client-only and neither selects an engine target nor consumes a turn.
+
+
+### Compact character overview
+
+The fixed sidebar overview groups character identity and resources, dungeon context, and the tracked creature into distinct sections. Identity shares a compact wrapping row with a Details button, which opens the original character screen until a native sheet replaces it. HP/SP and Food/XP use a two-column bar layout; food retains both percentage and amount. XP shows progress within the current level using engine-supplied level_start_experience and next_level_experience thresholds, with exact totals in a tooltip. Attributes occupy equal-width columns; gold, armour, speed, depth, light and feeling use aligned cells. Creature names are capitalized for display. The overview remains outside the scrolling tab panel.
