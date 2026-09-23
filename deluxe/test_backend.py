@@ -27,6 +27,7 @@ class Engine:
         self.state = {}
         self.prompt = None
         self.responses = {}
+        self.travel = {}
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._errors, daemon=True).start()
 
@@ -55,6 +56,8 @@ class Engine:
         if j.get("kind") == "event":
             if j["event"] == "state.changed":
                 self.state = j["data"]
+            elif j["event"] == "travel.changed":
+                self.travel = j["data"]
             elif j["event"] == "prompt.requested":
                 self.prompt = j["data"]
         else:
@@ -301,6 +304,13 @@ class BackendTests(unittest.TestCase):
                 e.key(ord(key))
                 while e.state['readiness']!='ready': e.key('enter')
             self.assertEqual(e.state['map']['visible'][y][x],'0')
+        snapshot = e.call('state.get')['result']
+        for _ in range(3):
+            preview = e.call('dungeon.route', {'context': snapshot['context'], 'x': x, 'y': y})['result']
+            self.assertTrue(preview['reachable'])
+            self.assertEqual(preview['path'][-1], [x, y])
+            self.assertEqual(e.call('state.get')['result'], snapshot)
+        self.assertEqual(e.call('dungeon.route', {'context': 'old', 'x': x, 'y': y})['error']['code'], 'stale_revision')
         self.assertEqual(e.call('dungeon.pickup',{'context':'old','x':x,'y':y})['error']['code'],'stale_revision')
         self.assertEqual(e.call('dungeon.pickup',{'context':e.state['context'],'x':-1,'y':y})['error']['code'],'invalid_argument')
         if interrupt:
@@ -313,6 +323,9 @@ class BackendTests(unittest.TestCase):
             while 'cancel-batch' not in e.responses: e.receive()
             self.assertIn('result',e.responses['pickup-batch'])
             self.assertIn('result',e.responses['cancel-batch'])
+            self.assertFalse(e.travel['active'])
+            self.assertTrue(e.travel['interrupted'])
+            self.assertIn('cancelled',e.travel['label'])
             e.next_state(old)
             while e.state['readiness']!='ready': e.key('enter')
             self.assertTrue(any(o['location']=='Floor' and o['actual']['kind']==kind for o in e.state['items']))

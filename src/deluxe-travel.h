@@ -5,6 +5,7 @@ static enum deluxe_travel_stage travel_stage;
 static struct loc travel_grid, travel_waypoint;
 static unsigned long travel_level;
 static bool pickup_automatic;
+static const char *travel_stop_reason;
 static cmd_code travel_command=CMD_PICKUP;
 
 static cmd_code deluxe_terrain_command(struct loc grid)
@@ -81,7 +82,7 @@ static bool deluxe_travel_continue(void)
    count=find_path(player,player->grid,adjacent,&steps); mem_free(steps);
    if(count>=0 && (best<0 || count<best)) { best=count; travel_waypoint=adjacent; }
   }
-  if(best<0) { travel_stage=TRAVEL_IDLE; return false; }
+  if(best<0) { travel_stop_reason="No route to a digging position could be found."; travel_stage=TRAVEL_IDLE; return false; }
   if(best>0) {
    travel_stage=TRAVEL_APPROACH;
    cmdq_push(CMD_PATHFIND); cmd_set_arg_point(cmdq_peek(),"point",travel_waypoint); return true;
@@ -93,7 +94,7 @@ static bool deluxe_travel_continue(void)
   else {
    int16_t *steps=NULL;
    int count=find_path(player,player->grid,travel_grid,&steps);
-   if(count<=0) { mem_free(steps); travel_stage=TRAVEL_IDLE; return false; }
+   if(count<=0) { mem_free(steps); travel_stop_reason="No walking route could be found."; travel_stage=TRAVEL_IDLE; return false; }
    /* Ordinary running stops before visible objects. Route to the previous
     * square, then take one normal step, without weakening running checks. */
    travel_waypoint=loc_diff(travel_grid,ddgrid[steps[0]]);
@@ -112,6 +113,7 @@ static bool deluxe_travel_continue(void)
  }
  if(travel_stage==TRAVEL_STEP) {
   if(square_monster(cave,travel_grid)) {
+   travel_stop_reason="Travel stopped: destination occupied.";
    travel_stage=TRAVEL_IDLE; return false;
   }
   travel_stage=TRAVEL_ARRIVED;
@@ -135,4 +137,66 @@ static bool deluxe_travel_continue(void)
   * Queue it directly: arrival's input flush must not eat synthetic keystrokes. */
  cmdq_push(CMD_PICKUP);
  return true;
+}
+
+
+/* Presentation-only tracking; never changes the movement or disturbance rules. */
+static bool travel_display_active, travel_display_attack;
+static struct loc travel_display_grid;
+static unsigned long travel_display_level;
+static cmd_code travel_display_command;
+static void deluxe_travel_feedback(const char *label,bool active,bool interrupted)
+{
+ cJSON *v=cJSON_CreateObject();
+ string(v,"label",label); json_bool(v,"active",active); json_bool(v,"interrupted",interrupted);
+ number(v,"x",travel_display_grid.x); number(v,"y",travel_display_grid.y); counter(v,"level_id",travel_display_level);
+ event("travel.changed",v); travel_display_active=active;
+}
+static void deluxe_travel_begin(struct loc grid,cmd_code command)
+{
+ travel_stop_reason=NULL;
+ travel_display_attack=command==CMD_WALK && distance(player->grid,grid)<=1 && square_monster(cave,grid)!=NULL;
+ travel_display_grid=grid; travel_display_level=deluxe_level; travel_display_command=command;
+ deluxe_travel_feedback(travel_display_attack?"Engaging adjacent creature":command==CMD_PICKUP?"Walking to pick up":command==CMD_TUNNEL?"Approaching wall to tunnel":command==CMD_GO_UP?"Walking to ascend":command==CMD_GO_DOWN?"Walking to descend":"Moving to destination",true,false);
+}
+static void deluxe_travel_finish(void)
+{
+ bool arrived;
+ if(!travel_display_active) return;
+ arrived=loc_eq(player->grid,travel_display_grid);
+ if((travel_display_command==CMD_GO_UP || travel_display_command==CMD_GO_DOWN) && travel_display_level!=deluxe_level)
+  deluxe_travel_feedback("Stairs used",false,false);
+ else if(travel_display_level!=deluxe_level)
+  deluxe_travel_feedback("Travel stopped: level changed",false,true);
+ else if(travel_display_command==CMD_TUNNEL && deluxe_terrain_command(travel_display_grid)!=CMD_TUNNEL)
+  deluxe_travel_feedback("Passage opened",false,false);
+ else if(travel_display_attack)
+  deluxe_travel_feedback("Interaction finished",false,false);
+ else if(arrived)
+  /* Ordinary arrivals clear the destination marker without a notification. */
+  deluxe_travel_feedback(travel_display_command==CMD_PICKUP?"Arrived: pickup attempted":"",false,false);
+ else
+  deluxe_travel_feedback(travel_stop_reason?travel_stop_reason:"",false,true);
+}
+static void deluxe_route_preview(const char *id,const cJSON *p)
+{
+ struct loc dest=loc(num(p,"x",-1),num(p,"y",-1)),at;
+ int16_t *steps=NULL; int count,i;
+ cJSON *out,*points;
+ const cJSON *x=cJSON_GetObjectItem(p,"x"),*y=cJSON_GetObjectItem(p,"y");
+ if(!ready || active_prompt || !character_generated || !streq(phase,"playing")) { error(id,"busy","Route previews require normal play."); return; }
+ if(!streq(str(p,"context"),context_text)) { error(id,"stale_revision","View changed."); return; }
+ if(!cJSON_IsNumber(x) || !cJSON_IsNumber(y) || x->valuedouble!=x->valueint || y->valuedouble!=y->valueint || !square_in_bounds_fully(player->cave,dest)) {
+  error(id,"invalid_argument","Invalid route destination."); return;
+ }
+ /* Use the same knowledge, door and trap costs as ordinary mouse pathfinding. */
+ count=find_path(player,player->grid,dest,&steps);
+ out=cJSON_CreateObject(); points=cJSON_CreateArray(); at=player->grid;
+ for(i=count-1;i>=0;--i) {
+  int xy[2]; at=loc_sum(at,ddgrid[steps[i]]); xy[0]=at.x; xy[1]=at.y;
+  cJSON_AddItemToArray(points,ints(xy,2));
+ }
+ mem_free(steps);
+ string(out,"context",context_text); number(out,"x",dest.x); number(out,"y",dest.y);
+ json_bool(out,"reachable",count>=0); cJSON_AddItemToObject(out,"path",points); response(id,out);
 }

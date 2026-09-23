@@ -375,6 +375,31 @@ int main(int argc,char **argv) {
    creator.receive({{"id",cancel},{"result",json::object()}}); creator.process_stopped(0);
    check(creator.restart_ready,"Cancelled birth must return to main menu without backend stopped error");
   }
+  {
+   Connection feedback; feedback.connected=true; feedback.state={{"context","view-1"},{"readiness","ready"},{"phase","playing"},{"dungeon",{{"level_id","1"}}}};
+   feedback.capabilities["interaction.route"]=1;
+   feedback.route_sent=SDL_GetTicksNS()-120000001;
+   feedback.preview_route(4,5);
+   check(!feedback.busy && !feedback.route_request.empty(),"Preview must not block input");
+   const auto request=feedback.route_request; const auto count=feedback.next;
+   feedback.preview_route(6,7); check(feedback.next==count,"Only one preview may be in flight");
+   feedback.busy=true;
+   feedback.receive({{"id",request},{"result",{{"context","view-1"},{"x",4},{"y",5},{"reachable",true},{"path",json::array({json::array({4,5})})}}}});
+   check(feedback.busy && feedback.route["x"]==4,"Preview reply must not unblock a movement command");
+   auto stale=feedback.send("dungeon.route"); feedback.receive({{"id",stale},{"result",{{"context","older"},{"x",9}}}});
+   check(feedback.route["x"]==4,"Stale route must be discarded");
+   feedback.receive({{"kind","event"},{"event","travel.changed"},{"data",{{"label","Travel cancelled by input"},{"active",false},{"interrupted",true}}}});
+   check(feedback.messages.front()["text"]=="[SYSTEM] Travel cancelled by input","Interrupted travel must be recorded in message history");
+   feedback.state["message_pending"]=true;
+   feedback.previous_messages=json::array({{{"text","The scruffy little dog bites you. LOW HITPOINT WARNING! More messages follow."}}});
+   for(int i=0;i<3;++i) {
+    ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(i==0?350:900,450)); ImGui::Begin("Dungeon feedback test");
+    auto origin=ImGui::GetCursorScreenPos(),area=ImGui::GetContentRegionAvail(); auto *draw=ImGui::GetWindowDrawList();
+    DungeonFeedback::route(feedback,draw,origin,area,12,22,0,0,true,4,5);
+    DungeonFeedback::ribbon(feedback,draw,origin,area,i==0);
+    ImGui::End(); ImGui::Render(); feedback.state["message_pending"]=i==0;
+   }
+  }
   Connection shop; shop.connected=true;
   shop.state={{"phase","store"},{"context","shop-1"},{"player",{{"gold",100}}},
    {"items",json::array({{{"id","stock-1"},{"label","a Dagger"},{"location","Store"},{"quantity",2},{"description","Weapon description"}},

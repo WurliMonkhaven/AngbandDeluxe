@@ -604,3 +604,29 @@ name limits and birth-option choices are validated. Engine events supply point
 costs and totals; state queries do not generate rolls or mutate the character.
 Clients without the capability retain terminal creation. Existing commands and
 save formats remain unchanged. macOS/Linux packaging remains deferred.
+
+
+## Dungeon interaction feedback (September 2026)
+
+Hovering during ordinary unmodified mouse play previews the engine's walking
+route as a continuous amber line through tile centres. The optional interaction.route capability provides
+read-only dungeon.route queries, checked against the current input context.
+Queries are throttled, limited to one in flight, and never set the client's
+command-busy flag. Stale replies are discarded. The path is advisory: normal
+movement still stops for danger, objects and other engine interruptions.
+
+Mouse movement and travel-and-act intents emit travel.changed feedback with a
+destination, level identity, activity label and active/interrupted state. The
+client records specific travel failures in regular [SYSTEM] messages. Travel
+activity and completion have no ribbon or queued-destination marker. Feedback
+does not resume interrupted travel or bypass checks.
+
+Message pauses replace the small corner '- more -' text with a centred dark
+ribbon near the bottom of the dungeon: an amber pause emblem, 'Messages waiting',
+a two-line excerpt, gentle breathing accents and a faint viewport border. The
+Messages heading also displays WAITING. White filled blocks are avoided for CRT
+readability. Existing acknowledgement keys remain authoritative, and clicking
+continues only when Proceed with click is enabled. No messages are auto-skipped.
+
+The ribbon fades to 6% opacity while hovered and never captures clicks.
+Underlying dungeon interactions and Proceed with click retain their normal rules.

@@ -90,6 +90,9 @@ struct Connection {
  json capabilities = json::object();
  json comparisons = json::object();
  json item_rules=nullptr;
+ json route=json::object(), travel=json::object();
+ std::string route_request;
+ Uint64 route_sent=0;
  json save_change_requests=json::object(), save_changes=json::array();
  std::map<std::string,std::string> comparison_requests;
  std::map<std::string,std::string> requests;
@@ -171,12 +174,22 @@ struct Connection {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
    if (name == "state.changed") { state = std::move(j.at("data")); comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
+   if(name=="travel.changed") {
+    travel=j.at("data");
+    const auto label=travel.value("label","");
+    if(travel.value("interrupted",false) && !label.empty()) notice(label);
+   }
    if (name == "prompt.requested") { prompt = j.at("data"); busy = false; pickup_travel=false; }
    return;
   }
   auto id = j.value("id",""); auto it = requests.find(id);
   if (it == requests.end()) return;
   auto method = it->second; requests.erase(it);
+  if(method=="dungeon.route") {
+   route_request.clear();
+   if(!j.contains("error") && j["result"].value("context","")==state.value("context","")) route=j["result"];
+   return; // Preview replies must never unblock actions or show stale-query errors.
+  }
   if(save_change_requests.contains(id)) {
    if(!j.contains("error")) save_changes.push_back(save_change_requests[id]);
    save_change_requests.erase(id);
@@ -260,7 +273,14 @@ struct Connection {
  void target(const std::string &method,json params=json::object()) {
   if(!connected || busy || !prompt.empty()) return;
   params["context"]=state.value("context",""); send(method,std::move(params)); busy=true;
-  pickup_travel=method=="dungeon.pickup" || method=="dungeon.terrain";
+  pickup_travel=method=="dungeon.pickup" || method=="dungeon.terrain" || method=="dungeon.click";
+ }
+ void preview_route(int x,int y) {
+  if(!ready() || capabilities.value("interaction.route",0)==0 || !route_request.empty()) return;
+  const auto context=state.value("context","");
+  if(route.value("context","")==context && route.value("x",-1)==x && route.value("y",-1)==y) return;
+  const auto now=SDL_GetTicksNS(); if(now-route_sent<120000000) return;
+  route_sent=now; route_request=send("dungeon.route",{{"context",context},{"x",x},{"y",y}});
  }
  void command(const std::string &id, const std::string &item = "", const std::string &spell = "") {
   if (!ready()) return;
@@ -309,6 +329,7 @@ static void properties(const json &value) {
 }
 #include "character_overview.h"
 #include "character_sheet.h"
+#include "dungeon_feedback.h"
 #include "birth_panel.h"
 #include "quickbar.h"
 #include "spell_panel.h"
@@ -441,7 +462,7 @@ struct UI {
      if(ImGui::IsItemHovered()) ImGui::SetTooltip("Ten slots using top-row 1-0. Numpad movement is unchanged. Right-click a slot, item, spell or command to assign.");
      ImGui::Spacing();
      ImGui::Spacing(); ImGui::Checkbox("Proceed with click",&draft_proceed_with_click);
-     ImGui::TextWrapped("Left-click the game view to continue at - more -.");
+     ImGui::TextWrapped("Left-click the game view to continue when messages are waiting.");
      ImGui::Spacing(); ImGui::Checkbox("Quick targeting",&draft_quick_targeting);
      if(ImGui::IsItemHovered()) ImGui::SetTooltip("Click to confirm a target and continue casting, shooting or another aimed action.");
      ImGui::Spacing(); ImGui::Checkbox("Click exits look",&draft_click_exits_look);
@@ -708,6 +729,10 @@ struct UI {
     }
     outline(wx,wy,IM_COL32(255,225,125,255),2.f*display_scale);
    };
+   const auto &io=ImGui::GetIO();
+   const bool routing=hovered && c.ready() && !c.state.contains("targeting") && !c.state.value("aiming",false) && !c.state.value("direction_prompt",false) && !c.state.value("message_pending",false) && !io.KeyShift && !io.KeyCtrl && !io.KeyAlt;
+   if(routing) c.preview_route(x,y);
+   DungeonFeedback::route(c,draw,origin,size,cw,ch,ox,oy,routing,x,y);
    if(mouse_target) {
     target_box(x,y);
    } else if(c.state.contains("targeting")) {
@@ -722,14 +747,18 @@ struct UI {
     const auto &t=c.state["selected_target"];
     outline(t.value("x",0),t.value("y",0),IM_COL32(210,175,85,200),display_scale);
    }
-   if(hovered) {
+   if(hovered && !c.state.value("message_pending",false)) {
     if(!mouse_target) outline(x,y,IM_COL32(140,185,220,190),display_scale);
     ImGui::BeginTooltip(); ImGui::PushTextWrapPos(ImGui::GetFontSize()*26);
-    tile_details(x,y,false); ImGui::PopTextWrapPos(); ImGui::EndTooltip();
+    tile_details(x,y,false);
+    if(routing && c.route.value("context","")==c.state.value("context","") && c.route.value("x",-1)==x && c.route.value("y",-1)==y) {
+     if(c.route.value("reachable",false)) ImGui::TextDisabled("Route: %d steps. Travel may stop for events.",int(c.route.at("path").size()));
+     else ImGui::TextDisabled("No walking route found.");
+    }
+    ImGui::PopTextWrapPos(); ImGui::EndTooltip();
     if(ImGui::IsMouseClicked(0) && c.native_targeting() && !c.busy && !c.state.value("message_pending",false)) {
      const bool active=c.state.contains("targeting") || c.state.value("aiming",false) || c.state.value("direction_prompt",false);
      if(active || (c.ready() && c.mouse_movement())) {
-      const auto &io=ImGui::GetIO();
       const bool exit_look=click_exits_look && c.state.contains("targeting") && c.state["targeting"].value("mode","")=="look";
       c.target(active && !exit_look?"targeting.select":"dungeon.click",{{"x",x},{"y",y},{"exit_look",exit_look},{"confirm",quick_targeting},{"shift",io.KeyShift},{"control",io.KeyCtrl},{"alt",io.KeyAlt}});
       focus_game();
@@ -793,15 +822,7 @@ struct UI {
    }
   }
 
-  if(c.state.value("message_pending",false)) {
-   const char *label="- more -";
-   const ImVec2 text_size=ImGui::CalcTextSize(label);
-   const float padding=6.f*display_scale, inset=8.f*display_scale;
-   const ImVec2 at(start.x+viewport.x-inset-text_size.x-2*padding,start.y+inset);
-   const ImVec2 end(start.x+viewport.x-inset,at.y+text_size.y+2*padding);
-   draw->AddRectFilled(at,end,IM_COL32(0,0,0,255));
-   draw->AddText(ImVec2(at.x+padding,at.y+padding),IM_COL32(255,255,255,255),label);
-  }
+  DungeonFeedback::ribbon(c,draw,start,viewport,proceed_with_click);
 
   if(!ImGui::IsWindowFocused()) grid_focus=false;
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
@@ -1200,6 +1221,7 @@ struct UI {
    }
    ImGui::BeginChild("Message history");
    ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Messages"); ImGui::SameLine();
+   if(c.state.value("message_pending",false)) { ImGui::TextColored(ImVec4(1,.73f,.3f,1),"WAITING"); ImGui::SameLine(); }
    const float icon=ImGui::GetFrameHeight();
    const auto icon_pos=ImGui::GetCursorScreenPos();
    bool focus_search=false;

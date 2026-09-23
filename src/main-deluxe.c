@@ -537,6 +537,7 @@ static void pump(void);
 static cJSON *prompt(const char *type, const char *text, int maximum, const char *initial)
 {
  cJSON *p = cJSON_CreateObject(), *v;
+ deluxe_travel_finish();
  native_prompt = true;
  ready = false; publish();
  string(p, "prompt_id", context_text); string(p, "type", type); string(p, "text", text);
@@ -640,7 +641,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -772,6 +773,8 @@ static void pump(void)
    (streq(type, "quantity") && cJSON_IsNumber(v) && v->valuedouble == v->valueint && v->valueint >= 0 && v->valueint <= num(active_prompt, "maximum", 0))))
    error(id, "invalid_argument", "Invalid prompt value.");
   else { reply_value = cJSON_Duplicate(v, true); response(id, cJSON_CreateObject()); }
+ } else if (streq(method,"dungeon.route")) {
+  deluxe_route_preview(id,p);
  } else if (streq(method,"dungeon.terrain")) {
   cJSON *jx=cJSON_GetObjectItem(p,"x"), *jy=cJSON_GetObjectItem(p,"y");
   struct loc grid=loc(num(p,"x",-1),num(p,"y",-1));
@@ -781,6 +784,7 @@ static void pump(void)
   else if(!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) || jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint || command==CMD_NULL || !streq(str(p,"action"),deluxe_terrain_action(command))) error(id,"invalid_argument","That action is not available on this terrain.");
   else {
    travel_command=command; travel_grid=grid; travel_level=deluxe_level; travel_stage=TRAVEL_START;
+   deluxe_travel_begin(grid,travel_command);
    ready=false; Term_keypress(ESCAPE,0); response(id,cJSON_CreateObject());
   }
  } else if (streq(method,"dungeon.pickup")) {
@@ -793,6 +797,7 @@ static void pump(void)
    error(id,"invalid_argument","No observed item at that location.");
   else {
    travel_command=CMD_PICKUP; travel_grid=grid; travel_level=deluxe_level; travel_stage=TRAVEL_START;
+   deluxe_travel_begin(grid,travel_command);
    ready=false; Term_keypress(ESCAPE,0); response(id,cJSON_CreateObject());
   }
  } else if (streq(method,"dungeon.click")) {
@@ -810,6 +815,7 @@ static void pump(void)
    int mods=(cJSON_IsTrue(cJSON_GetObjectItem(p,"shift"))?KC_MOD_SHIFT:0) |
     (cJSON_IsTrue(cJSON_GetObjectItem(p,"control"))?KC_MOD_CONTROL:0) |
     (cJSON_IsTrue(cJSON_GetObjectItem(p,"alt"))?KC_MOD_ALT:0);
+   if(!mods && !loc_eq(player->grid,grid)) deluxe_travel_begin(grid,CMD_WALK);
    if(exit_look) {
     click_after_look=true; look_click_grid=grid; look_click_mods=mods;
     Term_keypress(ESCAPE,0);
@@ -883,7 +889,7 @@ static void pump(void)
    if (key == ESCAPE) { store_operation = STORE_LEAVE; response(id, cJSON_CreateObject()); }
    else error(id, "busy", "Use the store interaction controls.");
   }
-  else { travel_stage=TRAVEL_IDLE; deluxe_target_key(key); response(id, cJSON_CreateObject()); }
+  else { if(travel_display_active) deluxe_travel_feedback("Travel cancelled by input",false,true); travel_stage=TRAVEL_IDLE; deluxe_target_key(key); response(id, cJSON_CreateObject()); }
  } else if (streq(method, "command.execute")) {
   if (!ready || active_prompt) error(id, "busy", "Finish the current prompt first.");
   else if (!streq(str(p, "revision"), revision_text)) error(id, "stale_revision", "State changed; choose again.");
@@ -949,6 +955,7 @@ static errr xtra(int n, int v)
 {
  if (n == TERM_XTRA_EVENT) {
   if (!v) { if (input_available()) pump(); return 0; }
+  deluxe_travel_finish();
   travel_stage=TRAVEL_IDLE; /* Never resume an intent after a user-input prompt. */
   publish(); if (ready) complete();
   while (terminal.key_head == terminal.key_tail && connected) pump();
