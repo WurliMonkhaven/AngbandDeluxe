@@ -1597,12 +1597,21 @@ class BackendTests(unittest.TestCase):
                     if item.get('comparison_available'):
                         self.assertIn('result', branch.call('item.compare', {'revision': branch.state['revision'], 'item': item['id']}))
             self.spell_command('core.cast',self.spell_book()['spells'][0]['id'])
-            if branch.prompt: self.store_reply(True)
-            branch.key(ord('6'))
-            for _ in range(40):
+            # Low-mana confirmation, message pauses and aiming are separate
+            # input boundaries. A direction sent to -more- is consumed there.
+            for _ in range(60):
+                branch.state=branch.call('state.get')['result']
                 if branch.state['readiness']=='ready': break
-                branch.key('enter')
-            self.assertEqual(branch.state['readiness'],'ready',f'Cast did not finish: phase={branch.state.get("phase")} prompt={branch.prompt}')
+                if branch.prompt:
+                    self.assertEqual(branch.prompt['type'],'confirmation')
+                    self.store_reply(True)
+                elif branch.state.get('message_pending'):
+                    branch.key('enter')
+                elif branch.state.get('aiming'):
+                    branch.key(ord('6'))
+                else:
+                    branch.key('enter')
+            self.assertEqual(branch.state['readiness'],'ready',f'Cast did not finish: state={branch.state.get("phase")} aiming={branch.state.get("aiming")} prompt={branch.prompt}')
             result={key:branch.state[key] for key in ('turn','player','map','monsters','items')}
             for collection in ('items','monsters'):
                 for entity in result[collection]: entity.pop('id',None)
