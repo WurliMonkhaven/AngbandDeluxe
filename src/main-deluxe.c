@@ -8,6 +8,7 @@
 #include "game-world.h"
 #include "init.h"
 #include "message.h"
+#include "deluxe-messages.h"
 #include "monster.h"
 #include "mon-util.h"
 #include "obj-desc.h"
@@ -511,6 +512,7 @@ static cJSON *capture(void)
  for (i = 0; i < messages_num() && i < 200; ++i) {
   cJSON *m = cJSON_CreateObject(); string(m, "text", message_str(i));
   number(m, "count", message_count(i)); number(m, "category", message_type(i));
+  string(m,"group",deluxe_message_group(message_type(i)));
   cJSON_AddItemToArray(messages, m);
  }
  cJSON_AddItemToObject(s, "items", items); cJSON_AddItemToObject(s, "monsters", monsters);

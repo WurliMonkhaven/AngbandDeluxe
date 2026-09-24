@@ -705,6 +705,25 @@ int main(int argc,char **argv) {
   }
   check(replay_sent && replay.character_save=="Hero" && replay.busy,"Handshake must resume the completed save through replay");
   DungeonTooltip hover;
+  const json history_combat={{"text","The orc hits you."},{"group","combat"},{"count",3}};
+  const json history_loot={{"text","You collect gold."},{"group","loot"}};
+  const json history_system={{"text","[SYSTEM] Game saved."},{"system",true}};
+  check(MessageHistory::accepts(history_combat,1,"ORC") && !MessageHistory::accepts(history_combat,2,""),"Message history combines category and case-insensitive search");
+  check(MessageHistory::accepts(history_loot,2,"") && MessageHistory::accepts(history_system,3,"saved"),"Loot and system message filters");
+  check(MessageHistory::accepts(json{{"text","An unclassified event"}},4,"") && !MessageHistory::accepts(json{{"text","  "}},0,""),"History retains unclassified messages and omits blank separators");
+  Connection history_connection;
+  history_connection.messages={history_combat,history_loot,history_system};
+  MessageHistory message_history_test;
+  io.AddKeyEvent(ImGuiKey_Escape,false);
+  message_history_test.open=true;
+  for(int filter=0;filter<5;++filter) {
+   message_history_test.filter=filter;
+   ImGui::NewFrame(); ImGui::Begin("History host"); message_history_test.draw(history_connection); ImGui::End(); ImGui::Render();
+  }
+  io.AddKeyEvent(ImGuiKey_Escape,true);
+  ImGui::NewFrame(); ImGui::Begin("History host"); check(message_history_test.draw(history_connection),"Escape closes message history"); ImGui::End(); ImGui::Render();
+  io.AddKeyEvent(ImGuiKey_Escape,false);
+  check(history_connection.outgoing.empty(),"Browsing message history must not send gameplay input");
   RestDialog rest;
   for(int mode=0;mode<4;++mode) {
    rest.mode=mode;

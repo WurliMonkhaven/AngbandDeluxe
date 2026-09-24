@@ -796,13 +796,20 @@ class BackendTests(unittest.TestCase):
         wizard('z')
         floors = {f['id'] for f in e.call('catalog.get')['result']['features']
                   if f['name'] == 'open floor'}
-        p = e.state['player']; origin = (p['x'], p['y'])
-        cells = e.state['map']['actual']
-        occupied = {(o['x'], o['y']) for o in e.state['items'] if o['location'] == 'Floor'}
-        trap_pos = next((p['x']+dx, p['y']+dy)
-                        for dx,dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1))
-                        if cells[p['y']+dy][p['x']+dx] in floors
-                        and (p['x']+dx, p['y']+dy) not in occupied)
+        for attempt in range(5):
+            p = e.state['player']; origin = (p['x'], p['y'])
+            cells = e.state['map']['actual']
+            occupied = {(o['x'], o['y']) for o in e.state['items'] if o['location'] == 'Floor'}
+            candidates = [(p['x']+dx, p['y']+dy)
+                          for dx,dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1))
+                          if cells[p['y']+dy][p['x']+dx] in floors
+                          and (p['x']+dx, p['y']+dy) not in occupied]
+            if candidates: break
+            # Some random stairs have no empty adjacent floor. Regenerate only
+            # this disposable fixture; never weaken the disarming assertions.
+            wizard('j', 1); wizard('z')
+        self.assertTrue(candidates, 'No empty floor for the gas-trap fixture')
+        trap_pos = candidates[0]
         self.targeting('dungeon.click', x=trap_pos[0], y=trap_pos[1]); settle()
         wizard('T', 'gas trap')
         wizard('d')

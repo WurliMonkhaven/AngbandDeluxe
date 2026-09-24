@@ -784,3 +784,13 @@ syntax. Cancel spends no turn. Recovery and danger interruptions remain engine
 rules. Lightweight activity.changed events show Resting and a Stop resting button
 in the existing top bar; Escape and the button use context-checked rest.cancel.
 Rest polls input without generating full snapshots or adding artificial delays.
+
+### Native message history
+
+History beside the Messages heading opens a read-only, resizable modal. Search
+is case-insensitive and combines with All, Combat, Loot, System or Other filters.
+Messages wrap, retain repeat counts and appear newest first. Copy results copies
+the current filtered list. The window uses the existing bounded 400-entry client
+log (including system notices); it is session history, not a persistent journal.
+The backend adds a semantic group derived from native message types. Untyped
+messages remain Other; no classification is inferred from localized prose.

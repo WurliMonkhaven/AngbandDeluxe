@@ -407,6 +407,7 @@ static void properties(const json &value) {
 #include "dungeon_feedback.h"
 #include "dungeon_tooltip.h"
 #include "rest_dialog.h"
+#include "message_history.h"
 #include "birth_panel.h"
 #include "quickbar.h"
 #include "spell_panel.h"
@@ -473,6 +474,7 @@ struct UI {
  char item_filter[128]{}, message_filter[128]{}, command_filter[128]{}, save_name[65] = "Adventurer";
  char prompt_text[4096]{};
  RestDialog rest_dialog;
+ MessageHistory message_history;
  std::string last_prompt, selected, settings_path, prompt_item;
  std::string managed_save;
  char renamed_save[65]{};
@@ -1432,6 +1434,8 @@ struct UI {
    draw->AddCircle(ImVec2(icon_pos.x+icon*.42f,icon_pos.y+icon*.42f),icon*.22f,ink,0,std::max(1.f,icon*.06f));
    draw->AddLine(ImVec2(icon_pos.x+icon*.58f,icon_pos.y+icon*.58f),ImVec2(icon_pos.x+icon*.8f,icon_pos.y+icon*.8f),ink,std::max(1.f,icon*.06f));
    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",message_search_open?"Close search":"Search messages");
+   ImGui::SameLine();
+   if(ImGui::SmallButton("History")) { keys.clear(); message_history.open=true; }
    if(message_search_open) {
     ImGui::SameLine(); ImGui::SetNextItemWidth(std::max(1.f,ImGui::GetContentRegionAvail().x));
     if(focus_search) ImGui::SetKeyboardFocusHere();
@@ -1485,6 +1489,7 @@ struct UI {
   if(!ending) {
   if(quickbar.customize_window()) focus_game();
   if(quickbar.dirty) { quickbar.dirty=false; save_settings(); }
+  if(message_history.draw(c)) focus_game();
   if(item_rules_panel.draw(c)) focus_game();
   if(knowledge_browser.draw(c)) focus_game();
   if(c.state.contains("player")) {
