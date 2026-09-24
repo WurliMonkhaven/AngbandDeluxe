@@ -118,7 +118,9 @@ struct Connection {
  std::string creature_request;
  std::string knowledge_list_request,knowledge_detail_request;
  json route=json::object(), travel=json::object();
- std::string route_request;
+ std::string route_request, blast_request;
+ json blast=json::object();
+ Uint64 blast_sent=0;
  Uint64 route_sent=0;
  json save_change_requests=json::object(), save_changes=json::array();
  std::map<std::string,std::string> comparison_requests;
@@ -272,6 +274,13 @@ struct Connection {
    }
    return; // Read-only replies never release the engine command lock.
   }
+  if(method=="targeting.blast") {
+   if(id==blast_request) {
+    blast_request.clear();
+    if(!j.contains("error") && j["result"].value("context","")==state.value("context","")) blast=j["result"];
+   }
+   return; // Read-only preview replies never release the command lock.
+  }
   if(method=="dungeon.route") {
    route_request.clear();
    if(!j.contains("error") && j["result"].value("context","")==state.value("context","")) route=j["result"];
@@ -373,6 +382,14 @@ struct Connection {
   params["context"]=state.value("context",""); send(method,std::move(params)); busy=true;
   pickup_travel=method=="dungeon.pickup" || method=="dungeon.terrain" || method=="dungeon.click";
  }
+ void preview_blast(int x,int y) {
+  if(!connected || busy || !prompt.empty() || state.value("blast_radius",0)<=0 ||
+     capabilities.value("targeting.blast",0)==0 || !blast_request.empty()) return;
+  const auto context=state.value("context","");
+  if(blast.value("context","")==context && blast.value("x",-1)==x && blast.value("y",-1)==y) return;
+  const auto now=SDL_GetTicksNS(); if(now-blast_sent<50000000) return;
+  blast_sent=now; blast_request=send("targeting.blast",{{"context",context},{"x",x},{"y",y}});
+ }
  void preview_route(int x,int y) {
   if(!ready() || capabilities.value("interaction.route",0)==0 || !route_request.empty()) return;
   const auto context=state.value("context","");
@@ -433,6 +450,7 @@ static void properties(const json &value) {
 #include "dungeon_feedback.h"
 #include "combat_feedback.h"
 #include "projectile_feedback.h"
+#include "blast_preview.h"
 #include "monster_feedback.h"
 #include "dungeon_tooltip.h"
 #include "rest_dialog.h"
@@ -479,7 +497,7 @@ struct UI {
  bool fear_animation=true, draft_fear_animation=true;
  bool level_animation=true, draft_level_animation=true;
  bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
- int damage_amount=1, xp_amount=100;
+ int damage_amount=1, xp_amount=100, blast_radius=2;
  DevStatusDialog dev_status_dialog;
  int crt=0, draft_crt=0;
  int crt_strength=1, draft_crt_strength=1;
@@ -955,6 +973,17 @@ struct UI {
    const bool routing=hovered && c.ready() && !c.state.contains("targeting") && !c.state.value("aiming",false) && !c.state.value("direction_prompt",false) && !c.state.value("message_pending",false) && !io.KeyShift && !io.KeyCtrl && !io.KeyAlt;
    if(routing) c.preview_route(x,y);
    DungeonFeedback::route(c,draw,origin,size,cw,ch,ox,oy,routing,x,y);
+   if(c.state.value("blast_radius",0)>0 && !c.state.value("message_pending",false)) {
+    int bx=x,by=y;
+    bool previewing=mouse_target;
+    if(!previewing && c.state.contains("targeting") && c.state["targeting"].value("mode","")=="target") {
+     bx=c.state["targeting"].value("x",0); by=c.state["targeting"].value("y",0); previewing=true;
+    }
+    if(previewing) {
+     c.preview_blast(bx,by);
+     if(BlastPreview::matches(c.blast,c.state,bx,by)) BlastPreview::draw(draw,c.blast,origin,size,cw,ch,ox,oy,display_scale);
+    }
+   }
    if(sleep_animation || fear_animation) MonsterFeedback::draw(draw,c.state,origin,size,cw,ch,double(SDL_GetTicksNS())/1e9,sleep_animation,fear_animation);
    projectile_feedback.draw(draw,origin,size,cw,ch,ox,oy,double(SDL_GetTicksNS())/1e9);
    combat_feedback.draw(draw,origin,size,cw,ch,ox,oy,double(SDL_GetTicksNS())/1e9);
@@ -1088,6 +1117,10 @@ struct UI {
   }
  }
  void targeting_panel() {
+  if(c.state.value("blast_radius",0)>0) {
+   ImGui::TextColored(ImVec4(.96f,.75f,.32f,1),"Blast radius %d",c.state.value("blast_radius",0));
+   if(ImGui::IsItemHovered()) ImGui::SetTooltip("Amber outline: expected blast area, based on known terrain.\nUnseen changes may affect the actual blast.");
+  }
   const bool aiming=c.state.value("aiming",false);
   auto action=[&](const char *label,const char *operation) {
    if(ImGui::Button(label)) { c.target("targeting.control",{{"operation",operation}}); focus_game(); }
@@ -1483,8 +1516,9 @@ struct UI {
   ImGui::PushStyleColor(ImGuiCol_ButtonActive,ImVec4(.85f,.24f,.26f,1));
   if(ImGui::Button("Dev tools")) ImGui::OpenPopup("Developer tools");
   ImGui::PopStyleColor(3);
-  bool open_damage=false,open_status=false,open_xp=false;
+  bool open_damage=false,open_status=false,open_xp=false,open_blast=false;
   if(ImGui::BeginPopup("Developer tools")) {
+   if(ImGui::MenuItem("Cast test blast",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.blast",0)>0)) open_blast=true;
    if(ImGui::MenuItem("Inflict damage on player",nullptr,false,c.ready() && c.state.value("phase","")=="playing")) open_damage=true;
    if(ImGui::MenuItem("Inflict status effect",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.status",0)>0)) open_status=true;
    if(ImGui::MenuItem("Give player XP",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.experience",0)>0)) open_xp=true;
@@ -1503,6 +1537,22 @@ struct UI {
    ImGui::BeginDisabled(!c.ready() || xp_amount<1 || xp_amount>99999999);
    if(ImGui::Button("Give XP")) {
     c.send("debug.experience",{{"amount",xp_amount}}); c.busy=true;
+    ImGui::CloseCurrentPopup(); focus_game();
+   }
+   ImGui::EndDisabled(); ImGui::SameLine();
+   if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+   ImGui::EndPopup();
+  }
+  if(open_blast) { keys.clear(); ImGui::OpenPopup("Cast test blast"); }
+  if(ImGui::BeginPopupModal("Cast test blast",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+   ImGui::TextUnformatted("Blast radius (tiles)");
+   if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+   ImGui::InputInt("##Blast radius",&blast_radius,1,2);
+   ImGui::TextDisabled("Radius 1-20. Fire ball: 25 damage, no mana cost.");
+   ImGui::TextDisabled("Uses normal aiming. Can damage monsters and items.");
+   ImGui::BeginDisabled(!c.ready() || blast_radius<1 || blast_radius>20);
+   if(ImGui::Button("Aim spell")) {
+    c.send("debug.blast",{{"radius",blast_radius}}); c.busy=true;
     ImGui::CloseCurrentPopup(); focus_game();
    }
    ImGui::EndDisabled(); ImGui::SameLine();

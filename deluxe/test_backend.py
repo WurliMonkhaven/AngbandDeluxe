@@ -1394,6 +1394,94 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(e.process.wait(timeout=10), 0)
         self.assertTrue(dead_save.exists())
 
+    def test_blast_preview_and_free_test_spell(self):
+        e=self.engine
+        e.hello(); e.birth()
+        initial=e.state
+        for radius in (0,21,2.5,"2"):
+            self.assertEqual(e.call('debug.blast',{'radius':radius})['error']['code'],'invalid_argument')
+        for radius in (1,2,3):
+            old=e.state['revision']; mana=e.state['player']['sp']; turn=e.state['turn']
+            self.assertIn('result',e.call('debug.blast',{'radius':radius}))
+            e.next_state(old)
+            self.assertTrue(e.state['aiming'])
+            self.assertEqual(e.state['blast_radius'],radius)
+            p=e.state['player']; x,y=p['x'],p['y']
+            params={'context':e.state['context'],'x':x,'y':y}
+            preview=e.call('targeting.blast',params)['result']
+            self.assertTrue(preview['tiles'])
+            self.assertEqual(e.call('targeting.blast',params)['result'],preview)
+            self.assertEqual(e.call('targeting.blast',{**params,'context':'old'})['error']['code'],'stale_revision')
+            self.assertEqual(e.call('targeting.blast',{**params,'x':-1})['error']['code'],'invalid_argument')
+            self.assertEqual(e.state['turn'],turn)
+            self.assertEqual(e.state['player']['sp'],mana)
+            e.projectile_events.clear()
+            self.targeting('targeting.select',x=x,y=y,confirm=True)
+            while e.state['readiness']!='ready': e.key('enter')
+            self.assertEqual(e.state['player']['sp'],mana)
+            self.assertEqual(e.state['turn'],turn,'Dev cast is free and advances no game turns')
+            self.assertNotIn('blast_radius',e.state)
+            blasts=[fx for batch in e.projectile_events for fx in batch['effects'] if fx['blast']]
+            self.assertTrue(blasts)
+            actual={(p[0],p[1]) for fx in blasts for p in fx['tiles']}
+            expected={tuple(p) for p in preview['tiles']}
+            self.assertEqual(actual,expected,'Preview must match the visible native explosion')
+        old=e.state['revision']; e.call('debug.blast',{'radius':5}); e.next_state(old)
+        e.projectile_events.clear(); e.key('escape')
+        while e.state['readiness']!='ready': e.key('escape')
+        self.assertFalse(e.projectile_events,'Cancelling must never cast a spell')
+        self.assertNotIn('blast_radius',e.state)
+        self.assertEqual(e.state['player']['sp'],initial['player']['sp'])
+
+    def test_blast_preview_walls(self):
+        e=self.engine
+        e.hello(); e.birth()
+        d=e.state['dungeon']; player=e.state['player']
+        visible={(d['x']+x,d['y']+y) for y,row in enumerate(d['cells']) for x,cell in enumerate(row) if cell[10]}
+        walls=[(d['x']+x,d['y']+y) for y,row in enumerate(d['cells']) for x,cell in enumerate(row) if cell[0]==ord('#') and cell[10] and 0<d['x']+x<len(e.state['map']['actual'][0])-1 and 0<d['y']+y<len(e.state['map']['actual'])-1]
+        self.assertTrue(walls)
+        x,y=min(walls,key=lambda p:abs(p[0]-player['x'])+abs(p[1]-player['y']))
+        old=e.state['revision']; e.call('debug.blast',{'radius':3}); e.next_state(old)
+        params={'context':e.state['context'],'x':x,'y':y}
+        result=e.call('targeting.blast',params)
+        self.assertIn('result',result,repr((x,y,e.state.get('blast_radius'),result)))
+        preview=result['result']
+        self.assertNotIn([x,y],preview['tiles'],'A wall stops the ball before impact')
+        e.projectile_events.clear()
+        self.targeting('targeting.select',x=x,y=y,confirm=True)
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.key('enter')
+        self.assertEqual(e.state['readiness'],'ready')
+        actual={(p[0],p[1]) for batch in e.projectile_events for fx in batch['effects'] if fx['blast'] for p in fx['tiles']}
+        self.assertEqual(actual,{tuple(p) for p in preview['tiles']} & visible)
+
+    def test_native_ball_spell_preview(self):
+        e=self.engine
+        e.hello(); e.birth(class_index=1)
+        old=e.state['revision']; e.call('debug.experience',{'amount':1000}); e.next_state(old)
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.key('enter')
+        self.assertEqual(e.state['readiness'],'ready',e.screen())
+        spell=next(s for s in self.spell_book()['spells'] if s['label']=='Fire Ball')
+        self.spell_command('core.study',spell['id'])
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.key('enter')
+        self.assertEqual(e.state['readiness'],'ready',e.screen())
+        self.spell_command('core.cast',spell['id'])
+        if e.prompt: self.store_reply(True)
+        self.assertEqual(e.state['blast_radius'],2)
+        p=e.state['player']
+        self.assertTrue(e.call('targeting.blast',{'context':e.state['context'],'x':p['x'],'y':p['y']})['result']['tiles'])
+        e.key('escape')
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.key('escape')
+        self.assertEqual(e.state['readiness'],'ready',e.screen())
+        self.assertNotIn('blast_radius',e.state)
+
     def test_debug_experience(self):
         e=self.engine
         e.hello()

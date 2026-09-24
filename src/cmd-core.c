@@ -952,6 +952,17 @@ int cmd_get_arg_target(struct command *cmd, const char *arg, int *target)
 /**
  * Get a target, first from command or prompt otherwise
  */
+int cmd_get_effect_target(struct command *cmd, const char *arg, int *target,
+	const struct effect *effect)
+{
+	const struct effect *previous = aim_effect;
+	int result;
+	aim_effect = effect;
+	result = cmd_get_target(cmd, arg, target);
+	aim_effect = previous;
+	return result;
+}
+
 int cmd_get_target(struct command *cmd, const char *arg, int *target)
 {
 	if (cmd_get_arg_target(cmd, arg, target) == CMD_OK) {

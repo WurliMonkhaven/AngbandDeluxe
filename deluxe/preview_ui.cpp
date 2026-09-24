@@ -27,6 +27,7 @@ int main(int argc,char **argv) {
   c.receive({{"kind","event"},{"event","state.changed"},{"data",fixture.at("state")}});
   if(fixture.contains("level_elapsed")) c.level_feedback.started=double(SDL_GetTicksNS())/1e9-fixture["level_elapsed"].get<double>();
   if(fixture.contains("prompt")) c.prompt=fixture["prompt"];
+  if(fixture.contains("blast")) c.blast=fixture["blast"];
   UI ui{c}; ui.base_style=ImGui::GetStyle();
   ui.scale=std::clamp(fixture.value("scale",1.f),.75f,1.5f);
   ImGui::GetStyle().ScaleAllSizes(ui.scale); ImGui::GetStyle().FontScaleMain=ui.scale;

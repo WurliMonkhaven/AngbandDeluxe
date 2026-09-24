@@ -428,6 +428,54 @@ struct loc origin_get_loc(struct source origin)
 	return loc(-1, -1);
 }
 
+/* Shared, read-only terrain test for explosions and their targeting previews. */
+static bool project_blast_terrain(struct chunk *c, struct loc centre,
+	struct loc grid, int flg)
+{
+	if ((flg & PROJECT_THRU) || square_ispassable(c, grid)) {
+		if (!square_isprojectable(c, grid)) {
+			int i;
+			for (i = 0; i < 8; ++i) {
+				struct loc adj = loc_sum(grid, ddgrid_ddd[i]);
+				if (square_in_bounds(c, adj) && los(c, centre, adj)) return true;
+			}
+			return false;
+		}
+	} else if (!square_isprojectable(c, grid)) return false;
+	return true;
+}
+
+/* Targeted player balls pass monsters and stop before walls. The caller supplies
+ * either the real chunk (tests) or the remembered chunk (UI); no RNG or mutation.
+ * The same 255-grid cap and row order as project() are intentional. */
+int project_ball_area(struct chunk *c, struct loc start, struct loc target,
+	int radius, struct loc *centre, struct loc *grids)
+{
+	struct loc path[512];
+	int n, i, x, y, count = 1;
+	radius = MIN(MAX(radius, 0), z_info->max_range);
+	*centre = start;
+	n = project_path(c, path, z_info->max_range, start, target, 0);
+	for (i = 0; i < n; ++i) {
+		if (!square_in_bounds(c, path[i]) || !square_ispassable(c, path[i])) break;
+		*centre = path[i];
+	}
+	n = i;
+	grids[0] = *centre;
+	for (y = centre->y-radius; y <= centre->y+radius; ++y) {
+		for (x = centre->x-radius; x <= centre->x+radius; ++x) {
+			struct loc grid = loc(x, y);
+			bool on_path = false;
+			if (count >= 255) return count;
+			if (loc_eq(grid, *centre) || !square_in_bounds(c, grid)) continue;
+			if (!project_blast_terrain(c, *centre, grid, 0) || distance(*centre, grid)>radius) continue;
+			for (i = 0; i < n; ++i) if (loc_eq(grid, path[i])) { on_path = true; break; }
+			if (on_path || los(c, *centre, grid)) grids[count++] = grid;
+		}
+	}
+	return count;
+}
+
 /**
  * Generic "beam"/"bolt"/"ball" projection routine.
  *   -BEN-, some changes by -LM-
@@ -791,31 +839,7 @@ bool project(struct source origin, int rad, struct loc finish,
 				if (!square_in_bounds(cave, grid))
 					continue;
 
-				/* Most explosions are immediately stopped by walls. If
-				 * PROJECT_THRU is set, walls can be affected if adjacent to
-				 * a grid visible from the explosion centre - note that as of
-				 * Angband 3.5.0 there are no such explosions - NRM.
-				 * All explosions can affect one layer of terrain which is
-				 * passable but not projectable */
-				if ((flg & (PROJECT_THRU)) || square_ispassable(cave, grid)) {
-					/* If this is a wall grid, ... */
-					if (!square_isprojectable(cave, grid)) {
-						bool can_see_one = false;
-						/* Check neighbors */
-						for (i = 0; i < 8; i++) {
-							struct loc adj_grid = loc_sum(grid, ddgrid_ddd[i]);
-							if (los(cave, centre, adj_grid)) {
-								can_see_one = true;
-								break;
-							}
-						}
-
-						/* Require at least one adjacent grid in LOS. */
-						if (!can_see_one)
-							continue;
-					}
-				} else if (!square_isprojectable(cave, grid))
-					continue;
+				if (!project_blast_terrain(cave, centre, grid, flg)) continue;
 
 				/* Must be within maximum distance. */
 				dist_from_centre  = (distance(centre, grid));

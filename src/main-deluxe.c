@@ -22,6 +22,8 @@
 #include "obj-tval.h"
 #include "player.h"
 #include "project.h"
+#include "effects.h"
+#include "z-dice.h"
 #include "player-birth.h"
 #include "ui-birth.h"
 #include "player-properties.h"
@@ -75,7 +77,7 @@ static bool connected = true, negotiated, initialized, ready, closing;
 static unsigned long revision, sequence, context_id;
 static char revision_text[32], context_text[32];
 static const char *phase = "launcher";
-static int debug_damage, debug_experience;
+static int debug_damage, debug_experience, debug_blast_radius;
 static int debug_status=-1,debug_status_amount;
 static int native_target_mode;
 static bool native_target_immediate;
@@ -404,7 +406,9 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
 #include "deluxe-save-summary.h"
 #include "deluxe-status.h"
 #include "deluxe-knowledge.h"
+static int deluxe_blast_radius(void);
 #include "deluxe-view.h"
+#include "deluxe-blast.h"
 #include "deluxe-projectiles.h"
 #include "deluxe-compare.h"
 #include "deluxe-travel.h"
@@ -696,7 +700,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.experience\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.experience\":1,\"debug.blast\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -840,6 +844,8 @@ static void pump(void)
    (streq(type, "quantity") && cJSON_IsNumber(v) && v->valuedouble == v->valueint && v->valueint >= 0 && v->valueint <= num(active_prompt, "maximum", 0))))
    error(id, "invalid_argument", "Invalid prompt value.");
   else { reply_value = cJSON_Duplicate(v, true); response(id, cJSON_CreateObject()); }
+ } else if (streq(method,"targeting.blast")) {
+  deluxe_blast_preview(id,p);
  } else if (streq(method,"dungeon.route")) {
   deluxe_route_preview(id,p);
  } else if (streq(method,"dungeon.terrain")) {
@@ -1060,6 +1066,16 @@ static void pump(void)
    debug_experience=amount->valueint; ready=false;
    response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0);
   }
+ } else if (streq(method, "debug.blast")) {
+  const cJSON *radius=cJSON_GetObjectItem(p,"radius");
+  if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing"))
+   error(id,"busy","Return to normal play before casting a test spell.");
+  else if(!cJSON_IsNumber(radius) || radius->valuedouble!=radius->valueint || radius->valueint<1 || radius->valueint>MIN(20,z_info->max_range))
+   error(id,"invalid_argument","Radius must be a whole number from 1 to 20 (within engine range).");
+  else {
+   debug_blast_radius=radius->valueint; ready=false;
+   response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0);
+  }
  } else if (streq(method, "debug.damage")) {
   cJSON *amount = cJSON_GetObjectItem(p, "amount");
   if (!ready || active_prompt || !character_generated || player->is_dead || !streq(phase, "playing"))
@@ -1166,6 +1182,10 @@ static errr get_command(cmd_context context)
   if(debug_experience) {
    int amount=debug_experience; debug_experience=0; ready=false;
    player_exp_gain(player,amount);
+  }
+  if (debug_blast_radius) {
+   int radius=debug_blast_radius; debug_blast_radius=0; ready=false;
+   deluxe_debug_blast(radius);
   }
   if (debug_damage) {
    int damage = debug_damage; debug_damage = 0; ready = false;

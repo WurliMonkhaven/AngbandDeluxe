@@ -26,6 +26,7 @@ int (*get_quantity_hook)(const char *prompt, int max);
 bool (*get_check_hook)(const char *prompt);
 bool (*get_com_hook)(const char *prompt, char *command);
 bool (*get_rep_dir_hook)(int *dir, bool allow_none);
+const struct effect *aim_effect;
 bool (*get_aim_dir_hook)(int *dir);
 bool (*get_point_hook)(struct loc *grid);
 int (*get_spell_from_book_hook)(struct player *p, const char *verb,

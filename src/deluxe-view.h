@@ -105,6 +105,8 @@ static void deluxe_capture_view(cJSON *state_record)
   cJSON_AddItemToObject(selection,"candidates",candidates); cJSON_AddItemToObject(selection,"path",path);
   cJSON_AddItemToObject(state_record,"targeting",selection);
  }
+ if (textui_aiming || (target_ui_current && (target_ui_current->mode&TARGET_KILL)))
+  number(state_record,"blast_radius",deluxe_blast_radius());
  json_bool(state_record,"aiming",textui_aiming);
  json_bool(state_record,"direction_prompt",textui_direction);
  json_bool(state_record,"item_selection",item_choice_objects!=NULL);

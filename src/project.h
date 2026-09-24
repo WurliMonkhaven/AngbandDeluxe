@@ -118,6 +118,9 @@ bool project_p(struct source, int r, struct loc grid, int dam, int typ,
 
 int project_path(struct chunk *c, struct loc *gp, int range, struct loc grid1,
 	struct loc grid2, int flg);
+/* grids must have room for 255 cells. */
+int project_ball_area(struct chunk *c, struct loc start, struct loc target,
+	int radius, struct loc *centre, struct loc *grids);
 bool projectable(struct chunk *c, struct loc grid1, struct loc grid2, int flg);
 int proj_name_to_idx(const char *name);
 const char *proj_idx_to_name(int type);

@@ -911,6 +911,23 @@ int main(int argc,char **argv) {
    events.push_back(batch); state["dungeon"]["level_id"]="two"; fx.update(events,state,true,11);
    check(fx.tiles.empty(),"Effects cannot leak to another level");
   }
+  {
+   json state={{"context","aim-2"},{"blast_radius",2}};
+   json preview={{"context","aim-2"},{"x",4},{"y",5},{"tiles",json::array({{4,5},{5,5},{4,6}})}};
+   check(BlastPreview::matches(preview,state,4,5),"Current blast footprint matches its target");
+   check(!BlastPreview::matches(preview,state,5,5),"Old mouse positions never reuse a footprint");
+   state["context"]="aim-3";
+   check(!BlastPreview::matches(preview,state,4,5),"Old targeting contexts never reuse a footprint");
+   state["context"]="aim-2"; state["blast_radius"]=0;
+   check(!BlastPreview::matches(preview,state,4,5),"Cancelling or switching to a non-ball removes the preview");
+   ImGui::NewFrame(); ImGui::Begin("Blast preview test");
+   BlastPreview::draw(ImGui::GetWindowDrawList(),preview,{0,0},{200,200},18,24,0,0,1);
+   ImGui::End(); ImGui::Render();
+   Connection connection; connection.state={{"context","aim-2"}};
+   auto id=connection.send("targeting.blast"); connection.blast_request=id; connection.busy=true;
+   connection.receive({{"kind","response"},{"id",id},{"result",preview}});
+   check(connection.busy && connection.blast_request.empty(),"Preview replies do not unlock a pending game command");
+  }
   KeybindingEditor binding_editor;
   const json binding_data={{"mode",0},{"revision",2},{"bindings",json::array()},
    {"commands",json::array({{{"id",82},{"label","Rest for a while"},{"group","Action commands"},{"original","R"},{"rogue","R"}}})},

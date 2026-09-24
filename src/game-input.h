@@ -44,6 +44,8 @@ extern int (*get_quantity_hook)(const char *prompt, int max);
 extern bool (*get_check_hook)(const char *prompt);
 extern bool (*get_com_hook)(const char *prompt, char *command);
 extern bool (*get_rep_dir_hook)(int *dir, bool allow_none);
+/* Borrowed effect chain, only while a known spell/device requests a target. */
+extern const struct effect *aim_effect;
 extern bool (*get_aim_dir_hook)(int *dir);
 extern bool (*get_point_hook)(struct loc *grid);
 extern int (*get_spell_from_book_hook)(struct player *p, const char *verb,

@@ -915,3 +915,12 @@ Quantity prompts show the engine-selected item and its colour, an amount field a
 ### Projectile and spell feedback
 
 Settings > Animations includes Projectiles and spells (enabled by default). Visible native bolt/missile paths become short directional ASCII trails; explosions expand over the actual visible affected tiles, with elemental colours. Presentation is non-blocking and independent of CRT effects. Hidden tiles are never inferred. Events are bounded and batched at engine input boundaries; stale effects and effects from previous levels are discarded.
+
+
+### Ball-spell targeting previews
+
+Known ball spells and known device effects expose their blast radius while aiming. Mouse aiming and keyboard target selection request a read-only footprint from the backend; the client draws a faint amber fill with an outer outline. Geometry uses the remembered dungeon, native projectile paths, distance, line-of-sight and shared explosion terrain rules. Unknown terrain is omitted; unseen changes can make the eventual blast differ. Random/choice effects and confused, blind or hallucinating aim do not show a guessed footprint. Cancelling or changing targets/context removes stale previews. Requests are coalesced, bounded and never lock input or consume turns, mana or random numbers.
+
+Dev tools > Cast test blast opens a radius selector (1-20 tiles, limited by engine range), then the normal aiming controls. The guaranteed fire ball deals 25 damage with no mana or turn cost; it can affect monsters and items. Escape cancels without firing. This works for every class and always requests a target, including when Use old target is enabled.
+
+Protocol: targeting.blast accepts context, x and y while a known ball effect is being aimed and returns radius and remembered affected tiles. debug.blast accepts radius at normal gameplay input and begins the test cast. Both are capability-advertised. A scoped borrowed effect chain supplies aiming metadata for native casts and known devices without changing their targeting, cost or failure rules.
