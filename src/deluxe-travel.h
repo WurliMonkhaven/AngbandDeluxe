@@ -11,6 +11,9 @@ static cmd_code travel_command=CMD_PICKUP;
 static cmd_code deluxe_terrain_command(struct loc grid)
 {
  if(!player || !player->cave || !square_in_bounds_fully(player->cave,grid)) return CMD_NULL;
+ if(square_isdisarmabletrap(player->cave,grid)) return CMD_DISARM;
+ if(square_iscloseddoor(player->cave,grid)) return CMD_OPEN;
+ if(square_isopendoor(player->cave,grid)) return CMD_CLOSE;
  if(square_isupstairs(player->cave,grid)) return CMD_GO_UP;
  if(square_isdownstairs(player->cave,grid)) return CMD_GO_DOWN;
  if(square_isdiggable(player->cave,grid) && !square_isperm(player->cave,grid)) return CMD_TUNNEL;
@@ -19,7 +22,13 @@ static cmd_code deluxe_terrain_command(struct loc grid)
 
 static const char *deluxe_terrain_action(cmd_code command)
 {
- return command==CMD_GO_UP?"up":command==CMD_GO_DOWN?"down":command==CMD_TUNNEL?"tunnel":"";
+ return command==CMD_GO_UP?"up":command==CMD_GO_DOWN?"down":command==CMD_TUNNEL?"tunnel":
+  command==CMD_DISARM?"disarm":command==CMD_OPEN?"open":command==CMD_CLOSE?"close":"";
+}
+
+static bool deluxe_adjacent_action(cmd_code command)
+{
+ return command==CMD_TUNNEL || command==CMD_DISARM || command==CMD_OPEN || command==CMD_CLOSE;
 }
 
 static void deluxe_capture_terrain_actions(cJSON *state)
@@ -31,6 +40,18 @@ static void deluxe_capture_terrain_actions(cJSON *state)
    cmd_code command=deluxe_terrain_command(loc(x,y));
    if(command!=CMD_NULL) {
     cJSON *entry=cJSON_CreateObject(); number(entry,"x",x); number(entry,"y",y);
+    bool adjacent=distance(player->grid,loc(x,y))==1;
+    const char *hint=command==CMD_DISARM?
+     (adjacent && !player_is_trapsafe(player)?"Click to attempt disarming; right-click for Disarm.":"Right-click to approach and disarm."):
+     command==CMD_OPEN?(adjacent?"Click to attempt opening; right-click for Open.":"Right-click to approach and open."):
+     command==CMD_CLOSE?"Click to move through; right-click to close.":
+     command==CMD_TUNNEL?"Right-click to approach and tunnel.":
+     command==CMD_GO_UP?"Right-click to approach and go up.":"Right-click to approach and go down.";
+    if(!OPT(player,mouse_movement)) hint="Mouse movement is disabled; terrain actions are available on right-click.";
+    else if(player->timed[TMD_CONFUSED]) hint="Confused: clicks attempt a random step.";
+    else if(adjacent && square_monster(cave,loc(x,y)) && monster_is_visible(square_monster(cave,loc(x,y))))
+     hint="Click to attack; the creature may block terrain actions.";
+    string(entry,"hint",hint);
     string(entry,"action",deluxe_terrain_action(command)); cJSON_AddItemToArray(actions,entry);
    }
   }
@@ -70,19 +91,22 @@ static void deluxe_travel_event(game_event_type type, game_event_data *data, voi
 static bool deluxe_travel_continue(void)
 {
  if(travel_stage==TRAVEL_IDLE) return false;
- if(travel_level!=deluxe_level || player->is_dead || player->timed[TMD_CONFUSED]) {
+ bool adjacent=deluxe_adjacent_action(travel_command);
+ if(travel_level!=deluxe_level || player->is_dead || (player->timed[TMD_CONFUSED] &&
+    !(travel_stage==TRAVEL_START && adjacent && distance(player->grid,travel_grid)==1))) {
   travel_stage=TRAVEL_IDLE; return false;
  }
- if(travel_stage==TRAVEL_START && travel_command==CMD_TUNNEL) {
+ if(travel_stage==TRAVEL_START && adjacent) {
   int best=-1,dir;
-  for(dir=1;dir<=9;++dir) if(dir!=5) {
+  if(distance(player->grid,travel_grid)==1) { best=0; travel_waypoint=player->grid; }
+  for(dir=1;best!=0 && dir<=9;++dir) if(dir!=5) {
    struct loc adjacent=loc_sum(travel_grid,ddgrid[dir]);
    int16_t *steps=NULL; int count;
    if(!square_in_bounds_fully(player->cave,adjacent) || !square_ispassable(player->cave,adjacent)) continue;
    count=find_path(player,player->grid,adjacent,&steps); mem_free(steps);
    if(count>=0 && (best<0 || count<best)) { best=count; travel_waypoint=adjacent; }
   }
-  if(best<0) { travel_stop_reason="No route to a digging position could be found."; travel_stage=TRAVEL_IDLE; return false; }
+  if(best<0) { travel_stop_reason="No route to an adjacent position could be found."; travel_stage=TRAVEL_IDLE; return false; }
   if(best>0) {
    travel_stage=TRAVEL_APPROACH;
    cmdq_push(CMD_PATHFIND); cmd_set_arg_point(cmdq_peek(),"point",travel_waypoint); return true;
@@ -109,7 +133,7 @@ static bool deluxe_travel_continue(void)
  }
  if(travel_stage==TRAVEL_APPROACH) {
   if(!loc_eq(player->grid,travel_waypoint)) { travel_stage=TRAVEL_IDLE; return false; }
-  travel_stage=travel_command==CMD_TUNNEL?TRAVEL_ARRIVED:TRAVEL_STEP;
+  travel_stage=adjacent?TRAVEL_ARRIVED:TRAVEL_STEP;
  }
  if(travel_stage==TRAVEL_STEP) {
   if(square_monster(cave,travel_grid)) {
@@ -121,12 +145,13 @@ static bool deluxe_travel_continue(void)
   return true;
  }
  travel_stage=TRAVEL_IDLE;
- if(travel_command==CMD_TUNNEL) {
-  if(!loc_eq(player->grid,travel_waypoint) || deluxe_terrain_command(travel_grid)!=CMD_TUNNEL || square_monster(cave,travel_grid)) return false;
+ if(adjacent) {
+  if(!loc_eq(player->grid,travel_waypoint) || deluxe_terrain_command(travel_grid)!=travel_command) return false;
+  if(travel_command==CMD_TUNNEL && square_monster(cave,travel_grid)) return false;
   /* Continue after the engine's repeat batch expires. Success, futile digging,
    * danger and manual cancellation call disturb() and discard this intent. */
-  travel_stage=TRAVEL_DIGGING;
-  cmdq_push(CMD_TUNNEL); cmd_set_arg_direction(cmdq_peek(),"direction",motion_dir(player->grid,travel_grid)); return true;
+  if(travel_command==CMD_TUNNEL) travel_stage=TRAVEL_DIGGING;
+  cmdq_push(travel_command); cmd_set_arg_direction(cmdq_peek(),"direction",motion_dir(player->grid,travel_grid)); return true;
  }
  if(travel_command==CMD_GO_UP || travel_command==CMD_GO_DOWN) {
   if(!loc_eq(player->grid,travel_grid)) return false;

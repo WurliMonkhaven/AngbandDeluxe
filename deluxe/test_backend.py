@@ -718,6 +718,12 @@ class BackendTests(unittest.TestCase):
             self.assert_semantic_view(e.state)
 
     def test_mouse_disarms_gas_trap(self):
+        self.check_gas_trap_action('dungeon.click')
+
+    def test_context_disarms_gas_trap(self):
+        self.check_gas_trap_action('dungeon.terrain')
+
+    def check_gas_trap_action(self, method):
         e = self.engine
         e.hello(); e.birth()
 
@@ -754,12 +760,56 @@ class BackendTests(unittest.TestCase):
         wizard('T', 'gas trap')
         wizard('d')
         self.targeting('dungeon.click', x=origin[0], y=origin[1]); settle()
-        self.targeting('dungeon.click', x=trap_pos[0], y=trap_pos[1])
+        args = {'x': trap_pos[0], 'y': trap_pos[1]}
+        if method == 'dungeon.terrain':
+            action = next(a for a in e.state['terrain_actions'] if (a['x'], a['y']) == trap_pos)
+            self.assertEqual(action['action'], 'disarm')
+            self.assertIn('Click to attempt disarming', action['hint'])
+            args['action'] = 'disarm'
+            self.assertEqual(e.call(method, {'context': 'old', **args})['error']['code'], 'stale_revision')
+            self.assertEqual(e.call(method, {'context': e.state['context'], **args, 'action': 'open'})['error']['code'], 'invalid_argument')
+        self.targeting(method, **args)
         # A disarm attempt stays beside the trap, whether it succeeds, safely
         # fails, or sets it off. Walking into it would move onto its square.
         self.assertEqual((e.state['player']['x'], e.state['player']['y']), origin)
         text = '\n'.join(m['text'] for m in e.state['messages']).lower()
         self.assertTrue('disarm' in text or 'set off the gas trap' in text, text)
+
+    def test_context_door_actions(self):
+        e = self.engine
+        e.hello(); e.birth()
+        # Create ordinary adjacent doors with an existing wizard projection,
+        # confined to this disposable character.
+        e.key(1); e.key(ord('E'))
+        for _ in range(30):
+            e.call('state.get')
+            if e.prompt:
+                p = e.prompt; e.prompt = None; old = e.state['revision']
+                text = p.get('text', '').lower()
+                if p['type'] == 'confirmation': value = True
+                elif p['type'] == 'quantity': value = 0
+                elif 'which effect' in text: value = 'TOUCH'
+                elif 'dice' in text: value = '0'
+                elif 'subtype' in text: value = 'MAKE_DOOR'
+                else: self.fail(f'Unexpected effect prompt: {p}')
+                e.call('prompt.reply', {'prompt_id': p['prompt_id'], 'value': value})
+                e.next_state(old)
+            elif e.state['readiness'] != 'ready': e.key('enter')
+            else: break
+        origin = (e.state['player']['x'], e.state['player']['y'])
+        door = next(a for a in e.state['terrain_actions'] if a['action'] == 'open'
+                    and max(abs(a['x']-origin[0]), abs(a['y']-origin[1])) == 1)
+        x,y = door['x'],door['y']
+        self.assertIn('Click to attempt opening', door['hint'])
+        for action, following in (('open', 'close'), ('close', 'open')):
+            turn = e.state['turn']
+            self.targeting('dungeon.terrain', x=x, y=y, action=action)
+            while e.state['readiness'] != 'ready': e.key('enter')
+            self.assertEqual((e.state['player']['x'], e.state['player']['y']), origin)
+            self.assertGreater(e.state['turn'], turn)
+            self.assertTrue(any(a['x']==x and a['y']==y and a['action']==following for a in e.state['terrain_actions']))
+            self.assertEqual(e.call('dungeon.terrain', {'context':e.state['context'], 'x':x, 'y':y, 'action':action})['error']['code'], 'invalid_argument')
+            self.assert_semantic_view(e.state)
 
     def test_quick_targeting_throw(self):
         e=self.engine

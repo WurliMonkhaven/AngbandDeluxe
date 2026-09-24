@@ -713,6 +713,8 @@ int main(int argc,char **argv) {
   json hover_catalog={{"features",json::array({{{"id",1},{"name","open floor"}}})}};
   auto remembered= DungeonTooltip::describe_tile(hover_state,hover_catalog,5,6);
   check(!remembered.contains("name") && remembered["items"][0]["label"]=="a remembered Scroll" && !remembered["seen"].get<bool>(),"Tooltip must describe memory rather than live hidden entities");
+  hover_state["terrain_actions"]=json::array({{{"x",5},{"y",6},{"action","disarm"},{"hint","Click to attempt disarming; right-click for Disarm."}}});
+  check(DungeonTooltip::describe_tile(hover_state,hover_catalog,5,6).value("hint","")=="Click to attempt disarming; right-click for Disarm.","Tooltip uses the engine's contextual click hint");
   hover_state["monsters"][0]={{"x",5},{"y",6},{"name","sleepy orc"},{"visible",true},{"hp",3},{"max_hp",8},{"condition","asleep"}};
   auto creature= DungeonTooltip::describe_tile(hover_state,hover_catalog,5,6);
   check(creature["name"]=="Sleepy orc" && creature["subtitle"]=="Asleep" && creature["hp"]==3,"Creature tooltip details");
@@ -724,6 +726,7 @@ int main(int argc,char **argv) {
   hover_state["dungeon"]["cells"][0][0][11]=1;
   auto hallucination=DungeonTooltip::describe_tile(hover_state,hover_catalog,5,6);
   check(hallucination.value("hallucinating",false) && !hallucination.contains("name") && hallucination["items"].empty(),"Hallucination should not turn an appearance into a definite identification");
+  check(!hallucination.contains("hint"),"Hallucinations must not receive definite terrain hints");
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";

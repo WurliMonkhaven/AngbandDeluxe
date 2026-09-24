@@ -39,6 +39,10 @@ struct DungeonTooltip {
   if(view.contains("items")) for(const auto &item:view["items"])
    if(item.value("x",-1)==x && item.value("y",-1)==y) result["items"].push_back(item);
   if(cell[4].get<int>() && result["items"].empty()) result["unresolved_item"]=true;
+  if(state.contains("terrain_actions")) for(const auto &action:state["terrain_actions"])
+   if(action.value("x",-1)==x && action.value("y",-1)==y) {
+    result["hint"]=action.value("hint",""); break;
+   }
   return result;
  }
  void draw(const json &state,const json &catalog) {
@@ -75,6 +79,12 @@ struct DungeonTooltip {
     ImGui::TextWrapped("%s",item.value("label","Item").c_str()); ImGui::PopStyleColor();
    }
    if(content.value("unresolved_item",false)) ImGui::TextUnformatted("An observed item");
+  }
+  const auto hint=content.value("hint","");
+  if(!hint.empty()) {
+   ImGui::Separator();
+   ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(.88f,.72f,.38f,1));
+   ImGui::TextWrapped("%s",hint.c_str()); ImGui::PopStyleColor();
   }
   ImGui::PopTextWrapPos(); ImGui::EndTooltip();
  }

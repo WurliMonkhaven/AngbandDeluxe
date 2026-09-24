@@ -426,7 +426,12 @@ a hallucination), the trip simply ends without picking anything up.
 
 The dungeon context menu groups Move here, contextual actions, and Look/Target
 with separators. Contextual actions include Pick up, Tunnel for remembered
-diggable walls/rubble (excluding permanent rock), and Go up/Go down for stairs.
+diggable walls/rubble (excluding permanent rock), Disarm for known active traps,
+Open/Close for doors, and Go up/Go down for stairs. Trap and door actions approach
+an adjacent square and run the original engine command with its normal repeat
+count, skill checks and confusion rules. Interrupted travel cancels the action.
+Hover cards include engine-provided click hints that account for adjacency,
+confusion, trap immunity, visible occupants and the mouse-movement option.
 Terrain actions share interruption-safe travel: tunnelling approaches an
 adjacent passable tile; stairs are used after arriving on their tile. The
 original engine commands retain digging attempts, tools, turns and stair rules.

@@ -927,9 +927,10 @@ struct UI {
     if(c.capabilities.value("interaction.terrain",0)>0 && c.state.contains("terrain_actions"))
      for(const auto &entry:c.state["terrain_actions"]) if(entry.value("x",-1)==grid_menu_x && entry.value("y",-1)==grid_menu_y) {
       const std::string action=entry.value("action","");
-      if(action=="tunnel" || action=="up" || action=="down") {
+      if(action=="tunnel" || action=="up" || action=="down" || action=="disarm" || action=="open" || action=="close") {
        contextual=true;
-       choose(action=="tunnel"?"Tunnel":action=="up"?"Go up":"Go down","dungeon.terrain",{{"action",action}});
+       choose(action=="tunnel"?"Tunnel":action=="up"?"Go up":action=="down"?"Go down":
+        action=="disarm"?"Disarm":action=="open"?"Open":"Close","dungeon.terrain",{{"action",action}});
       }
      }
     if(c.capabilities.value("knowledge",0)>0 && c.state.contains("monsters"))
