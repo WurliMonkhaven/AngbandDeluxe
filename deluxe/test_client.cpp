@@ -337,7 +337,10 @@ int main(int argc,char **argv) {
   check(!ui.crt_settings.parts[Hum].enabled,"Hum bar draft applied immediately");
   check(ui.scale==1.25f && ui.crt==0 && !ui.fullscreen,"Draft changed live settings");
   ui.draft_audio_settings.master=.1f; ui.draft_audio_settings.enabled=false;
+  ui.draft_fonts.interface_font="Hack-Regular.ttf";
+  check(ui.font_settings.interface_font=="Nouveau_IBM.ttf","Font preview must not change the live interface");
   ui.begin_settings(); // Reopening after Cancel discards the draft.
+  check(ui.draft_fonts.interface_font=="Nouveau_IBM.ttf","Cancel must discard font choices");
   check(ui.draft_audio_settings.enabled && ui.draft_audio_settings.master==.8f,"Cancel must discard audio edits");
   check(!ui.draft_proceed_with_click,"Cancelled gameplay draft retained");
   check(!ui.draft_click_exits_look,"Cancelled look click draft retained");
@@ -358,8 +361,10 @@ int main(int argc,char **argv) {
   ui.draft_quickbar_enabled=true;
   ui.quickbar.profile="test-character"; ui.quickbar.slots()[0]=Quickbar::command_binding({{"id","core.hold"},{"label","Hold"}});
   ui.draft_audio_settings.master=.43f; ui.draft_audio_settings.gameplay=.25f;
+  ui.draft_fonts.interface_font="Hack-Regular.ttf"; ui.draft_fonts.dungeon_font="Flexi_IBM_VGA_True.ttf";
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
+  check(loaded.font_settings.interface_font=="Hack-Regular.ttf" && loaded.font_settings.dungeon()=="Flexi_IBM_VGA_True.ttf","Both font choices persist");
   check(!loaded.scene_animation,"Scene transitions setting persists");
   check(loaded.audio_settings.master==.43f && loaded.audio_settings.gameplay==.25f,"Audio volumes must persist after Save and Close");
   check(loaded.proceed_with_click,"Gameplay option did not persist");
@@ -415,8 +420,17 @@ int main(int argc,char **argv) {
   // stock and modal-busy states. No desktop input or native window is used.
   ImGui::CreateContext(); DeluxeTheme::apply();
   auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(1280,800);
+  FontLibrary font_library; font_library.load(DELUXE_FONTS_DIR);
   unsigned char *pixels; int atlas_w,atlas_h;
   io.Fonts->GetTexDataAsRGBA32(&pixels,&atlas_w,&atlas_h); io.Fonts->SetTexID(1);
+  for(size_t i=0;i<font_choices.size();++i) {
+   check(font_library.fonts[i]!=nullptr,"Every bundled font must load");
+   const float ratio=font_library.cell_ratio(font_choices[i].file);
+   check(ratio>.1f && ratio<3.f,"Dungeon cell metrics must be usable");
+   check(font_library.fonts[i]->GetFontBaked(18)->FindGlyphNoFallback('@')!=nullptr,"Every dungeon face needs the player glyph");
+  }
+  FontSettings invalid_fonts; invalid_fonts.load({{"interface","../outside.ttf"},{"dungeon",42}});
+  check(invalid_fonts.interface_font=="Cousine-Regular.ttf" && invalid_fonts.dungeon()==invalid_fonts.interface_font,"Unknown fonts safely default and dungeon inherits");
   {
    UI final_ui{postgame}; final_ui.run_history.current=archived;
    ImGui::NewFrame(); ImGui::Begin("Old gameplay popup"); ImGui::OpenPopup("Stale menu"); ImGui::End();

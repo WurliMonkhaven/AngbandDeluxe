@@ -1034,3 +1034,17 @@ This is a Windows playtest distribution, not a signed installer. Offscreen timin
 measure input-to-state and GPU submission/backpressure, not physical display
 latency. A fresh-machine human playtest and accessibility review remain necessary;
 macOS and Linux validation remain deferred.
+
+
+### Selectable fonts (implemented)
+
+Graphics > Fonts offers independent interface and dungeon font choices from the
+15 bundled TTF faces; dungeon defaults to Same as interface and both start with
+Nouveau IBM. Picker entries show their own typeface. A local live preview
+shows character text, an item, HP, a message and an ASCII dungeon, using the current
+CRT treatment. Save and Close persists both choices; Cancel leaves active fonts
+unchanged. Restore default fonts resets only the draft font choices. UI scale
+remains independent. Saved file IDs are validated against the bundled catalog,
+with unknown IDs falling back to Cousine. Missing glyphs use Cousine where
+available. Dungeon geometry, hit testing and outgoing stair snapshots use actual
+font advances rather than assuming every face has Cousine's character width.

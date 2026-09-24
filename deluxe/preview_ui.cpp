@@ -13,7 +13,7 @@ int main(int argc,char **argv) {
   if(!gpu) throw std::runtime_error(SDL_GetError());
   ImGui::CreateContext(); DeluxeTheme::apply();
   auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(float(w),float(h)); io.DeltaTime=1.f/60;
-  io.Fonts->AddFontFromFileTTF(DELUXE_FONT_FILE,18); ImGui::GetStyle().FontSizeBase=18;
+  FontLibrary fonts; fonts.load(fs::path(DELUXE_FONT_FILE).parent_path()); io.FontDefault=fonts.fonts[0]; ImGui::GetStyle().FontSizeBase=18;
   ImGui_ImplSDLGPU3_InitInfo init{}; init.Device=gpu; init.ColorTargetFormat=SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM; init.MSAASamples=SDL_GPU_SAMPLECOUNT_1;
   if(!ImGui_ImplSDLGPU3_Init(&init)) throw std::runtime_error(SDL_GetError());
   CrtRenderer renderer; if(!renderer.initialize(gpu,init.ColorTargetFormat)) throw std::runtime_error(renderer.error());
@@ -28,7 +28,7 @@ int main(int argc,char **argv) {
   if(fixture.contains("level_elapsed")) c.level_feedback.started=double(SDL_GetTicksNS())/1e9-fixture["level_elapsed"].get<double>();
   if(fixture.contains("prompt")) c.prompt=fixture["prompt"];
   if(fixture.contains("blast")) c.blast=fixture["blast"];
-  UI ui{c}; ui.base_style=ImGui::GetStyle();
+  UI ui{c}; ui.font_library=&fonts; ui.font_settings.load(fixture.value("fonts",json::object())); ui.base_style=ImGui::GetStyle();
   ui.quit_dialog=fixture.value("quit_dialog",false);
   ui.scene_animation=fixture.contains("transition");
   ui.scale=std::clamp(fixture.value("scale",1.f),.75f,1.5f);
@@ -54,7 +54,11 @@ int main(int argc,char **argv) {
     auto batch=fixture["projectiles"]; batch["received"]=double(SDL_GetTicksNS())/1e9-fixture.value("projectile_elapsed",.15);
     ui.projectile_feedback.tiles.clear(); c.projectile_events.push_back(batch);
    }
-   ImGui_ImplSDLGPU3_NewFrame(); ImGui::NewFrame(); ui.draw(nullptr);
+   ImGui_ImplSDLGPU3_NewFrame(); io.FontDefault=fonts.get(ui.font_settings.interface_font); ImGui::NewFrame();
+   ui.draw(nullptr);
+   if(fixture.value("font_picker",false) && i==0) {
+    ui.begin_settings(); ImGui::Begin("Angband Deluxe"); ImGui::OpenPopup("Settings"); ImGui::End();
+   }
    if(fixture.contains("journal")) {
     ImGui::SetNextWindowSize({std::min(float(w)-40,ImGui::GetFontSize()*48),float(h)-80});
     ImGui::SetNextWindowPos({30,40}); ImGui::SetNextWindowFocus();

@@ -23,12 +23,13 @@ target_compile_features(deluxe_crt PUBLIC cxx_std_17)
 target_link_libraries(deluxe_crt PUBLIC deluxe_imgui nlohmann_json::nlohmann_json)
 add_executable(deluxe-client-tests EXCLUDE_FROM_ALL test_client.cpp)
 target_compile_features(deluxe-client-tests PRIVATE cxx_std_17)
-target_compile_definitions(deluxe-client-tests PRIVATE SDL_MAIN_HANDLED DELUXE_CLIENT_TEST)
+target_compile_definitions(deluxe-client-tests PRIVATE SDL_MAIN_HANDLED DELUXE_CLIENT_TEST
+    DELUXE_FONTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fonts")
 target_link_libraries(deluxe-client-tests PRIVATE deluxe_crt)
 add_executable(deluxe-ui-preview EXCLUDE_FROM_ALL preview_ui.cpp)
 target_compile_features(deluxe-ui-preview PRIVATE cxx_std_17)
 target_compile_definitions(deluxe-ui-preview PRIVATE SDL_MAIN_HANDLED DELUXE_CLIENT_TEST
-    DELUXE_FONT_FILE="${imgui_SOURCE_DIR}/misc/fonts/Cousine-Regular.ttf")
+    DELUXE_FONT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fonts/Cousine-Regular.ttf")
 target_link_libraries(deluxe-ui-preview PRIVATE deluxe_crt)
 add_executable(deluxe-gpu-tests EXCLUDE_FROM_ALL test_crt_gpu.cpp)
 add_executable(deluxe-transport-tests EXCLUDE_FROM_ALL test_transport.cpp)
@@ -41,7 +42,7 @@ target_link_libraries(deluxe-gpu-tests PRIVATE deluxe_crt)
 add_executable(angband-deluxe client.cpp)
 target_compile_features(angband-deluxe PRIVATE cxx_std_17)
 target_compile_definitions(angband-deluxe PRIVATE DELUXE_DATA_DIR="${CMAKE_SOURCE_DIR}/lib"
-    DELUXE_FONT_FILE="${imgui_SOURCE_DIR}/misc/fonts/Cousine-Regular.ttf")
+    DELUXE_FONT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fonts/Cousine-Regular.ttf")
 target_link_libraries(angband-deluxe PRIVATE deluxe_crt)
 # Stage original audio beside the executable; no source-tree path at runtime.
 add_custom_target(deluxe-audio ALL
@@ -54,8 +55,7 @@ foreach(sample IN LISTS DELUXE_AUDIO_SAMPLES)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${sample}" "$<TARGET_FILE_DIR:angband-deluxe>/audio/")
 endforeach()
 add_custom_command(TARGET deluxe-audio POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:angband-deluxe>/fonts"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${imgui_SOURCE_DIR}/misc/fonts/Cousine-Regular.ttf" "$<TARGET_FILE_DIR:angband-deluxe>/fonts/Cousine-Regular.ttf")
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/fonts" "$<TARGET_FILE_DIR:angband-deluxe>/fonts")
 add_dependencies(angband-deluxe deluxe-audio)
 add_executable(deluxe-audio-tests EXCLUDE_FROM_ALL test_audio.cpp)
 target_compile_features(deluxe-audio-tests PRIVATE cxx_std_17)

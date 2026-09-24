@@ -7,6 +7,7 @@
 #include "imgui_impl_sdlgpu3.h"
 #include "crt_renderer.h"
 #include "runtime_paths.h"
+#include "font_library.h"
 #include <iostream>
 #include "dungeon_view.h"
 #include "backend_reader.h"
@@ -541,6 +542,8 @@ struct UI {
  AudioSettings audio_settings{}, draft_audio_settings{};
  AudioPlayer audio;
  CrtSettings crt_settings{}, draft_crt_settings{};
+ FontLibrary *font_library=nullptr;
+ FontSettings font_settings,draft_fonts;
  float draft_scale=1.f;
  std::string settings_error;
  EngineOptions engine_options;
@@ -574,6 +577,7 @@ struct UI {
  std::vector<json> keys;
  void load_settings() {
   try { std::ifstream in(settings_path); if (!in) return; json j; in >> j;
+   font_settings.load(j.value("fonts",json::object()));
    scale=std::clamp(j.value("scale",1.f),0.75f,1.5f);
    game_fraction=std::clamp(j.value("game_fraction",.72f),.2f,.9f);
    fullscreen=j.value("fullscreen",false);
@@ -599,10 +603,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -610,6 +614,7 @@ struct UI {
   if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look,quick_targeting,quickbar_enabled)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
+  draft_fonts=font_settings;
   draft_audio_settings=audio_settings;
   engine_options.reset(); settings_saving=false; saving_bindings=false;
   keybinding_editor.reset(); c.bindings_result=nullptr; c.bindings_saved=nullptr; c.bindings_request.clear();
@@ -637,10 +642,11 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
+  font_settings=draft_fonts;
   audio_settings=draft_audio_settings; audio.configure(audio_settings,window_active);
   projectile_animation=draft_projectile_animation;
   movement_animation=draft_movement_animation; blink_animation=draft_blink_animation;
@@ -704,6 +710,18 @@ struct UI {
        if(ImGui::Selectable(label,draft_scale==value)) draft_scale=value;
       }
       ImGui::EndCombo();
+     }
+     if(font_library) {
+      ImGui::Spacing(); DeluxeTheme::section("Fonts");
+      font_library->picker("Interface font",draft_fonts.interface_font);
+      font_library->picker("Dungeon font",draft_fonts.dungeon_font,true);
+      if(ImGui::Button("Restore default fonts")) draft_fonts=FontSettings{};
+      ImGui::TextDisabled("Preview only until Save and Close.");
+      ImGui::Spacing();
+      ImGui::BeginChild("Font preview",ImVec2(0,ImGui::GetTextLineHeight()*13),ImGuiChildFlags_Borders);
+      font_library->preview(draft_fonts);
+      if(crt==1) { game_draw_list=ImGui::GetWindowDrawList(); game_pos=ImGui::GetWindowPos(); game_size=ImGui::GetWindowSize(); }
+      ImGui::EndChild();
      }
      ImGui::EndTabItem();
     }
@@ -964,10 +982,12 @@ struct UI {
   const auto available=ImGui::GetContentRegionAvail();
   const ImVec2 viewport(std::max(1.f,available.x),std::max(1.f,available.y));
   // Fit the complete semantic viewport (or fallback terminal) without scrolling.
+  auto *dungeon_font=font_library?font_library->get(font_settings.dungeon()):ImGui::GetFont();
+  const float cell_ratio=font_library?font_library->cell_ratio(font_settings.dungeon()):.60f;
   const float pixels=std::min(
-   std::max(.01f,viewport.x-2)/(float(columns)*.60f),
+   std::max(.01f,viewport.x-2)/(float(columns)*cell_ratio),
    std::max(.01f,viewport.y-2)/(float(std::max(size_t(1),grid.height))*1.12f));
-  const float cw=pixels*.60f, ch=pixels*1.12f;
+  const float cw=pixels*cell_ratio, ch=pixels*1.12f;
   const ImVec2 size(cw*float(columns),ch*float(grid.height));
   const ImVec2 origin(start.x+(viewport.x-size.x)*.5f,start.y+(viewport.y-size.y)*.5f);
   ImGui::InvisibleButton("Dungeon keyboard surface",viewport,ImGuiButtonFlags_EnableNav);
@@ -989,10 +1009,10 @@ struct UI {
      if(displacement.x || displacement.y) {
       unsigned glyph=0; int ink=0;
       for(int layer=0;layer<3;++layer) if(layers[layer*2].get<unsigned>()) { glyph=layers[layer*2]; ink=layers[layer*2+1]; }
-      if(glyph) draw->AddText(ImGui::GetFont(),pixels,at,color(ink),utf8(glyph).c_str());
+      if(glyph) draw->AddText(dungeon_font,pixels,at,color(ink),utf8(glyph).c_str());
      }
     }
-    draw->AddText(ImGui::GetFont(),pixels,{at.x+displacement.x*cw,at.y+displacement.y*ch},color(cell.color),utf8(cell.glyph).c_str());
+    draw->AddText(dungeon_font,pixels,{at.x+displacement.x*cw,at.y+displacement.y*ch},color(cell.color),utf8(cell.glyph).c_str());
    }
   }
   if(grid.semantic) {
@@ -1140,7 +1160,7 @@ struct UI {
    }
   }
 
-  c.transitions.dungeon(draw,start,viewport,double(SDL_GetTicksNS())/1e9,CharacterSelect::accent(c.character_save));
+  c.transitions.dungeon(draw,start,viewport,double(SDL_GetTicksNS())/1e9,CharacterSelect::accent(c.character_save),dungeon_font,cell_ratio);
   DungeonFeedback::ribbon(c,draw,start,viewport,proceed_with_click);
 
   if(!ImGui::IsWindowFocused()) grid_focus=false;
@@ -1875,13 +1895,14 @@ int main(int argc,char **argv) {
  SDL_SetGPUAllowedFramesInFlight(gpu,1); // Bound presentation latency; still paced by vsync.
  IMGUI_CHECKVERSION(); ImGui::CreateContext();
  auto &io=ImGui::GetIO(); io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad;
- io.Fonts->AddFontFromFileTTF(paths.font.string().c_str(),18.f);
+ FontLibrary fonts; fonts.load(paths.font.parent_path());
+ io.FontDefault=fonts.fonts[0];
  DeluxeTheme::apply();
  ImGui::GetStyle().FontSizeBase=18.f;
  ImGui_ImplSDL3_InitForSDLGPU(window);
  ImGui_ImplSDLGPU3_InitInfo info{}; info.Device=gpu; info.ColorTargetFormat=SDL_GetGPUSwapchainTextureFormat(gpu,window); info.MSAASamples=SDL_GPU_SAMPLECOUNT_1;
  ImGui_ImplSDLGPU3_Init(&info);
- Connection connection; UI ui{connection}; CrtRenderer crt_renderer;
+ Connection connection; UI ui{connection}; ui.font_library=&fonts; CrtRenderer crt_renderer;
  crt_renderer.initialize(gpu,info.ColorTargetFormat);
  std::string renderer_error;
  ui.base_style=ImGui::GetStyle();
@@ -1994,6 +2015,7 @@ int main(int argc,char **argv) {
     auto p=curve.map(ImVec2(x,y),true); ImGui::GetIO().AddMousePosEvent(p.x,p.y);
    }
   }
+  io.FontDefault=fonts.get(ui.font_settings.interface_font);
   ImGui::NewFrame(); ui.draw(window);
   ui.audio.configure(ui.audio_settings,ui.window_active);
   if(!ui.grid_focus && !ImGui::GetIO().WantTextInput && ((ImGui::GetIO().MouseClicked[0] && GImGui->ActiveId && GImGui->ActiveIdIsJustActivated) || GImGui->NavActivateId)) ui.audio.play("ui");
