@@ -1566,15 +1566,22 @@ class BackendTests(unittest.TestCase):
             elif e.state['readiness']!='ready': e.key('enter')
             else: break
         blinks=[fx for batch in e.motion_events for fx in batch['effects'] if fx['blink']]
-        self.assertEqual(len(blinks),1)
+        self.assertEqual(len(blinks),2)
         self.assertEqual(e.state['player']['sp'],start['sp'])
         self.assertEqual(e.state['turn'],turn,'Test Blink costs no turn')
         blink=blinks[0]
         self.assertEqual((blink['x'],blink['y']),(start['x'],start['y']))
-        self.assertEqual((blink['tx'],blink['ty']),(start['x'],start['y']),'No teleport destination is disclosed')
+        self.assertEqual((blink['tx'],blink['ty']),(start['x'],start['y']),'Departure ripple contains only its own centre')
         self.assertTrue(blink['tiles'])
         self.assertTrue(all(tuple(tile) in visible for tile in blink['tiles']))
         self.assertTrue(all((x-start['x'])**2+(y-start['y'])**2<=9 for x,y in blink['tiles']))
+        arrival=blinks[1]; end=e.state['player']; view=e.state['dungeon']
+        visible_after={(x+view['x'],y+view['y']) for y,row in enumerate(view['cells']) for x,cell in enumerate(row) if cell[10]}
+        self.assertEqual((arrival['x'],arrival['y']),(end['x'],end['y']))
+        self.assertEqual((arrival['tx'],arrival['ty']),(end['x'],end['y']))
+        self.assertTrue(arrival['tiles'])
+        self.assertTrue(all(tuple(tile) in visible_after for tile in arrival['tiles']))
+        self.assertTrue(all((x-end['x'])**2+(y-end['y'])**2<=9 for x,y in arrival['tiles']))
         count=len(e.motion_events); e.call('state.get'); e.call('state.get')
         self.assertEqual(len(e.motion_events),count,'Queries do not replay animations')
 

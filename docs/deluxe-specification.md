@@ -987,3 +987,7 @@ explains pending messages and keeps Save and quit disabled. Character Details
 can open from the current snapshot during continuation messages without
 acknowledging them or sending gameplay input. Native prompts retain modal
 priority. Death-transition freezing does not override nested disabled styling.
+
+Blink/teleport ripples play at both visible departure and arrival points.
+Arrival visibility is sampled after the native view update, so newly visible
+landing tiles light up while unseen monster destinations remain undisclosed.

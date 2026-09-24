@@ -1735,10 +1735,15 @@ void monster_walk(struct loc from, struct loc to)
  monster_swap(from,to);
  event_signal_motion(from,to,index,false,seen && monster_is_visible(mon) && !player->timed[TMD_IMAGE]);
 }
+/* Arrival callers wait for handle_stuff() so visibility belongs to the new view. */
+void monster_blink_ripple(struct loc grid)
+{
+ struct monster *mon=square_monster(cave,grid);
+ bool seen=mon ? monster_is_visible(mon) && !monster_is_camouflaged(mon) : loc_eq(player->grid,grid);
+ event_signal_motion(grid,grid,mon ? mon->midx : 0,true,seen && !player->timed[TMD_IMAGE]);
+}
 void monster_blink(struct loc from, struct loc to)
 {
- struct monster *mon=square_monster(cave,from);
- bool seen=mon ? monster_is_visible(mon) && !monster_is_camouflaged(mon) : loc_eq(player->grid,from);
- event_signal_motion(from,from,mon ? mon->midx : 0,true,seen && !player->timed[TMD_IMAGE]);
+ monster_blink_ripple(from);
  monster_swap(from,to);
 }

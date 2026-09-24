@@ -32,6 +32,7 @@ void update_monsters(bool full);
 bool monster_carry(struct chunk *c, struct monster *mon, struct object *obj);
 void monster_walk(struct loc from, struct loc to);
 void monster_blink(struct loc from, struct loc to);
+void monster_blink_ripple(struct loc grid);
 void monster_swap(struct loc grid1, struct loc grid2);
 void monster_wake(struct monster *mon, bool notify, int aware_chance);
 bool monster_can_see(struct chunk *c, struct monster *mon, struct loc grid);

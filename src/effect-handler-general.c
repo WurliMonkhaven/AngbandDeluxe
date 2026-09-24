@@ -2696,6 +2696,7 @@ bool effect_handler_TELEPORT(effect_handler_context_t *context)
 
 	/* Lots of updates after monster_swap */
 	handle_stuff(player);
+	if (!loc_eq(start, spots->grid)) monster_blink_ripple(spots->grid);
 
 	while (spots) {
 		struct jumps *next = spots->next;
@@ -2838,6 +2839,7 @@ bool effect_handler_TELEPORT_TO(effect_handler_context_t *context)
 
 	/* Lots of updates after monster_swap */
 	handle_stuff(player);
+	if (!loc_eq(start, land)) monster_blink_ripple(land);
 
 	return true;
 }
