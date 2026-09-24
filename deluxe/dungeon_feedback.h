@@ -45,7 +45,7 @@ struct DungeonFeedback {
   const bool hovered=ImGui::IsMouseHoveringRect(a,b);
   auto *storage=ImGui::GetStateStorage();
   const auto fade_id=ImGui::GetID("Dungeon ribbon opacity");
-  const float target=hovered?.06f:1.f;
+  const float target=hovered?.10f:1.f;
   const float opacity=target+(storage->GetFloat(fade_id,target)-target)*std::exp(-ImGui::GetIO().DeltaTime*22.f);
   storage->SetFloat(fade_id,opacity);
   const int first_vertex=draw->VtxBuffer.Size;

@@ -636,7 +636,7 @@ Messages heading also displays WAITING. White filled blocks are avoided for CRT
 readability. Existing acknowledgement keys remain authoritative, and clicking
 continues only when Proceed with click is enabled. No messages are auto-skipped.
 
-The ribbon fades to 6% opacity while hovered and never captures clicks.
+The ribbon fades to 10% opacity while hovered and never captures clicks.
 Underlying dungeon interactions and Proceed with click retain their normal rules.
 
 
@@ -888,3 +888,12 @@ is excluded. Stack rearrangement, identification and inscription stay quiet.
 A kind_key groups the underlying kind/ego/artifact without mutable equipment
 bonuses, so enchanting does not count as a new acquisition. Highlight records
 are bounded by current carried item identities and do not persist across loads.
+
+
+### Items at the player's feet and level-up feedback
+
+- Inventory shows a compact **On this tile** pile above Pack/Equipment/Quiver when observable, non-ignored items occupy the player's current tile. Larger piles scroll within three rows; each item has a quantity and individual Pick up action, and selecting its name uses the existing inspection panel. Uncarryable items stay visible with pickup disabled.
+- Item snapshots expose `on_player_tile`; `core.pickup` accepts a current item handle for a single item on that tile. The backend validates revision, location and capacity, honors inscription confirmation, and uses native pickup quantity, weight and energy rules. Ordinary unqualified pickup retains its original pile-selection behavior. Gold remains governed by native automatic collection.
+- New highest character levels trigger a brief amber sweep and Level N notice inside the existing XP bar, plus a matching emphasis on an available Study badge. No popup, input capture or layout shift. Loading, duplicate snapshots and restoration of drained levels are silent. Animations settings include a staged, persisted Level up flourish checkbox.
+
+- Dev tools includes Give player XP: a positive whole-number amount (up to 99,999,999), applied through native experience/level-up handling without consuming a turn. Only available during normal living-character play.

@@ -519,6 +519,56 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(e.state['turn'], turn)
         self.assert_semantic_view(e.state)
 
+    def test_individual_floor_pickup(self):
+        e=self.engine
+        e.hello(); e.birth()
+        def settle(confirmation=True):
+            for _ in range(20):
+                if e.state['readiness']=='ready': return
+                e.call('state.get')
+                if e.prompt:
+                    prompt=e.prompt; e.prompt=None; old=e.state['revision']
+                    self.assertNotEqual(prompt['type'],'choice', 'Explicit pickup must not open the rest-of-pile selector')
+                    value=confirmation if prompt['type']=='confirmation' else '!g' if prompt['type']=='text' else 1
+                    e.call('prompt.reply',{'prompt_id':prompt['prompt_id'],'value':value})
+                    e.next_state(old)
+                else: e.key('enter')
+            self.fail('Pickup did not settle')
+        def command(name,item,confirmation=True):
+            old=e.state['revision']
+            self.assertIn('result',e.call('command.execute',{'revision':old,'command':name,'item':item['id']}))
+            e.next_state(old); settle(confirmation)
+        # New characters stand on stairs, which scatter dropped objects. Use
+        # ordinary open floor so both drops belong to the same current pile.
+        features=e.call('catalog.get')['result']['features']
+        open_floor=next(f['id'] for f in features if f['name']=='open floor')
+        x,y=e.state['player']['x'],e.state['player']['y']
+        dx,dy,key=next((dx,dy,key) for dx,dy,key in ((1,0,'6'),(-1,0,'4'),(0,1,'2'),(0,-1,'8'))
+                       if e.state['map']['actual'][y+dy][x+dx]==open_floor)
+        e.key(ord(key)); settle()
+        potion=next(o for o in e.state['items'] if o['location']=='Pack' and 'Potion' in o['label'])
+        kind=potion['actual']['kind']
+        command('core.inscribe',potion)
+        potion=next(o for o in e.state['items'] if o['location']=='Pack' and o['actual']['kind']==kind)
+        command('core.drop',potion)
+        scroll=next(o for o in e.state['items'] if o['location']=='Pack' and 'Scroll' in o['label'])
+        other=scroll['actual']['kind']
+        command('core.drop',scroll)
+        floor=lambda k: next(o for o in e.state['items'] if o['location']=='Floor' and o['actual']['kind']==k)
+        self.assertTrue(floor(kind)['on_player_tile'], (floor(kind),e.state['player']))
+        self.assertTrue(floor(other)['on_player_tile'])
+        command('core.pickup',floor(kind),False)
+        self.assertTrue(floor(kind)['on_player_tile'],'Declining an inscription confirmation must leave the item')
+        old_handle=floor(kind)['id']
+        command('core.pickup',floor(kind))
+        self.assertFalse(any(o['location']=='Floor' and o['actual']['kind']==kind for o in e.state['items']))
+        self.assertTrue(floor(other)['on_player_tile'],'Picking one item must leave the other pile entries untouched')
+        self.assertIn('error',e.call('command.execute',{'revision':e.state['revision'],'command':'core.pickup','item':old_handle}))
+        owned=next(o for o in e.state['items'] if o['location']=='Pack' and o['actual']['kind']==kind)
+        self.assertIn('error',e.call('command.execute',{'revision':e.state['revision'],'command':'core.pickup','item':owned['id']}))
+        command('core.pickup',floor(other))
+        self.assertFalse(any(o.get('on_player_tile') for o in e.state['items']))
+
     def test_walk_and_pickup(self):
         self.walk_and_pickup(False)
 
@@ -1266,6 +1316,24 @@ class BackendTests(unittest.TestCase):
         e.call("session.close")
         self.assertEqual(e.process.wait(timeout=10), 0)
         self.assertTrue(dead_save.exists())
+
+    def test_debug_experience(self):
+        e=self.engine
+        e.hello()
+        self.assertIn('error',e.call('debug.experience',{'amount':100}))
+        e.birth()
+        for amount in (0,-1,1.5,100000000,'100',True):
+            self.assertEqual(e.call('debug.experience',{'amount':amount})['error']['code'],'invalid_argument')
+        before=e.state
+        amount=before['player']['next_level_experience']
+        self.assertIn('result',e.call('debug.experience',{'amount':amount}))
+        e.next_state(before['revision'])
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.key('enter')
+        self.assertEqual(e.state['player']['experience'],before['player']['experience']+amount)
+        self.assertGreater(e.state['player']['level'],before['player']['level'])
+        self.assertEqual(e.state['turn'],before['turn'])
 
     def test_debug_damage(self):
         e = self.engine

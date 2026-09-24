@@ -9,7 +9,7 @@ struct StatusEffects {
   std::stable_sort(effects.begin(),effects.end(),[](const json &a,const json &b) { return a.value("priority",2)<b.value("priority",2); });
   return effects;
  }
- static void draw(const json &player,bool *open_spells=nullptr) {
+ static void draw(const json &player,bool *open_spells=nullptr,float study_flash=0) {
   auto effects=active(player);
   const int study=player.value("study",0);
   if(study>0) effects.push_back({{"name","Study"},{"kind","study"},{"duration",study},
@@ -35,6 +35,10 @@ struct StatusEffects {
    draw->AddRectFilled(a,b,ImGui::GetColorU32(ImVec4(accent.x*.16f,accent.y*.16f,accent.z*.16f,1)),pad*.5f);
    draw->AddRect(a,b,ImGui::GetColorU32(ImVec4(accent.x,accent.y,accent.z,.5f)),pad*.5f);
    draw->AddLine(ImVec2(a.x+pad*.5f,a.y+pad*.45f),ImVec2(a.x+pad*.5f,b.y-pad*.45f),ImGui::GetColorU32(accent),2.f);
+   if(kind=="study" && study_flash>0) {
+    draw->AddRectFilled(a,b,ImGui::GetColorU32(ImVec4(accent.x,accent.y,accent.z,study_flash*.18f)),pad*.5f);
+    draw->AddRect(a,b,ImGui::GetColorU32(ImVec4(accent.x,accent.y,accent.z,study_flash)),pad*.5f,0,1.5f);
+   }
    draw->PushClipRect(a,b,true);
    draw->AddText(ImGui::GetFont(),ImGui::GetFontSize(),ImVec2(a.x+1.5f*pad,a.y+pad*.5f),ImGui::GetColorU32(accent),label.c_str(),nullptr,text_width);
    draw->PopClipRect();

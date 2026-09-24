@@ -253,7 +253,7 @@ int main(int argc,char **argv) {
   check(!ui.click_exits_look,"Look click draft applied immediately");
   ui.draft_proceed_with_click=true;
   check(!ui.proceed_with_click,"Gameplay draft must not apply immediately");
-  ui.draft_low_animation=false; ui.draft_death_animation=false; ui.draft_combat_animation=false; ui.draft_sleep_animation=false; ui.draft_fear_animation=false;
+  ui.draft_low_animation=false; ui.draft_death_animation=false; ui.draft_combat_animation=false; ui.draft_sleep_animation=false; ui.draft_fear_animation=false; ui.draft_level_animation=false;
   check(ui.low_animation && ui.death_animation && ui.combat_animation && ui.sleep_animation && ui.fear_animation,"Animation drafts applied immediately");
   ui.draft_crt_strength=3; ui.draft_crt_settings.parts[Hum].enabled=true;
   check(!ui.crt_settings.parts[Hum].enabled,"Hum bar draft applied immediately");
@@ -271,7 +271,7 @@ int main(int argc,char **argv) {
   check(!ui.draft_crt_settings.parts[Hum].enabled && !ui.crt_settings.parts[Hum].enabled,"Cancelled hum bar was applied");
   ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_crt_settings.parts[Hum].enabled=true;
   ui.draft_crt_settings.raster_lines=720; ui.draft_crt_settings.mask=2; ui.draft_crt_settings.tube_preset=-1;
-  ui.draft_low_animation=false; ui.draft_death_animation=true; ui.draft_combat_animation=false; ui.draft_sleep_animation=false; ui.draft_fear_animation=false;
+  ui.draft_low_animation=false; ui.draft_death_animation=true; ui.draft_combat_animation=false; ui.draft_sleep_animation=false; ui.draft_fear_animation=false; ui.draft_level_animation=false;
   ui.draft_click_exits_look=true;
   ui.draft_proceed_with_click=true;
   ui.draft_quick_targeting=true;
@@ -288,7 +288,7 @@ int main(int argc,char **argv) {
   check(loaded.quickbar_enabled && loaded.quickbar.slots()[0]["command"]=="core.hold","Quickbar settings and assignments did not persist");
   loaded.quickbar.profile="other-character"; check(loaded.quickbar.slots()[0].is_null(),"Characters must not share slots");
   check(loaded.crt_settings.raster_lines==720 && loaded.crt_settings.mask==2,"Staged raster/mask settings did not persist");
-  check(!loaded.low_animation && loaded.death_animation && !loaded.combat_animation && !loaded.sleep_animation && !loaded.fear_animation,"Independent animation switches did not persist");
+  check(!loaded.low_animation && loaded.death_animation && !loaded.combat_animation && !loaded.sleep_animation && !loaded.fear_animation && !loaded.level_animation,"Independent animation switches did not persist");
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");
   check(loaded.crt_settings.parts[Hum].enabled,"Hum bar did not persist");
   loaded.begin_settings(); loaded.draft_crt=2; loaded.draft_crt_settings.parts[Hum].enabled=false;
@@ -861,6 +861,27 @@ int main(int argc,char **argv) {
   auto hallucination=DungeonTooltip::describe_tile(hover_state,hover_catalog,5,6);
   check(hallucination.value("hallucinating",false) && !hallucination.contains("name") && hallucination["items"].empty(),"Hallucination should not turn an appearance into a definite identification");
   check(!hallucination.contains("hint"),"Hallucinations must not receive definite terrain hints");
+  LevelFeedback levels;
+  json level_state={{"phase","playing"},{"player",{{"level",5},{"max_level",5}}}};
+  levels.update(level_state,10);
+  check(levels.intensity(10.2)==0,"Loading a character must not celebrate existing levels");
+  level_state["player"]["level"]=level_state["player"]["max_level"]=7;
+  levels.update(level_state,11);
+  check(levels.level==7 && levels.intensity(11.3)>0,"A multi-level gain celebrates the new level once");
+  levels.update(level_state,11.5);
+  check(levels.started==11 && levels.intensity(14)==0,"Repeated snapshots cannot restart the flourish");
+  level_state["player"]["level"]=4; levels.update(level_state,15);
+  level_state["player"]["level"]=7; levels.update(level_state,16);
+  check(levels.started==11,"Restoring drained levels is quiet");
+  levels.reset(); levels.update(level_state,20);
+  check(levels.intensity(20.3)==0,"New sessions establish a fresh silent baseline");
+  json floor_state={{"phase","playing"},{"items",json::array({
+   {{"location","Floor"},{"on_player_tile",true},{"can_pickup",true}},
+   {{"location","Floor"},{"on_player_tile",true},{"can_pickup",false}},
+   {{"location","Floor"},{"on_player_tile",false}},{{"location","Pack"}}})}};
+  check(FloorItems::collect(floor_state).size()==2,"Current pile includes uncarryable items but excludes distant and owned items");
+  floor_state["phase"]="store";
+  check(FloorItems::collect(floor_state).empty(),"Floor section is limited to dungeon play");
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";

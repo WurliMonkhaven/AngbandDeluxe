@@ -94,18 +94,20 @@ struct DeluxeTheme {
   corners(d,ImVec2(a.x+1,a.y+1),ImVec2(b.x-1,b.y-1),IM_COL32(51,79,69,170),ImGui::GetFontSize()*.7f);
  }
  // The hit target spans the row, but the name belongs to this column only.
- static bool table_choice(const char *label,bool selected,ImGuiSelectableFlags flags=ImGuiSelectableFlags_SpanAllColumns,const char *badge="") {
+ static bool table_choice(const char *label,bool selected,ImGuiSelectableFlags flags=ImGuiSelectableFlags_SpanAllColumns,const char *badge="",float row_height=0) {
   const auto a=ImGui::GetCursorScreenPos(); const float width=ImGui::GetContentRegionAvail().x;
   const std::string id=std::string("##row-")+label;
-  const bool activated=ImGui::Selectable(id.c_str(),selected,flags,ImVec2(0,ImGui::GetTextLineHeight()));
+  const float height=std::max(ImGui::GetTextLineHeight(),row_height);
+  const ImVec2 text_pos(a.x,a.y+(height-ImGui::GetTextLineHeight())*.5f);
+  const bool activated=ImGui::Selectable(id.c_str(),selected,flags,ImVec2(0,height));
   auto *d=ImGui::GetWindowDrawList();
   const float f=ImGui::GetFontSize(),badge_font=f*.75f;
   const float badge_width=*badge?ImGui::GetFont()->CalcTextSizeA(badge_font,FLT_MAX,0,badge).x+f*.5f:0;
-  d->PushClipRect(a,ImVec2(a.x+std::max(1.f,width-badge_width),a.y+ImGui::GetTextLineHeight()),true);
-  d->AddText(a,ImGui::GetColorU32(ImGuiCol_Text),label); d->PopClipRect();
+  d->PushClipRect(a,ImVec2(a.x+std::max(1.f,width-badge_width),a.y+height),true);
+  d->AddText(text_pos,ImGui::GetColorU32(ImGuiCol_Text),label); d->PopClipRect();
   if(*badge) {
-   d->PushClipRect(a,ImVec2(a.x+std::max(1.f,width),a.y+f),true);
-   d->AddText(ImGui::GetFont(),badge_font,ImVec2(a.x+std::max(0.f,width-badge_width)+f*.3f,a.y+f*.15f),IM_COL32(156,211,162,255),badge);
+   d->PushClipRect(a,ImVec2(a.x+std::max(1.f,width),a.y+height),true);
+   d->AddText(ImGui::GetFont(),badge_font,ImVec2(a.x+std::max(0.f,width-badge_width)+f*.3f,text_pos.y+f*.15f),IM_COL32(156,211,162,255),badge);
    d->PopClipRect();
   }
   return activated;

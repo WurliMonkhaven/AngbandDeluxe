@@ -74,7 +74,7 @@ static bool connected = true, negotiated, initialized, ready, closing;
 static unsigned long revision, sequence, context_id;
 static char revision_text[32], context_text[32];
 static const char *phase = "launcher";
-static int debug_damage;
+static int debug_damage, debug_experience;
 static int debug_status=-1,debug_status_amount;
 static int native_target_mode;
 static bool native_target_immediate;
@@ -89,6 +89,7 @@ static cJSON *next_choices;
 static struct object **item_choice_objects;
 static int item_choice_count;
 static struct object *item_handles[8192], *pending_item;
+static bool pickup_single;
 static size_t item_handle_count;
 static bool (*original_get_item)(struct object **, const char *, const char *, cmd_code, item_tester, int);
 static char *seen_ids[32768];
@@ -342,7 +343,8 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  }
 
  json_bool(j,"comparison_available",tval_is_wearable(o) && wield_slot(o)>=0 && !object_is_equipped(player->body,o));
- json_bool(j,"can_pickup",streq(location,"Floor") && square_isseen(cave,o->grid) && !ignore_item_ok(player,o) && (tval_is_money(o) || inven_carry_okay(o)));
+ json_bool(j,"on_player_tile",streq(location,"Floor") && !tval_is_money(o) && loc_eq(player->grid,o->grid) && o->known && !ignore_item_ok(player,o) && !player->timed[TMD_IMAGE]);
+ json_bool(j,"can_pickup",streq(location,"Floor") && (loc_eq(player->grid,o->grid) || square_isseen(cave,o->grid)) && !ignore_item_ok(player,o) && (tval_is_money(o) || inven_carry_okay(o)));
  {
   cJSON *actions = cJSON_CreateArray();
   bool carried = object_is_carried(player, o);
@@ -671,7 +673,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.experience\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -962,6 +964,13 @@ static void pump(void)
       pending_item=NULL; cJSON_Delete(out); error(id,"invalid_argument","That spell is not available from this book for this action."); goto done;
      }
     }
+    if(streq(commands[i].id,"core.pickup") && pending_item) {
+     if(object_is_carried(player,pending_item) || !loc_eq(player->grid,pending_item->grid) ||
+        tval_is_money(pending_item) || ignore_item_ok(player,pending_item) || !inven_carry_okay(pending_item)) {
+      pending_item=NULL; cJSON_Delete(out); error(id,"invalid_argument","That item cannot be picked up from here."); goto done;
+     }
+     pickup_single=true;
+    }
     my_strcpy(action, id, sizeof(action)); string(out, "action_id", action);
     /* Route through ordinary text UI prerequisites, inscription checks and queue. */
     {
@@ -970,7 +979,8 @@ static void pump(void)
      if (code != CMD_NULL) key = cmd_lookup_key(code, OPT(player, rogue_like_commands) ? KEYMAP_MODE_ROGUE : KEYMAP_MODE_ORIG);
      else if (key == 'l' && OPT(player, rogue_like_commands)) key = 'x';
      /* The engine's explicit bypass preserves semantic commands under user keymaps. */
-     Term_keypress('\\', 0); Term_keypress(key, 0);
+     if(pickup_single) Term_keypress(ESCAPE,0);
+     else { Term_keypress('\\', 0); Term_keypress(key, 0); }
     }
     response(id, out);
    }
@@ -1014,6 +1024,16 @@ static void pump(void)
    error(id,"invalid_argument","Amount must be a whole number from 0 to 30000.");
   else {
    debug_status=idx; debug_status_amount=amount->valueint; ready=false;
+   response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0);
+  }
+ } else if (streq(method, "debug.experience")) {
+  cJSON *amount=cJSON_GetObjectItem(p,"amount");
+  if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing"))
+   error(id,"busy","Return to normal play before giving experience.");
+  else if(!cJSON_IsNumber(amount) || amount->valuedouble!=amount->valueint || amount->valueint<1 || amount->valueint>PY_MAX_EXP)
+   error(id,"invalid_argument","Experience must be a whole number from 1 to 99999999.");
+  else {
+   debug_experience=amount->valueint; ready=false;
    response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0);
   }
  } else if (streq(method, "debug.damage")) {
@@ -1091,6 +1111,17 @@ static errr get_command(cmd_context context)
  }
  {
   errr result = textui_get_cmd(context);
+  if(pickup_single) {
+   struct object *obj=pending_item;
+   const int key=cmd_lookup_key(CMD_PICKUP,OPT(player,rogue_like_commands)?KEYMAP_MODE_ROGUE:KEYMAP_MODE_ORIG);
+   pickup_single=false; pending_item=NULL; ready=false;
+   /* Explicit selection uses the engine's single-item pickup path. Its normal
+    * capacity, quantity, weight, pickup messaging and energy rules still apply. */
+   if(obj && loc_eq(player->grid,obj->grid) && inven_carry_okay(obj) &&
+      key_confirm_command(key) && get_item_allow(obj,key,CMD_PICKUP,false)) {
+    cmdq_push(CMD_PICKUP); cmd_set_arg_item(cmdq_peek(),"item",obj);
+   }
+  }
   if(native_target_mode) {
    const int mode=native_target_mode; native_target_mode=0;
    if(native_target_immediate) {
@@ -1107,6 +1138,10 @@ static errr get_command(cmd_context context)
   if(debug_status>=0) {
    int idx=debug_status,amount=debug_status_amount; debug_status=-1; ready=false;
    player_set_timed(player,idx,amount,true,true);
+  }
+  if(debug_experience) {
+   int amount=debug_experience; debug_experience=0; ready=false;
+   player_exp_gain(player,amount);
   }
   if (debug_damage) {
    int damage = debug_damage; debug_damage = 0; ready = false;

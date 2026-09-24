@@ -1,7 +1,7 @@
 #include "status_effects.h"
 // Compact character overview. All values and XP thresholds come from the engine.
 struct CharacterOverview {
- static void meter(const char *label,const std::string &value,float fraction,ImVec4 fill,const std::string &badge="") {
+ static void meter(const char *label,const std::string &value,float fraction,ImVec4 fill,const std::string &badge="",float flash=0,float sweep=0) {
   ImGui::PushStyleColor(ImGuiCol_PlotHistogram,fill);
   ImGui::PushStyleColor(ImGuiCol_FrameBg,ImVec4(fill.x*.22f,fill.y*.22f,fill.z*.22f,1));
   ImGui::ProgressBar(fraction,ImVec2(-1,ImGui::GetFrameHeight()),"");
@@ -25,6 +25,16 @@ struct CharacterOverview {
    draw->AddLine(ImVec2(x,b.y-3),ImVec2(x,b.y-1),IM_COL32(180,210,200,65));
   }
   draw->AddRect(a,b,ImGui::GetColorU32(ImGuiCol_Border),2);
+  if(flash>0) {
+   draw->PushClipRect(a,b,true);
+   draw->AddRectFilled(a,b,ImGui::GetColorU32(ImVec4(1.f,.61f,.16f,flash*.18f)));
+   const float span=(b.x-a.x)*.28f,beam=a.x-span+(b.x-a.x+2*span)*std::min(1.f,sweep*1.7f);
+   const auto clear=IM_COL32(255,204,105,0),light=ImGui::GetColorU32(ImVec4(1.f,.8f,.42f,flash*.45f));
+   draw->AddRectFilledMultiColor(ImVec2(beam-span,a.y),ImVec2(beam,b.y),clear,light,light,clear);
+   draw->AddRectFilledMultiColor(ImVec2(beam,a.y),ImVec2(beam+span,b.y),light,clear,clear,light);
+   draw->PopClipRect();
+   draw->AddRect(a,b,ImGui::GetColorU32(ImVec4(1.f,.8f,.42f,flash)),2,0,1.5f);
+  }
   const float value_width=ImGui::CalcTextSize(value.c_str()).x;
   if(!badge.empty()) {
    const ImVec2 end(track.x,b.y);
@@ -65,7 +75,7 @@ struct CharacterOverview {
   DeluxeTheme::section(label);
   ImGui::Dummy(ImVec2(0,ImGui::GetFontSize()*.1f));
  }
- static bool draw(const json &p,bool can_open,bool *open_spells=nullptr) {
+ static bool draw(const json &p,bool can_open,bool *open_spells=nullptr,const LevelFeedback *level_up=nullptr,double now=0) {
   bool open=false;
   std::string identity=p.value("name","");
   if(!identity.empty()) identity+=" · ";
@@ -109,14 +119,15 @@ struct CharacterOverview {
    const int xp=p.value("experience",0),base=p.value("level_start_experience",0),next=p.value("next_level_experience",0);
    const float progress=next>0?resource_fraction(xp-base,next-base):1.f;
    char xp_text[64]; SDL_snprintf(xp_text,sizeof(xp_text),next>0?"%.0f%%":"MAX",progress*100);
-   meter("",xp_text,progress,ImVec4(.56f,.37f,.12f,1),"Lv "+std::to_string(p.value("level",1)));
+   const float flash=level_up?level_up->intensity(now):0;
+   const bool notice=flash>0 && level_up->progress(now)<.75f;
+   meter(notice?"LEVEL UP":"",notice?"Level "+std::to_string(level_up->level):xp_text,progress,ImVec4(.56f,.37f,.12f,1),notice?"":"Lv "+std::to_string(p.value("level",1)),flash,level_up?level_up->progress(now):0);
    if(ImGui::IsItemHovered()) {
     if(next>0) ImGui::SetTooltip("Level %d\nExperience: %d\nNext level: %d\nRemaining: %d",p.value("level",1),xp,next,std::max(0,next-xp));
     else ImGui::SetTooltip("Level %d\nExperience: %d\nMaximum level reached",p.value("level",1),xp);
    }
    ImGui::EndTable();
   }
-  StatusEffects::draw(p,open_spells);
   static const char *names[]={"STR","INT","WIS","DEX","CON"};
   if(p.contains("stats") && !p["stats"].empty() && ImGui::BeginTable("Attributes",int(p["stats"].size()),ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_BordersInnerV)) {
    ImGui::TableNextRow();
@@ -142,6 +153,7 @@ struct CharacterOverview {
    ImGui::EndTable();
   }
   if(p.value("extra_moves",0)) ImGui::Text("Extra moves: %+d",p.value("extra_moves",0));
+  StatusEffects::draw(p,open_spells,level_up?level_up->intensity(now):0);
   section("Dungeon");
   const char *dungeon_labels[]={"Depth","Light","Feel",""};
   const std::string dungeon_values[]={std::to_string(p.value("depth",0)),std::to_string(p.value("light",0)),p.value("feeling","—"),display_label(p.value("floor",""))};

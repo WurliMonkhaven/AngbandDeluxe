@@ -66,6 +66,8 @@ static bool matches(std::string text, std::string term) {
 #include "engine_options.h"
 #include "audio_player.h"
 #include "inventory_changes.h"
+#include "level_feedback.h"
+#include "floor_items.h"
 
 static std::string utf8(unsigned c) {
  std::string s;
@@ -90,6 +92,7 @@ static ImU32 color(int index) {
 }
 struct Connection {
  InventoryChanges inventory_changes;
+ LevelFeedback level_feedback;
  std::vector<std::string> sound_cues;
  RenderGrid game_grid;
  std::unique_ptr<BackendReader> reader;
@@ -166,7 +169,7 @@ struct Connection {
   send("debug.quit"); busy=true;
  }
  std::string send(const std::string &method, json params = json::object()) {
-  if(method=="session.new" || method=="session.load" || method=="session.replay") { inventory_changes.reset(); character_save=params.value("save",""); params["native_birth"]=capabilities.value("interaction.birth",0)>0; }
+  if(method=="session.new" || method=="session.load" || method=="session.replay") { inventory_changes.reset(); level_feedback.reset(); character_save=params.value("save",""); params["native_birth"]=capabilities.value("interaction.birth",0)>0; }
   if (!connected) return "";
   auto id = "r" + std::to_string(++next);
   params["session_id"] = "session-1";
@@ -212,7 +215,7 @@ struct Connection {
     postgame_finished=j["data"].value("phase","")=="finished";
     busy=false; return;
    }
-   if (name == "state.changed") { replay_save.clear(); state = std::move(j.at("data")); inventory_changes.update(state); resting=false; comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
+   if (name == "state.changed") { replay_save.clear(); state = std::move(j.at("data")); inventory_changes.update(state); level_feedback.update(state,double(SDL_GetTicksNS())/1e9); resting=false; comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
    if(name=="knowledge.changed" && creature_race>=0 && j["data"].value("category","")=="creatures" && j["data"].value("id",-1)==creature_race) creature_detail=j["data"];
    if(name=="travel.changed") {
     travel=j.at("data");
@@ -455,8 +458,9 @@ struct UI {
  bool combat_animation=true, draft_combat_animation=true;
  bool sleep_animation=true, draft_sleep_animation=true;
  bool fear_animation=true, draft_fear_animation=true;
+ bool level_animation=true, draft_level_animation=true;
  bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
- int damage_amount=1;
+ int damage_amount=1, xp_amount=100;
  DevStatusDialog dev_status_dialog;
  int crt=0, draft_crt=0;
  int crt_strength=1, draft_crt_strength=1;
@@ -506,6 +510,7 @@ struct UI {
    combat_animation=j.value("combat_animation",true);
    sleep_animation=j.value("sleep_animation",true);
    fear_animation=j.value("fear_animation",true);
+   level_animation=j.value("level_animation",true);
    low_animation=j.value("low_health_animation",true); death_animation=j.value("death_animation",true);
    crt=std::clamp(j.value("crt",0),0,2);
    crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
@@ -515,10 +520,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -538,6 +543,7 @@ struct UI {
   draft_combat_animation=combat_animation;
   draft_sleep_animation=sleep_animation;
   draft_fear_animation=fear_animation;
+  draft_level_animation=level_animation;
   draft_low_animation=low_animation; draft_death_animation=death_animation;
   draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
   draft_crt_strength=crt_strength; draft_crt_settings=crt_settings;
@@ -546,7 +552,7 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
@@ -554,6 +560,7 @@ struct UI {
   combat_animation=draft_combat_animation;
   sleep_animation=draft_sleep_animation;
   fear_animation=draft_fear_animation;
+  level_animation=draft_level_animation;
   low_animation=draft_low_animation; death_animation=draft_death_animation;
   proceed_with_click=draft_proceed_with_click;
   click_exits_look=draft_click_exits_look;
@@ -632,6 +639,7 @@ struct UI {
      ImGui::Checkbox("Combat feedback",&draft_combat_animation);
      ImGui::Checkbox("Sleeping monsters",&draft_sleep_animation);
      ImGui::Checkbox("Frightened monsters",&draft_fear_animation);
+     ImGui::Checkbox("Level up flourish",&draft_level_animation);
      ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("CRT effects")) {
@@ -996,7 +1004,7 @@ struct UI {
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
  void character() {
-  if(c.state.contains("player") && CharacterOverview::draw(c.state["player"],c.ready(),c.capabilities.value("spells",0)>0 && c.state["player"].value("spellcasting",false)?&select_spells_tab:nullptr)) execute("core.character");
+  if(c.state.contains("player") && CharacterOverview::draw(c.state["player"],c.ready(),c.capabilities.value("spells",0)>0 && c.state["player"].value("spellcasting",false)?&select_spells_tab:nullptr,level_animation?&c.level_feedback:nullptr,double(SDL_GetTicksNS())/1e9)) execute("core.character");
  }
  void tile_details(int x,int y,bool full) {
   ImGui::Text("Tile %d, %d",x,y);
@@ -1053,7 +1061,37 @@ struct UI {
  static const char *item_action_label(const std::string &id) {
   return id=="core.browse"?"Browse spells":id=="core.wield"?"Wield / wear":id=="core.use"?"Use":id=="core.quaff"?"Quaff":id=="core.read"?"Read":id=="core.eat"?"Eat":id=="core.fire"?"Fire":id=="core.throw"?"Throw":id=="core.takeoff"?"Take off":id=="core.drop"?"Drop":"Inscribe";
  }
+ void floor_items() {
+  const auto items=FloorItems::collect(c.state);
+  if(items.empty()) return;
+  DeluxeTheme::section("On this tile");
+  // Bound large piles so equipment and inspection remain within easy reach.
+  const float height=std::min(3.f,float(items.size()))*(ImGui::GetFrameHeight()+2*ImGui::GetStyle().CellPadding.y);
+  if(ImGui::BeginTable("Floor items",3,ImGuiTableFlags_ScrollY|ImGuiTableFlags_RowBg,ImVec2(0,height))) {
+   ImGui::TableSetupColumn("Item",ImGuiTableColumnFlags_WidthStretch);
+   ImGui::TableSetupColumn("Qty",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFontSize()*2.5f);
+   ImGui::TableSetupColumn("Action",ImGuiTableColumnFlags_WidthFixed,ImGui::CalcTextSize("Pick up").x+2*ImGui::GetStyle().FramePadding.x);
+   for(const auto *item:items) {
+    const auto &o=*item; const auto id=o.value("id","");
+    ImGui::PushID(id.c_str()); ImGui::TableNextRow(); ImGui::TableNextColumn();
+    ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
+    if(DeluxeTheme::table_choice(o.value("label","").c_str(),selected==id,ImGuiSelectableFlags_None,"",ImGui::GetFrameHeight())) selected=id;
+    ImGui::PopStyleColor();
+    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",o.value("label","").c_str());
+    ImGui::TableNextColumn(); ImGui::AlignTextToFramePadding(); ImGui::Text("%d",o.value("quantity",1));
+    ImGui::TableNextColumn();
+    ImGui::BeginDisabled(!c.ready() || !o.value("can_pickup",false));
+    if(ImGui::Button("Pick up")) execute("core.pickup",id);
+    ImGui::EndDisabled();
+    if(!o.value("can_pickup",false) && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("You cannot carry this item right now.");
+    ImGui::PopID();
+   }
+   ImGui::EndTable();
+  }
+  ImGui::Spacing();
+ }
  void items() {
+  floor_items();
   if(ImGui::BeginTabBar("Item categories",ImGuiTabBarFlags_DrawSelectedOverline)) {
    const char *tabs[]={"Pack","Equipment","Quiver"};
    for(int category=0;category<3;++category) if(ImGui::BeginTabItem(tabs[category])) {
@@ -1124,11 +1162,17 @@ struct UI {
    }
    ImGui::EndTable();
   }
+  for(const auto *item:FloorItems::collect(c.state)) values.push_back(item);
   for(const auto *item:values) if(item->value("id","")==selected) {
    const auto &o=*item;
    DeluxeTheme::section("Inspection");
    ImGui::BeginDisabled(!c.ready());
    bool first=true;
+   if(o.value("on_player_tile",false)) {
+    ImGui::BeginDisabled(!o.value("can_pickup",false));
+    if(ImGui::Button("Pick up")) execute("core.pickup",selected);
+    ImGui::EndDisabled(); first=false;
+   }
    for(const auto &action:o.value("actions",json::array())) {
     const std::string id=action.get<std::string>();
     const char *label=item_action_label(id);
@@ -1150,7 +1194,7 @@ struct UI {
     }
     ImGui::TableNextRow(); ImGui::TableNextColumn();
     ImGui::TextDisabled("Quantity"); ImGui::SameLine(); ImGui::Text("%d",o.value("quantity",0));
-    ImGui::TableNextColumn(); ImGui::TextDisabled("%s",category==1?"Slot":"Location"); ImGui::SameLine();
+    ImGui::TableNextColumn(); ImGui::TextDisabled("%s",category==1 && o.value("location","")!="Floor"?"Slot":"Location"); ImGui::SameLine();
     ImGui::TextWrapped("%s",display_label(o.value("location","")).c_str());
     ImGui::EndTable();
    }
@@ -1381,16 +1425,32 @@ struct UI {
   ImGui::PushStyleColor(ImGuiCol_ButtonActive,ImVec4(.85f,.24f,.26f,1));
   if(ImGui::Button("Dev tools")) ImGui::OpenPopup("Developer tools");
   ImGui::PopStyleColor(3);
-  bool open_damage=false,open_status=false;
+  bool open_damage=false,open_status=false,open_xp=false;
   if(ImGui::BeginPopup("Developer tools")) {
    if(ImGui::MenuItem("Inflict damage on player",nullptr,false,c.ready() && c.state.value("phase","")=="playing")) open_damage=true;
    if(ImGui::MenuItem("Inflict status effect",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.status",0)>0)) open_status=true;
+   if(ImGui::MenuItem("Give player XP",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.experience",0)>0)) open_xp=true;
    ImGui::Separator();
    if(ImGui::MenuItem("Quit without saving",nullptr,false,c.connected && !c.busy && c.capabilities.value("debug.quit",0)>0)) c.quit_without_saving();
    ImGui::EndPopup();
   }
   if(open_status) { keys.clear(); dev_status_dialog.open(c); }
   if(dev_status_dialog.draw(c)) focus_game();
+  if(open_xp) { keys.clear(); xp_amount=100; ImGui::OpenPopup("Give player XP"); }
+  if(ImGui::BeginPopupModal("Give player XP",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+   ImGui::TextUnformatted("Experience to add");
+   if(ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+   ImGui::InputInt("##Experience",&xp_amount,10,100);
+   ImGui::TextDisabled("1–99,999,999 XP. Normal level-up rules apply.");
+   ImGui::BeginDisabled(!c.ready() || xp_amount<1 || xp_amount>99999999);
+   if(ImGui::Button("Give XP")) {
+    c.send("debug.experience",{{"amount",xp_amount}}); c.busy=true;
+    ImGui::CloseCurrentPopup(); focus_game();
+   }
+   ImGui::EndDisabled(); ImGui::SameLine();
+   if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+   ImGui::EndPopup();
+  }
   if(open_damage) { damage_amount=1; ImGui::OpenPopup("Inflict damage on player"); }
   if(ImGui::BeginPopupModal("Inflict damage on player",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
    ImGui::TextUnformatted("Damage to deal");
