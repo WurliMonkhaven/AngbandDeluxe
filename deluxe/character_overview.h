@@ -1,7 +1,7 @@
 #include "status_effects.h"
 // Compact character overview. All values and XP thresholds come from the engine.
 struct CharacterOverview {
- static void meter(const char *label,const std::string &value,float fraction,ImVec4 fill) {
+ static void meter(const char *label,const std::string &value,float fraction,ImVec4 fill,const std::string &badge="") {
   ImGui::PushStyleColor(ImGuiCol_PlotHistogram,fill);
   ImGui::PushStyleColor(ImGuiCol_FrameBg,ImVec4(fill.x*.22f,fill.y*.22f,fill.z*.22f,1));
   ImGui::ProgressBar(fraction,ImVec2(-1,ImGui::GetFrameHeight()),"");
@@ -10,6 +10,9 @@ struct CharacterOverview {
   const float y=a.y+(b.y-a.y-ImGui::GetFontSize())*.5f;
   auto *draw=ImGui::GetWindowDrawList(); const auto ink=ImGui::GetColorU32(ImGuiCol_Text);
   // A lit glass face, a thin bright edge, and fine scale marks below the text.
+  const float badge_width=badge.empty()?0.f:std::min(ImGui::CalcTextSize(badge.c_str()).x+2*pad,(b.x-a.x)*.55f);
+  const ImVec2 track(a.x+badge_width,a.y);
+  // Labels share one continuous fill; the level is not a separate segment.
   const float edge=a.x+(b.x-a.x)*std::clamp(fraction,0.f,1.f);
   if(edge>a.x) {
    const auto top=ImGui::GetColorU32(ImVec4(fill.x*1.15f,fill.y*1.15f,fill.z*1.15f,1));
@@ -23,9 +26,15 @@ struct CharacterOverview {
   }
   draw->AddRect(a,b,ImGui::GetColorU32(ImGuiCol_Border),2);
   const float value_width=ImGui::CalcTextSize(value.c_str()).x;
-  draw->PushClipRect(a,b,true);
-  if(ImGui::CalcTextSize(label).x+value_width+3*pad<b.x-a.x) draw->AddText(ImVec2(a.x+pad,y),ink,label);
-  draw->AddText(ImVec2(std::max(a.x+pad,b.x-pad-value_width),y),ink,value.c_str());
+  if(!badge.empty()) {
+   const ImVec2 end(track.x,b.y);
+   draw->PushClipRect(a,end,true);
+   draw->AddText(ImVec2(a.x+pad,y),ink,badge.c_str());
+   draw->PopClipRect();
+  }
+  draw->PushClipRect(track,b,true);
+  if(ImGui::CalcTextSize(label).x+value_width+3*pad<b.x-track.x) draw->AddText(ImVec2(track.x+pad,y),ink,label);
+  draw->AddText(ImVec2(std::max(track.x+pad,b.x-pad-value_width),y),ink,value.c_str());
   draw->PopClipRect(); ImGui::PopStyleColor(2);
  }
  static void metric(const char *label,const std::string &value,const std::string &tooltip="") {
@@ -60,20 +69,23 @@ struct CharacterOverview {
   bool open=false;
   std::string identity=p.value("name","");
   if(!identity.empty()) identity+=" · ";
-  identity+=p.value("race","")+" "+p.value("class","")+" · Lv "+std::to_string(p.value("level",1));
+  identity+=p.value("race","")+" "+p.value("class","");
   const auto title=p.value("title","");
   if(!title.empty()) identity+=" · "+display_label(title);
   if(ImGui::BeginTable("Character identity",2,ImGuiTableFlags_SizingStretchProp)) {
    ImGui::TableSetupColumn("Identity",ImGuiTableColumnFlags_WidthStretch);
    ImGui::TableSetupColumn("Details",ImGuiTableColumnFlags_WidthFixed,ImGui::CalcTextSize("Details").x+2*ImGui::GetStyle().FramePadding.x);
    ImGui::TableNextRow(); ImGui::TableNextColumn();
-   if(ImGui::CalcTextSize(identity.c_str()).x+2*ImGui::GetStyle().SeparatorTextPadding.x<=ImGui::GetContentRegionAvail().x)
-    DeluxeTheme::section(identity.c_str());
-   else {
-    auto name=p.value("name",""); if(name.empty()) name=p.value("race","")+" "+p.value("class","");
-    if(!title.empty()) name+=" / "+display_label(title);
-    DeluxeTheme::section(name.c_str());
-    ImGui::TextDisabled("%s %s / Lv %d",p.value("race","").c_str(),p.value("class","").c_str(),p.value("level",1));
+   const bool compact=ImGui::CalcTextSize(identity.c_str()).x+ImGui::GetFontSize()*1.3f>ImGui::GetContentRegionAvail().x;
+   auto name=p.value("name",""); if(name.empty()) name="Adventurer";
+   DeluxeTheme::section(compact?name.c_str():identity.c_str(),false);
+   if(ImGui::IsItemHovered()) {
+    ImGui::BeginTooltip(); ImGui::PushTextWrapPos(ImGui::GetFontSize()*28.f);
+    ImGui::TextUnformatted(name.c_str()); ImGui::Separator();
+    ImGui::Text("Race: %s",p.value("race","").c_str());
+    ImGui::Text("Class: %s",p.value("class","").c_str());
+    if(!title.empty()) ImGui::Text("Title: %s",display_label(title).c_str());
+    ImGui::PopTextWrapPos(); ImGui::EndTooltip();
    }
    ImGui::TableNextColumn(); ImGui::BeginDisabled(!can_open); open=ImGui::Button("Details"); ImGui::EndDisabled();
    if(ImGui::IsItemHovered()) ImGui::SetTooltip("Open character details");
@@ -96,11 +108,11 @@ struct CharacterOverview {
    ImGui::TableNextColumn();
    const int xp=p.value("experience",0),base=p.value("level_start_experience",0),next=p.value("next_level_experience",0);
    const float progress=next>0?resource_fraction(xp-base,next-base):1.f;
-   char xp_text[64]; SDL_snprintf(xp_text,sizeof(xp_text),next>0?"%.0f%%":"Max level",progress*100);
-   meter("XP",xp_text,progress,ImVec4(.56f,.37f,.12f,1));
+   char xp_text[64]; SDL_snprintf(xp_text,sizeof(xp_text),next>0?"%.0f%%":"MAX",progress*100);
+   meter("",xp_text,progress,ImVec4(.56f,.37f,.12f,1),"Lv "+std::to_string(p.value("level",1)));
    if(ImGui::IsItemHovered()) {
-    if(next>0) ImGui::SetTooltip("Experience: %d\nNext level: %d\nRemaining: %d",xp,next,std::max(0,next-xp));
-    else ImGui::SetTooltip("Experience: %d\nMaximum level reached",xp);
+    if(next>0) ImGui::SetTooltip("Level %d\nExperience: %d\nNext level: %d\nRemaining: %d",p.value("level",1),xp,next,std::max(0,next-xp));
+    else ImGui::SetTooltip("Level %d\nExperience: %d\nMaximum level reached",p.value("level",1),xp);
    }
    ImGui::EndTable();
   }
