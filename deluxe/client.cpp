@@ -115,7 +115,7 @@ struct Connection {
  std::map<std::string,std::string> requests;
  unsigned long next = 0;
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
- bool pickup_travel=false;
+ bool pickup_travel=false, resting=false;
  bool return_to_menu = false, restart_ready = false, close_confirmed = false;
  json state = json::object(), prompt = json::object(), pending_prompt = json::object(), commands = json::array(), saves = json::array(), catalog = json::object();
  Connection()=default;
@@ -190,6 +190,7 @@ struct Connection {
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
+   if(name=="activity.changed") { resting=j.at("data").value("resting",false); return; }
    if(name=="sound.play") {
     auto cue=AudioPlayer::engine_cue(j.at("data").value("name",""));
     if(!cue.empty() && sound_cues.size()<16) sound_cues.push_back(cue);
@@ -203,7 +204,7 @@ struct Connection {
     postgame_finished=j["data"].value("phase","")=="finished";
     busy=false; return; // Keep the last gameplay image for the shutdown transition.
    }
-   if (name == "state.changed") { replay_save.clear(); state = std::move(j.at("data")); comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
+   if (name == "state.changed") { replay_save.clear(); state = std::move(j.at("data")); resting=false; comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
    if(name=="knowledge.changed" && creature_race>=0 && j["data"].value("category","")=="creatures" && j["data"].value("id",-1)==creature_race) creature_detail=j["data"];
    if(name=="travel.changed") {
     travel=j.at("data");
@@ -302,7 +303,7 @@ struct Connection {
   }
  }
  void process_stopped(int exit_code) {
-  connected=false; busy=false; pickup_travel=false;
+  connected=false; busy=false; pickup_travel=false; resting=false;
   // Death/post-game screens remain interactive until the engine reports that
   // play_game completed. A crash must not masquerade as a normal game ending.
   const bool finished=postgame_finished || state.value("phase","")=="finished";
@@ -330,6 +331,9 @@ struct Connection {
  bool native_targeting() const { return capabilities.value("interaction.targeting",0)>0; }
  bool mouse_movement() const { return capabilities.value("interaction.mouse",0)>0; }
  bool key(const json &k) {
+  if(connected && resting && prompt.empty() && k=="escape") {
+   send("rest.cancel",{{"context",state.value("context","")}}); return true;
+  }
   if(connected && busy && pickup_travel && prompt.empty() && k=="escape") {
    send("terminal.input",{{"context",state.value("context","")},{"key","escape"}});
    pickup_travel=false; return true;
@@ -402,6 +406,7 @@ static void properties(const json &value) {
 #include "dev_status_dialog.h"
 #include "dungeon_feedback.h"
 #include "dungeon_tooltip.h"
+#include "rest_dialog.h"
 #include "birth_panel.h"
 #include "quickbar.h"
 #include "spell_panel.h"
@@ -467,6 +472,7 @@ struct UI {
  ImGuiStyle base_style;
  char item_filter[128]{}, message_filter[128]{}, command_filter[128]{}, save_name[65] = "Adventurer";
  char prompt_text[4096]{};
+ RestDialog rest_dialog;
  std::string last_prompt, selected, settings_path, prompt_item;
  std::string managed_save;
  char renamed_save[65]{};
@@ -1228,17 +1234,19 @@ struct UI {
   if(c.prompt.empty()) return;
   auto id=c.prompt.value("prompt_id","");
   const bool fresh=id!=last_prompt;
+  const bool rest_selection=c.prompt.value("selection_kind","")=="rest";
   const bool item_selection=c.prompt.value("selection_kind","")=="item";
   const bool spell_selection=c.prompt.value("selection_kind","")=="spell";
   if(fresh) { last_prompt=id; SDL_strlcpy(prompt_text,c.prompt.value("initial","").c_str(),sizeof(prompt_text)); }
   const bool editing_inscription=inscription_edit && c.prompt.value("type","")=="text";
-  const char *prompt_title=editing_inscription?"Item inscription":"Angband asks";
+  const char *prompt_title=rest_selection?"Rest":editing_inscription?"Item inscription":"Angband asks";
   if(!ImGui::IsPopupOpen(prompt_title)) ImGui::OpenPopup(prompt_title);
   if(item_selection || spell_selection) ImGui::SetNextWindowSize(ImVec2(std::min(ImGui::GetMainViewport()->WorkSize.x-24,ImGui::GetFontSize()*48),0),ImGuiCond_Always);
   if(ImGui::BeginPopupModal(prompt_title,nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-   ImGui::TextWrapped("%s",c.prompt.value("text","").c_str());
+   if(!rest_selection) ImGui::TextWrapped("%s",c.prompt.value("text","").c_str());
    auto type=c.prompt.value("type",""); bool answered=false;
-   if(type=="confirmation") {
+   if(rest_selection) { answered=rest_dialog.draw(c,fresh); }
+   else if(type=="confirmation") {
     if(ImGui::Button("Yes")) { c.answer(true); answered=true; } ImGui::SameLine();
     if(ImGui::Button("No")) { c.answer(false); answered=true; }
    } else if(type=="choice" && spell_selection) {
@@ -1319,6 +1327,11 @@ struct UI {
     if(!c.ready()) ImGui::TextUnformatted("Return to normal play to save.");
     ImGui::EndPopup();
    }
+   ImGui::SameLine();
+  }
+  if(c.resting) {
+   ImGui::TextColored(ImVec4(.52f,.80f,.66f,1),"Resting..."); ImGui::SameLine();
+   if(ImGui::Button("Stop resting")) { c.key("escape"); focus_game(); }
    ImGui::SameLine();
   }
   const float settings_width=ImGui::CalcTextSize("Settings").x+2*ImGui::GetStyle().FramePadding.x;

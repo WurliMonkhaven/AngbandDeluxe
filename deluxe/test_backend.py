@@ -30,6 +30,7 @@ class Engine:
         self.responses = {}
         self.travel = {}
         self.knowledge_events = []
+        self.activity_events = []
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._errors, daemon=True).start()
 
@@ -64,6 +65,8 @@ class Engine:
                 self.knowledge_events.append(j["data"])
             elif j["event"] == "travel.changed":
                 self.travel = j["data"]
+            elif j["event"] == "activity.changed":
+                self.activity_events.append(j["data"])
             elif j["event"] == "prompt.requested":
                 self.prompt = j["data"]
         else:
@@ -694,6 +697,50 @@ class BackendTests(unittest.TestCase):
         self.assert_semantic_view(e.state)
         self.targeting('targeting.begin', mode='target')
         self.assertEqual(e.call('dungeon.click', {'context':e.state['context'],'x':x,'y':y,'exit_look':True})['error']['code'], 'busy')
+
+    def test_native_rest(self):
+        e = self.engine
+        e.hello(); e.birth()
+        # Remove nearby town creatures so waking one cannot legitimately end
+        # the long rest before its first interruption poll.
+        e.key(1); e.key(ord('z'))
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.call('state.get')
+            if e.prompt:
+                p=e.prompt; e.prompt=None; old=e.state['revision']
+                e.call('prompt.reply',{'prompt_id':p['prompt_id'],'value':True if p['type']=='confirmation' else 20})
+                e.next_state(old)
+            else: e.key('enter')
+        def begin(keyboard=False):
+            old=e.state['revision']
+            if keyboard: e.key(ord('R'))
+            else:
+                self.assertIn('result',e.call('command.execute',{'revision':old,'command':'core.rest'}))
+                e.next_state(old)
+            e.call('state.get')
+            self.assertEqual(e.prompt.get('selection_kind'),'rest')
+            return e.prompt['prompt_id']
+        before=e.state['turn']
+        pid=begin(True); old=e.state['revision']; e.prompt=None
+        e.call('prompt.reply',{'prompt_id':pid,'value':None}); e.next_state(old)
+        self.assertEqual(e.state['turn'],before,'Cancelling the dialog must not spend a turn')
+        for choice in ('&','*','!','5'):
+            pid=begin(); old=e.state['revision']; e.prompt=None
+            e.call('prompt.reply',{'prompt_id':pid,'value':choice}); e.next_state(old)
+            while e.state['readiness']!='ready': e.key('enter')
+            self.assertEqual(e.state['player']['resting'],0)
+            self.assert_semantic_view(e.state)
+        pid=begin(); old=e.state['revision']; e.prompt=None
+        e.call('prompt.reply',{'prompt_id':pid,'value':'9999'})
+        while not any(a.get('resting') for a in e.activity_events) and e.state['revision']==old:
+            e.receive()
+        self.assertIn('result',e.call('rest.cancel',{'context':e.state['context']}))
+        e.next_state(old)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertEqual(e.state['player']['resting'],0)
+        self.assertTrue(any(a.get('resting') for a in e.activity_events), (e.activity_events, e.state['turn'], e.state['messages'][:4]))
+        self.assertTrue(any('Cancelled' in m['text'] for m in e.state['messages']))
 
     def test_confused_mouse_walk(self):
         e = self.engine

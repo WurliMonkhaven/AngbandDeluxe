@@ -29,6 +29,7 @@ void textui_cmd_retire(void);
 void html_screenshot(const char *path, int mode, term *other_term);
 void do_cmd_save_screen(void);
 void textui_cmd_rest(void);
+extern bool textui_rest_prompt;
 void textui_quit(void);
 
 #endif /* UI_COMMAND_H */

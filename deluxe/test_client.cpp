@@ -32,6 +32,12 @@ int main(int argc,char **argv) {
   check(!read_test_frames("{\"seq\":1}").error.empty(),"Incomplete final frame must be reported");
   check(!read_test_frames(std::string(1048577,'x')).error.empty(),"Oversized frame must be rejected");
   Connection audio_events;
+  check(RestDialog::reply(0,100)=="&" && RestDialog::reply(1,100)=="*" && RestDialog::reply(2,100)=="!","Rest choices preserve native semantics");
+  check(RestDialog::reply(3,1)=="1" && RestDialog::reply(3,9999)=="9999" && RestDialog::reply(3,0).empty() && RestDialog::reply(3,10000).empty(),"Rest turn bounds");
+  audio_events.receive({{"kind","event"},{"event","activity.changed"},{"data",{{"resting",true}}}});
+  check(audio_events.resting,"Rest activity starts indicator");
+  audio_events.receive({{"kind","event"},{"event","activity.changed"},{"data",{{"resting",false}}}});
+  check(!audio_events.resting,"Rest activity clears indicator");
   for(int i=0;i<100;++i) audio_events.receive({{"kind","event"},{"event","sound.play"},{"data",{{"name","quaff"}}}});
   check(audio_events.sound_cues.size()==16,"Sound burst queue must be bounded");
   check(!audio_events.busy && audio_events.outgoing.empty(),"Sound cues must not change input readiness or issue requests");
@@ -699,6 +705,13 @@ int main(int argc,char **argv) {
   }
   check(replay_sent && replay.character_save=="Hero" && replay.busy,"Handshake must resume the completed save through replay");
   DungeonTooltip hover;
+  RestDialog rest;
+  for(int mode=0;mode<4;++mode) {
+   rest.mode=mode;
+   ImGui::NewFrame(); ImGui::Begin("Rest dialog test");
+   rest.draw(audio_events,false);
+   ImGui::End(); ImGui::Render();
+  }
   check(!hover.dwell(true,"first",5,6,1),"Tooltip must not appear immediately");
   check(!hover.dwell(true,"first",5,6,1.5),"Tooltip dwell delay");
   check(hover.dwell(true,"first",5,6,1.6),"Stationary hover should show tooltip");

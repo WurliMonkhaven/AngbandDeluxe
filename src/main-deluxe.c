@@ -564,6 +564,7 @@ static cJSON *prompt(const char *type, const char *text, int maximum, const char
  ready = false; publish();
  string(p, "prompt_id", context_text); string(p, "type", type); string(p, "text", text);
  number(p, "maximum", maximum); string(p, "initial", initial);
+ if(textui_rest_prompt) string(p,"selection_kind","rest");
  if(spell_selection) {
   string(p,"selection_kind","spell"); json_bool(p,"browse",spell_browsing);
  }
@@ -904,6 +905,12 @@ static void pump(void)
    else if(key=='t' && !target_ui_current->can_confirm && !deluxe_look_location()) error(id,"invalid_argument","This selection cannot be confirmed.");
    else { deluxe_target_key(key); response(id,cJSON_CreateObject()); }
   }
+ } else if (streq(method,"rest.cancel")) {
+  if(active_prompt || !streq(str(p,"context"),context_text)) error(id,"stale_revision","Input context changed.");
+  else {
+   if(player && player_is_resting(player)) { disturb(player); msg("Cancelled."); }
+   response(id,cJSON_CreateObject());
+  }
  } else if (streq(method, "terminal.input")) {
   if(birth_active) { error(id,"busy","Use character creation controls."); goto done; }
   int key = num(p, "key", -1);
@@ -1021,6 +1028,17 @@ done:
  cJSON_Delete(r);
 }
 
+static void rest_activity(game_event_type type, game_event_data *data, void *user)
+{
+ static bool reported;
+ bool resting=player && player->upkeep && player_is_resting(player);
+ if(resting!=reported) {
+  cJSON *activity=cJSON_CreateObject(); json_bool(activity,"resting",resting);
+  event("activity.changed",activity); reported=resting;
+ }
+ /* Poll only during rest. Never serialize full snapshots in this loop. */
+ if(resting && input_available()) pump();
+}
 static errr xtra(int n, int v)
 {
  if (n == TERM_XTRA_EVENT) {
@@ -1122,6 +1140,7 @@ int main(int argc, char **argv)
  cmd_get_hook = get_command;
  sound_event_hook=deluxe_sound_event;
  target_selected_hook=deluxe_target_selected;
+ event_add_handler(EVENT_CHECK_INTERRUPT, rest_activity, NULL);
  event_add_handler(EVENT_ENTER_BIRTH, lifecycle, NULL);
  event_add_handler(EVENT_ENTER_STORE, lifecycle, NULL);
  event_add_handler(EVENT_LEAVE_STORE, lifecycle, NULL);

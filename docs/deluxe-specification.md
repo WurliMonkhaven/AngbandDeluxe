@@ -774,3 +774,13 @@ Hovering the same dungeon tile for 550 ms opens a compact, non-interactive toolt
 Changing tiles or input context restarts the delay. Clicking/holding a mouse button, opening a popup, losing focus, targeting, look mode, direction prompts and message pauses suppress the tooltip. Hovering does not send commands or change the engine's tracked creature. Cached tooltip contents are rebuilt only for a new hover context.
 
 The semantic dungeon record now includes a sparse items list (x, y, label, quantity, color), derived from the player's remembered object piles. Description formatting operates on copied records to preserve read-only behaviour. This presentation data supplements, rather than restricts, the existing actual-world API.
+
+### Native rest dialog
+
+Rest from R, Commands, or a quickbar slot opens a native modal with full recovery,
+HP and mana, HP or mana, and 1-9999 turns. The adapter tags the original rest
+text prompt with selection_kind=rest; replies use the original &, *, ! or count
+syntax. Cancel spends no turn. Recovery and danger interruptions remain engine
+rules. Lightweight activity.changed events show Resting and a Stop resting button
+in the existing top bar; Escape and the button use context-checked rest.cancel.
+Rest polls input without generating full snapshots or adding artificial delays.

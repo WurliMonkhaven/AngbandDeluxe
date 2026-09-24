@@ -188,6 +188,7 @@ void textui_cmd_retire(void)
 /**
  * Get input for the rest command
  */
+bool textui_rest_prompt = false;
 void textui_cmd_rest(void)
 {
 	const char *p = "Rest (0-9999, '!' for HP or SP, '*' for HP and SP, '&' as needed): ";
@@ -195,7 +196,10 @@ void textui_cmd_rest(void)
 	char out_val[5] = "& ";
 
 	/* Ask for duration */
-	if (!get_string(p, out_val, sizeof(out_val))) return;
+	textui_rest_prompt = true;
+	bool accepted = get_string(p, out_val, sizeof(out_val));
+	textui_rest_prompt = false;
+	if (!accepted) return;
 
 	/* Rest... */
 	if (out_val[0] == '&') {
