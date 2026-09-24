@@ -1384,9 +1384,21 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(dead_save.read_bytes(), original)
         self.assertIn("result", e.call("session.replay", {"save":"ProtocolTest", "native_birth":True}))
         e.next_state(None)
-        self.assertIn("New character based on previous one", e.screen())
-        self.assertNotIn("birth", e.state, "Replay should use Angband's original quickstart controls")
-        e.key(ord("y"))
+        self.assertIn("birth", e.state, "Completed saves should open native quickstart")
+        birth = e.state["birth"]
+        self.assertTrue(birth["quickstart"])
+        self.assertTrue(birth["rolled"], "Preserved starting stats must not be editable as a fresh point allocation")
+        original_stats = [v["base"] for v in birth["stats"]]
+        self.native_birth_action("quickstart")
+        self.assertEqual([v["base"] for v in e.state["birth"]["stats"]], original_stats)
+        self.assertEqual(dead_save.read_bytes(), original, "Opening quickstart must not replace the dead save")
+        self.assertIn("result", e.call("birth.cancel", {"revision":e.state["revision"]}))
+        self.assertEqual(e.process.wait(timeout=10), 0); e.stop()
+        self.assertEqual(dead_save.read_bytes(), original, "Cancelling must preserve the dead save")
+        self.engine = e = Engine(self.temp.name); e.hello()
+        e.call("session.replay", {"save":"ProtocolTest", "native_birth":True}); e.next_state(None)
+        birth=e.state["birth"]
+        self.native_birth_action("accept", name=birth["name"] or "ProtocolTest", history=birth["history"])
         for _ in range(20):
             if e.state["readiness"] == "ready": break
             e.key("enter")

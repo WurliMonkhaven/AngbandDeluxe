@@ -62,6 +62,43 @@ int main(int argc,char **argv) {
    check(c.ready() && c.can_view_character(),"Controls become available again after continuation");
    c.save(true); check(c.close_requested && c.busy && !c.outgoing.empty(),"Ready save and quit still submits normally");
   }
+  {
+   SceneTransitions scene;
+   json state={{"phase","playing"},{"player",{{"depth",0},{"floor","down staircase"},{"x",1},{"y",0}}},
+    {"dungeon",{{"level_id","town"},{"x",0},{"y",0}}}};
+   RenderGrid old; old.semantic=true; old.width=2; old.height=1; old.cells={{'.',1},{'@',1}};
+   scene.observe(state,old,1); check(scene.kind==SceneTransitions::Kind::Load,"First semantic scene scans in");
+   scene.observe(state,old,1.1); check(scene.started==1,"Repeated snapshots do not restart loading");
+   state["dungeon"]["level_id"]="depth1"; state["player"]["depth"]=1; state["player"]["floor"]="up staircase";
+   scene.observe(state,old,2); check(scene.kind==SceneTransitions::Kind::Down && scene.previous.cells.size()==2,"Descending preserves one outgoing glyph grid");
+   state["dungeon"]["level_id"]="town2"; state["player"]["depth"]=0; state["player"]["floor"]="open floor";
+   scene.observe(state,old,3); check(scene.kind==SceneTransitions::Kind::Up,"Ascending sweeps upwards");
+   state["dungeon"]["level_id"]="recall"; state["player"]["depth"]=8;
+   scene.observe(state,old,4); check(scene.kind==SceneTransitions::Kind::Dissolve,"Non-stair level changes dissolve");
+   state["store"]={{"name","Temple"}}; scene.observe(state,old,5); check(scene.kind==SceneTransitions::Kind::Shop && scene.label=="Temple","Shop arrival fades through dark");
+   check(scene.hold_shop(5.05) && !scene.hold_shop(5.13),"Shop keeps the outgoing frame only before black");
+   check(scene.shop_darkness(5)==0 && scene.shop_darkness(5.12)>.999f && scene.shop_darkness(5.31)==0,"Shop fade crosses black before revealing the incoming view");
+   state.erase("dungeon"); scene.observe(state,old,5.1); check(scene.started==5,"Missing semantic view during a shop prompt does not restart it");
+   state.erase("store"); scene.observe(state,old,6); check(scene.kind==SceneTransitions::Kind::Shop,"Leaving a shop transitions back");
+   state["dungeon"]={{"level_id","recall"},{"x",0},{"y",0}}; scene.observe(state,old,6.1); check(scene.started==6,"Returning shop view does not count as a new floor");
+   state["player"]["death_pending"]=true; scene.observe(state,old,7);
+   check(scene.kind==SceneTransitions::Kind::Death && scene.previous.cells.empty(),"Death drains the live scene without hiding the final message");
+   check(scene.desaturation(7)==0 && std::abs(scene.desaturation(7.45)-.5f)<.001f,"Death colour drains smoothly");
+   scene.death(state,old,8); check(scene.started==7,"Acknowledging death does not restart the fade");
+   check(!scene.active(8) && scene.desaturation(20)==1,"The completed fade holds greyscale");
+   scene.restore_colour(20);
+   check(scene.desaturation(20)==1 && std::abs(scene.desaturation(20.3)-.5f)<.001f && scene.desaturation(20.6)==0,"Native death screen gradually regains full colour");
+   scene.restore_colour(20.3); check(scene.desaturation(20.6)==0,"Repeated summary frames do not restart colour return");
+   scene.start(SceneTransitions::Kind::Death,20);
+   const float partial=scene.desaturation(20.2); scene.restore_colour(20.2);
+   check(std::abs(scene.desaturation(20.2)-partial)<.001f && scene.desaturation(20.5)<partial,"Early acknowledgement reverses the fade without a colour jump");
+   state["player"]["death_pending"]=false; state["player"]["hp"]=10; scene.observe(state,old,21);
+   check(scene.desaturation(21)==0,"Surviving death restores colour");
+   scene.death(state,old,22); scene.reset(); check(scene.desaturation(22)==0,"A new session restores colour");
+   scene.dismiss(); check(scene.previous.cells.empty(),"Expired snapshots release their storage");
+   Connection live; live.connected=true; live.state={{"readiness","ready"},{"context","c"}}; live.transitions.start(SceneTransitions::Kind::Down,1,old);
+   check(live.key(50) && live.transitions.kind==SceneTransitions::Kind::None && !live.outgoing.empty(),"Movement immediately skips a transition and reaches the backend");
+  }
   auto messages=read_test_frames("{\"seq\":1}\n{\"seq\":2}\n");
   check(messages.error.empty() && messages.frames.size()==2 && messages.frames[0]["seq"]==1 && messages.frames[1]["seq"]==2,"Reader must preserve final message order at EOF");
   check(!read_test_frames("{bad}\n").error.empty(),"Malformed frame must be reported");
@@ -289,6 +326,7 @@ int main(int argc,char **argv) {
   check(!ui.click_exits_look,"Look click draft applied immediately");
   ui.draft_proceed_with_click=true;
   check(!ui.proceed_with_click,"Gameplay draft must not apply immediately");
+  ui.draft_scene_animation=false; check(ui.scene_animation,"Scene draft must not apply before saving");
   ui.draft_low_animation=false; ui.draft_death_animation=false; ui.draft_combat_animation=false; ui.draft_sleep_animation=false; ui.draft_fear_animation=false; ui.draft_level_animation=false;
   check(ui.low_animation && ui.death_animation && ui.combat_animation && ui.sleep_animation && ui.fear_animation,"Animation drafts applied immediately");
   ui.draft_crt_strength=3; ui.draft_crt_settings.parts[Hum].enabled=true;
@@ -301,12 +339,14 @@ int main(int argc,char **argv) {
   check(!ui.draft_click_exits_look,"Cancelled look click draft retained");
   check(!ui.draft_quick_targeting,"Cancel retained quick targeting draft");
   check(!ui.draft_quickbar_enabled,"Cancel retained quickbar draft");
+  check(ui.draft_scene_animation,"Cancel restores the transition preference");
   check(ui.draft_low_animation && ui.draft_death_animation && ui.draft_combat_animation && ui.draft_sleep_animation && ui.draft_fear_animation,"Cancelled animation draft retained");
   check(ui.draft_scale==1.25f && ui.draft_crt==0 && !ui.draft_fullscreen,"Draft was retained");
   check(ui.draft_crt_strength==1 && ui.crt_strength==1,"Cancelled strength was applied");
   check(!ui.draft_crt_settings.parts[Hum].enabled && !ui.crt_settings.parts[Hum].enabled,"Cancelled hum bar was applied");
   ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_crt_settings.parts[Hum].enabled=true;
   ui.draft_crt_settings.raster_lines=720; ui.draft_crt_settings.mask=2; ui.draft_crt_settings.tube_preset=-1;
+  ui.draft_scene_animation=false;
   ui.draft_low_animation=false; ui.draft_death_animation=true; ui.draft_combat_animation=false; ui.draft_sleep_animation=false; ui.draft_fear_animation=false; ui.draft_level_animation=false;
   ui.draft_click_exits_look=true;
   ui.draft_proceed_with_click=true;
@@ -316,6 +356,7 @@ int main(int argc,char **argv) {
   ui.draft_audio_settings.master=.43f; ui.draft_audio_settings.gameplay=.25f;
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
+  check(!loaded.scene_animation,"Scene transitions setting persists");
   check(loaded.audio_settings.master==.43f && loaded.audio_settings.gameplay==.25f,"Audio volumes must persist after Save and Close");
   check(loaded.proceed_with_click,"Gameplay option did not persist");
   check(loaded.click_exits_look,"Click exits look did not persist");

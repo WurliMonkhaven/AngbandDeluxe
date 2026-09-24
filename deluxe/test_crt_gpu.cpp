@@ -46,7 +46,7 @@ int main(int argc,char **argv) {
      for(int y=0;y<25;++y) overlay->AddText(ImVec2(1400,20+y*25.f),IM_COL32_WHITE,"Inventory and character information");
      ImGui::Render();
      auto *cmd=SDL_AcquireGPUCommandBuffer(gpu);
-     CrtFrame frame; frame.scope=scope; frame.settings=CrtSettings(3); frame.game=draw;
+     CrtFrame frame; frame.retain_scene=true; frame.scope=scope; frame.settings=CrtSettings(3); frame.game=draw;
      frame.settings.mask=0; // Stress the costlier delta-dot reconstruction too.
      frame.game_pos=ImVec2(0,0); frame.game_size=ImVec2(1300,950); frame.seconds=sample/60.;
      const auto before=DeluxeGpuGetUploadStats();
@@ -111,8 +111,32 @@ int main(int argc,char **argv) {
   auto pixel=[&](const auto &image,int x,int y,int channel=0) { return image[(y*texture.width+x)*4+channel]; };
   frame.scope=0; auto original=render(true);
   check(pixel(original,48,40)>250 && pixel(original,210,104,1)<3,"Offscreen source pattern");
+  frame.retain_scene=true; render(true);
+  frame.hold_scene=true; frame.scene_darkness=.5f;
+  auto outgoing=render(false);
+  check(pixel(outgoing,48,40)>120 && pixel(outgoing,48,40)<135,"Shop fade-out must show the outgoing scene, not the new one");
+  frame.scene_darkness=1; auto closed=render(false);
+  check(pixel(closed,48,40)==0,"Shop scene switches at black");
+  frame.hold_scene=false; frame.scene_darkness=.5f; auto incoming=render(false);
+  check(pixel(incoming,48,40)==0 && pixel(incoming,210,104)>120,"Shop fade-in reveals the incoming scene");
+  frame.retain_scene=false; frame.scene_darkness=0;
+  check(render(true)==original,"Cancelling shop presentation restores live output");
   frame.scope=2; auto plain=render(true);
   check(pixel(plain,48,40)>250 && pixel(plain,48,88)<3 && pixel(plain,210,104)>250,"Shader orientation/pass-through");
+  for(int scope=0;scope<=2;++scope) {
+   frame.scope=scope; frame.game_pos={0,0}; frame.game_size={256,128};
+   frame.desaturation=.5f; auto half=render(true,true);
+   check(pixel(half,210,104)>pixel(half,210,104,1) && pixel(half,210,104,1)>40,"Mid-fade retains some colour");
+   frame.desaturation=1; auto grey=render(true,true);
+   for(auto point:{ImVec2(210,104),ImVec2(48,40),ImVec2(96,88)}) {
+    const int r=pixel(grey,int(point.x),int(point.y));
+    check(std::abs(r-pixel(grey,int(point.x),int(point.y),1))<=1 && std::abs(r-pixel(grey,int(point.x),int(point.y),2))<=1,"Full-screen death fade includes CRT and foreground UI");
+   }
+   check(pixel(grey,48,40)>200 && pixel(grey,210,104)>100,"Greyscale preserves light intensity");
+  }
+  frame.desaturation=0; frame.scope=0;
+  check(render(true)==original,"Disabling colour drain restores original pixels");
+  frame.scope=2;
   frame.settings.parts[Glass]={true,100}; auto glass=render(true);
   check(pixel(glass,75,40)>pixel(plain,75,40)+2,"Glass diffusion has no broad light spill");
   frame.settings.parts[Glass].enabled=false;

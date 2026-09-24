@@ -38,9 +38,12 @@ bool CrtRenderer::initialize(SDL_GPUDevice *device,SDL_GPUTextureFormat format) 
  auto *vertex=shader(device,CRT_SHADER(fullscreen),SDL_GPU_SHADERSTAGE_VERTEX,0,0);
  auto *blur=shader(device,CRT_SHADER(blur),SDL_GPU_SHADERSTAGE_FRAGMENT,1,1);
  auto *composite=shader(device,CRT_SHADER(crt),SDL_GPU_SHADERSTAGE_FRAGMENT,5,1);
- if(vertex && blur && composite) {
+ auto *drain=shader(device,CRT_SHADER(desaturate),SDL_GPU_SHADERSTAGE_FRAGMENT,1,1);
+ if(vertex && blur && composite && drain) {
+  colour_drain_=pipeline(device,format,vertex,drain);
   blur_=pipeline(device,light_format,vertex,blur); composite_=pipeline(device,format,vertex,composite);
  }
+ if(drain) SDL_ReleaseGPUShader(device,drain);
  if(vertex) SDL_ReleaseGPUShader(device,vertex);
  if(blur) SDL_ReleaseGPUShader(device,blur);
  if(composite) SDL_ReleaseGPUShader(device,composite);
@@ -48,7 +51,7 @@ bool CrtRenderer::initialize(SDL_GPUDevice *device,SDL_GPUTextureFormat format) 
  info.min_filter=info.mag_filter=SDL_GPU_FILTER_LINEAR;
  info.address_mode_u=info.address_mode_v=info.address_mode_w=SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
  sampler_=SDL_CreateGPUSampler(device,&info);
- if(!blur_ || !composite_ || !sampler_) {
+ if(!blur_ || !composite_ || !colour_drain_ || !sampler_) {
   error_=std::string("CRT rendering unavailable: ")+SDL_GetError(); shutdown(); return false;
  }
  return true;
@@ -60,6 +63,10 @@ void CrtRenderer::release_targets() {
 void CrtRenderer::shutdown() {
  if(!device_) return;
  release_targets();
+ if(transition_target_) SDL_ReleaseGPUTexture(device_,transition_target_);
+ transition_target_=nullptr; transition_width_=transition_height_=0; retained_scene_valid_=false;
+ if(colour_drain_) SDL_ReleaseGPUGraphicsPipeline(device_,colour_drain_);
+ colour_drain_=nullptr;
  if(blur_) SDL_ReleaseGPUGraphicsPipeline(device_,blur_);
  if(composite_) SDL_ReleaseGPUGraphicsPipeline(device_,composite_);
  if(sampler_) SDL_ReleaseGPUSampler(device_,sampler_);
@@ -103,6 +110,35 @@ void CrtRenderer::draw_pass(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *target,SDL
 }
 void CrtRenderer::render(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *destination,Uint32 width,Uint32 height,ImDrawData *data,const CrtFrame &frame) {
  ImGui_ImplSDLGPU3_PrepareDrawData(data,cmd); // One upload, shared by every UI pass.
+ const float amount=std::clamp(frame.desaturation,0.f,1.f);
+ if((amount<=0 && !frame.retain_scene) || !ready() || !width || !height) {
+  if(transition_target_) SDL_ReleaseGPUTexture(device_,transition_target_);
+  transition_target_=nullptr; transition_width_=transition_height_=0; retained_scene_valid_=false;
+  render_scene(cmd,destination,width,height,data,frame); return;
+ }
+ if(transition_target_ && (transition_width_!=width || transition_height_!=height)) {
+  SDL_ReleaseGPUTexture(device_,transition_target_); transition_target_=nullptr; retained_scene_valid_=false;
+ }
+ if(!transition_target_) {
+  SDL_GPUTextureCreateInfo info{}; info.type=SDL_GPU_TEXTURETYPE_2D; info.format=format_;
+  info.usage=SDL_GPU_TEXTUREUSAGE_COLOR_TARGET|SDL_GPU_TEXTUREUSAGE_SAMPLER;
+  info.width=width; info.height=height; info.layer_count_or_depth=info.num_levels=1;
+  transition_target_=SDL_CreateGPUTexture(device_,&info);
+  if(!transition_target_) { render_scene(cmd,destination,width,height,data,frame); return; }
+  transition_width_=width; transition_height_=height;
+ }
+ // Finish CRT, game-only overlays, tooltips and UI before draining any colour.
+ // Preserve the last actually displayed scene until the fade reaches black.
+ // This is a GPU image, not a stale interactive copy of the game's state.
+ const bool missing_outgoing=frame.hold_scene && !retained_scene_valid_;
+ if(!frame.hold_scene || !retained_scene_valid_) {
+  render_scene(cmd,transition_target_,width,height,data,frame);
+  retained_scene_valid_=!frame.hold_scene;
+ }
+ const float uniforms[4]={amount,missing_outgoing?1.f:std::clamp(frame.scene_darkness,0.f,1.f),0,0};
+ draw_pass(cmd,destination,colour_drain_,&transition_target_,1,uniforms,sizeof(uniforms));
+}
+void CrtRenderer::render_scene(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *destination,Uint32 width,Uint32 height,ImDrawData *data,const CrtFrame &frame) {
  int game_index=-1;
  for(int i=0;i<data->CmdListsCount;++i) if(data->CmdLists[i]==frame.game) game_index=i;
  const bool enabled=frame.scope==2 || (frame.scope==1 && game_index>=0);

@@ -94,10 +94,41 @@ struct BirthPanel {
  void draw(Connection &c) {
   const auto &b=c.state.at("birth");
   if(!initialized) {
-   initialized=true; step=0; history_edited=false;
+   initialized=true; step=b.value("quickstart",false)?-1:0; history_edited=false;
    SDL_strlcpy(name,b.value("name","").empty()?c.character_save.c_str():b.value("name","").c_str(),sizeof(name));
   }
   if(!history_edited) SDL_strlcpy(history,b.value("history","").c_str(),sizeof(history));
+  if(step==-1) {
+   DeluxeTheme::section("Another adventure");
+   ImGui::BeginChild("Previous character",ImVec2(0,-ImGui::GetFrameHeightWithSpacing()*2));
+   ImGui::TextWrapped("%s",name);
+   ImGui::TextWrapped("%s %s",chosen(b,"races","race").value("name","").c_str(),chosen(b,"classes","class").value("name","").c_str());
+   ImGui::Spacing();
+   ImGui::TextWrapped("Their story has ended. Begin a new adventure with the same starting character, or make someone new.");
+   ImGui::Spacing(); DeluxeTheme::section("Starting attributes");
+   stats(c,b,false);
+   ImGui::Spacing(); ImGui::TextWrapped("%s",history);
+   ImGui::Spacing(); DeluxeTheme::section("Your next adventure");
+   ImGui::BeginDisabled(c.busy || !c.connected);
+   if(ImGui::Button("Use previous character")) act(c,"accept",{{"name",name},{"history",history}});
+   ImGui::TextWrapped("Begin at level 1 with the same race, class and starting attributes.");
+   ImGui::Spacing();
+   if(ImGui::Button("Change name / background")) step=3;
+   ImGui::TextWrapped("Keep the character's starting build and give them a new identity.");
+   ImGui::Spacing();
+   if(ImGui::Button("Create a different character")) { act(c,"suggest"); step=0; }
+   ImGui::TextWrapped("Choose race, class, attributes and identity in character creation.");
+   ImGui::Spacing();
+   if(ImGui::CollapsingHeader("Birth options")) for(const auto &opt:b.at("options")) {
+    bool enabled=opt.value("value",false);
+    if(ImGui::Checkbox(opt.value("description","").c_str(),&enabled)) act(c,"option",{{"option",opt["id"]},{"value",enabled}});
+   }
+   ImGui::EndDisabled(); ImGui::EndChild();
+   if(!c.menu_error.empty()) ImGui::TextWrapped("%s",c.menu_error.c_str());
+   ImGui::Separator(); ImGui::BeginDisabled(c.busy || !c.connected);
+   if(ImGui::Button("Return to main menu")) { c.return_to_menu=true; c.send("birth.cancel",{{"revision",c.state.value("revision","")}}); c.busy=true; }
+   ImGui::EndDisabled(); return;
+  }
   const char *steps[]={"Race","Class","Attributes","Identity","Review"};
   DeluxeTheme::section("Create a character");
   ImGui::Text("Step %d of 5 - %s",step+1,steps[step]);

@@ -139,8 +139,10 @@ static int deluxe_birth_session(void)
   struct player_class *cl;
   for(cl=classes;cl;cl=cl->next) if(streq(cl->name,birth_class)) { birth_queue(CMD_CHOOSE_CLASS,cl->cidx); cmdq_execute(CTX_BIRTH); break; }
  }
- birth_active=true; birth_rolled=birth_previous=false;
- birth_queue(CMD_RESET_STATS,1); cmdq_execute(CTX_BIRTH);
+ birth_active=true; birth_rolled=birth_quickstart; birth_previous=false;
+ /* CMD_BIRTH_RESET already restored the original birth stats. Do not replace
+  * those with a suggested point allocation when opening a completed save. */
+ if(!birth_quickstart) { birth_queue(CMD_RESET_STATS,1); cmdq_execute(CTX_BIRTH); }
  while(!character_generated && connected) {
   birth_waiting=true; ready=false; publish();
   while(birth_waiting && connected) pump();

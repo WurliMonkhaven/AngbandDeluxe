@@ -30,10 +30,22 @@ int main(int argc,char **argv) {
   if(fixture.contains("blast")) c.blast=fixture["blast"];
   UI ui{c}; ui.base_style=ImGui::GetStyle();
   ui.quit_dialog=fixture.value("quit_dialog",false);
+  ui.scene_animation=fixture.contains("transition");
   ui.scale=std::clamp(fixture.value("scale",1.f),.75f,1.5f);
   ImGui::GetStyle().ScaleAllSizes(ui.scale); ImGui::GetStyle().FontScaleMain=ui.scale;
   for(const auto &item:c.state.value("items",json::array())) if(item.value("location","")=="Pack") { ui.selected=item.value("id",""); break; }
   for(int i=0;i<3;++i) {
+   if(fixture.contains("transition")) {
+    const auto name=fixture["transition"].value("kind","");
+    using K=SceneTransitions::Kind;
+    const auto kind=name=="death"?K::Death:name=="shop"?K::Shop:name=="up"?K::Up:name=="down"?K::Down:name=="dissolve"?K::Dissolve:K::Load;
+    const double born=double(SDL_GetTicksNS())/1e9-fixture["transition"].value("elapsed",.15);
+    if(kind==K::Death) {
+     c.transitions.death(c.state,c.game_grid,born);
+    } else c.transitions.start(kind,born,c.game_grid);
+    c.transitions.label=fixture["transition"].value("label","The Alchemist");
+   }
+
    if(fixture.contains("motion")) {
     auto batch=fixture["motion"]; batch["received"]=double(SDL_GetTicksNS())/1e9-fixture.value("motion_elapsed",.14);
     ui.motion_feedback.ripples.clear(); c.motion_events.push_back(batch);
@@ -66,7 +78,11 @@ int main(int argc,char **argv) {
     ui.keybinding_editor.draw(); ImGui::End();
    }
    ImGui::Render();
-   auto *cmd=SDL_AcquireGPUCommandBuffer(gpu); CrtFrame frame; frame.scope=0;
+   auto *cmd=SDL_AcquireGPUCommandBuffer(gpu); CrtFrame frame; frame.scope=fixture.value("crt_scope",0); frame.game=ui.game_draw_list; frame.game_pos=ui.game_pos; frame.game_size=ui.game_size;
+   frame.desaturation=ui.scene_animation?c.transitions.desaturation(double(SDL_GetTicksNS())/1e9):0;
+   frame.retain_scene=ui.scene_animation;
+   frame.hold_scene=ui.scene_animation && c.transitions.hold_shop(double(SDL_GetTicksNS())/1e9);
+   frame.scene_darkness=ui.scene_animation?c.transitions.shop_darkness(double(SDL_GetTicksNS())/1e9):0;
    renderer.render(cmd,target,w,h,ImGui::GetDrawData(),frame);
    auto *copy=SDL_BeginGPUCopyPass(cmd);
    SDL_GPUTextureRegion region{}; region.texture=target; region.w=w; region.h=h; region.d=1;

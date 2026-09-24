@@ -91,7 +91,9 @@ static ImU32 color(int index) {
  const auto &c = colors[std::max(0,index) % std::size(colors)];
  return IM_COL32(c[0],c[1],c[2],255);
 }
+#include "scene_transitions.h"
 struct Connection {
+ SceneTransitions transitions;
  InventoryChanges inventory_changes;
  LevelFeedback level_feedback;
  std::vector<std::string> sound_cues;
@@ -176,8 +178,10 @@ struct Connection {
   send("debug.quit"); busy=true;
  }
  std::string send(const std::string &method, json params = json::object()) {
-  if(method=="session.new" || method=="session.load" || method=="session.replay") { inventory_changes.reset(); level_feedback.reset(); character_save=params.value("save",""); params["native_birth"]=capabilities.value("interaction.birth",0)>0; }
+  if(method=="session.new" || method=="session.load" || method=="session.replay") { inventory_changes.reset(); level_feedback.reset(); transitions.reset(); character_save=params.value("save",""); params["native_birth"]=capabilities.value("interaction.birth",0)>0; }
   if (!connected) return "";
+  if(transitions.kind!=SceneTransitions::Kind::Death &&
+     (method=="terminal.input" || method=="command.execute" || method=="dungeon.click" || method=="dungeon.pickup" || method=="dungeon.terrain" || method=="store.leave")) transitions.dismiss();
   auto id = "r" + std::to_string(++next);
   params["session_id"] = "session-1";
   outgoing += json{{"kind","request"},{"id",id},{"method",method},{"params",params}}.dump() + "\n";
@@ -224,13 +228,15 @@ struct Connection {
    }
    if(name=="state.changed" && j.at("data").contains("run")) {
     if(run_report.is_null()) {
-     run_report=j["data"]["run"]; prompt=json::object(); pending_prompt=json::object();
+     run_report=j["data"]["run"];
+     if(!run_report.value("winner",false) && !run_report.value("retired",false)) transitions.death(state,game_grid,double(SDL_GetTicksNS())/1e9);
+     prompt=json::object(); pending_prompt=json::object();
      if(j["data"].value("phase","")=="dead") send("run.finish");
     }
     postgame_finished=j["data"].value("phase","")=="finished";
     busy=false; return;
    }
-   if (name == "state.changed") { replay_save.clear(); state = std::move(j.at("data")); inventory_changes.update(state); level_feedback.update(state,double(SDL_GetTicksNS())/1e9); resting=false; comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
+   if (name == "state.changed") { replay_save.clear(); transitions.observe(j.at("data"),game_grid,double(SDL_GetTicksNS())/1e9); state = std::move(j.at("data")); inventory_changes.update(state); level_feedback.update(state,double(SDL_GetTicksNS())/1e9); resting=false; comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
    if(name=="knowledge.changed" && creature_race>=0 && j["data"].value("category","")=="creatures" && j["data"].value("id",-1)==creature_race) creature_detail=j["data"];
    if(name=="travel.changed") {
     travel=j.at("data");
@@ -497,6 +503,7 @@ struct UI {
  std::string pending_replay;
  bool run_report_started=false;
  bool showing_postgame=false;
+ bool scene_animation=true, draft_scene_animation=true;
  json replay_profile=json::object();
  bool replay_prompt=false,run_ui_reset=false,quit_after_run=false;
  BirthPanel birth_panel;
@@ -579,6 +586,7 @@ struct UI {
    sleep_animation=j.value("sleep_animation",true);
    fear_animation=j.value("fear_animation",true);
    level_animation=j.value("level_animation",true);
+   scene_animation=j.value("scene_animation",true);
    low_animation=j.value("low_health_animation",true); death_animation=j.value("death_animation",true);
    crt=std::clamp(j.value("crt",0),0,2);
    crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
@@ -588,10 +596,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -617,6 +625,7 @@ struct UI {
   draft_sleep_animation=sleep_animation;
   draft_fear_animation=fear_animation;
   draft_level_animation=level_animation;
+  draft_scene_animation=scene_animation;
   draft_low_animation=low_animation; draft_death_animation=death_animation;
   draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
   draft_crt_strength=crt_strength; draft_crt_settings=crt_settings;
@@ -625,7 +634,7 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
@@ -636,6 +645,7 @@ struct UI {
   sleep_animation=draft_sleep_animation;
   fear_animation=draft_fear_animation;
   level_animation=draft_level_animation;
+  scene_animation=draft_scene_animation;
   low_animation=draft_low_animation; death_animation=draft_death_animation;
   proceed_with_click=draft_proceed_with_click;
   click_exits_look=draft_click_exits_look;
@@ -727,6 +737,8 @@ struct UI {
     }
     if(ImGui::BeginTabItem("Animations")) {
      ImGui::Spacing(); ImGui::Checkbox("Low Health Animation",&draft_low_animation);
+     ImGui::Checkbox("Scene transitions",&draft_scene_animation);
+     if(ImGui::IsItemHovered()) ImGui::SetTooltip("Floor changes, shops, character loading and the final death transition.");
      ImGui::Checkbox("Monster walking",&draft_movement_animation);
      ImGui::Checkbox("Teleport ripples",&draft_blink_animation);
      ImGui::Checkbox("Projectiles and spells",&draft_projectile_animation);
@@ -1125,6 +1137,7 @@ struct UI {
    }
   }
 
+  c.transitions.dungeon(draw,start,viewport,double(SDL_GetTicksNS())/1e9,CharacterSelect::accent(c.character_save));
   DungeonFeedback::ribbon(c,draw,start,viewport,proceed_with_click);
 
   if(!ImGui::IsWindowFocused()) grid_focus=false;
@@ -1492,6 +1505,11 @@ struct UI {
   }
  }
  void draw(SDL_Window *window) {
+  const double scene_now=double(SDL_GetTicksNS())/1e9;
+  if(!scene_animation || (c.transitions.kind!=SceneTransitions::Kind::Death && !c.transitions.active(scene_now))) c.transitions.dismiss();
+  // Drawing never owns input. A deliberate click/key can skip the flourish.
+  if(c.transitions.kind!=SceneTransitions::Kind::Death && scene_now-c.transitions.started>.06 &&
+     (ImGui::IsMouseClicked(0) || ImGui::IsMouseClicked(1) || !keys.empty())) c.transitions.dismiss();
   motion_feedback.update(c.motion_events,c.state,movement_animation,blink_animation,double(SDL_GetTicksNS())/1e9);
   projectile_feedback.update(c.projectile_events,c.state,projectile_animation,double(SDL_GetTicksNS())/1e9);
   combat_feedback.update(c.combat_events,c.state,combat_animation,double(SDL_GetTicksNS())/1e9);
@@ -1503,6 +1521,7 @@ struct UI {
   ImGui::Begin("Angband Deluxe",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
   const bool ending=!c.run_report.is_null();
   if(ending && !run_ui_reset) {
+   c.transitions.restore_colour(scene_now);
    ImGui::ClosePopupsOverWindow(nullptr,false);
    open_character_sheet=false; quickbar.open_customize=false;
    knowledge_browser.request_open=false; item_rules_panel.open=item_rules_panel.auto_open=false;
@@ -1523,7 +1542,7 @@ struct UI {
     if(run_history.archived && action==1) { run_history.current=nullptr; run_history.archived=false; }
     else {
      run_history.current=nullptr; run_history.browsing=false;
-     if(ending) { c.run_report=nullptr; c.restart_ready=true; run_report_started=false; }
+     if(ending) { c.run_report=nullptr; c.restart_ready=true; run_report_started=false; c.transitions.reset(); }
     }
    }
    if(ending) prompts();
@@ -1971,6 +1990,10 @@ int main(int argc,char **argv) {
    frame.scope=ui.crt; frame.settings=ui.crt_settings;
    frame.game=ui.game_draw_list; frame.game_pos=ui.game_pos; frame.game_size=ui.game_size;
    frame.seconds=double(SDL_GetTicksNS())/1e9; frame.ui_scale=ui.scale*ui.display_scale; frame.session=connection.state.value("phase","");
+   frame.desaturation=ui.scene_animation?connection.transitions.desaturation(frame.seconds):0;
+   frame.retain_scene=ui.scene_animation;
+   frame.hold_scene=ui.scene_animation && connection.transitions.hold_shop(frame.seconds);
+   frame.scene_darkness=ui.scene_animation?connection.transitions.shop_darkness(frame.seconds):0;
    frame.health_glitch=health_glitch.update(connection.state,frame.seconds,ui.low_animation,false);
    if(ui.showing_postgame) frame.session="postgame";
    crt_renderer.render(cmd,surface,surface_width,surface_height,render_data,frame);

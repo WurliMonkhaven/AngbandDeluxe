@@ -155,6 +155,12 @@ the preference names, saved values and scope semantics are preserved.
 
 ## Death screen
 
-Acknowledged death opens the native post-mortem immediately. There is no CRT
-power-off shader, timed transition or shutdown sound. The normal session change
-resets temporal history so gameplay cannot bleed into the summary.
+Death drains colour from the entire composed window over 900 ms, including
+UI outside the CRT scope. A final GPU pass blends towards luminance after CRT
+and foreground UI composition. Scene transitions retain the last composed image in a full-window GPU target,
+so shop fade-out shows the outgoing scene until black, then fades in the new
+scene. This uses one final composition pass and no CPU image readback. The
+target is released when scene transitions and colour drain are disabled. The Scene transitions setting
+controls this effect independently of CRT. Acknowledgement opens the native
+post-mortem without delay; its colours return smoothly over 600 ms from the
+current desaturation level, including when death is acknowledged early.

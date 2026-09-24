@@ -744,7 +744,7 @@ The optional `options: 1` capability exposes `options.get` (interface option IDs
 
 ### Native post-mortem and graveyard (implemented)
 
-After the fatal message is acknowledged, Deluxe captures an immutable engine-authored run summary after death identification and score entry. The native post-mortem presents cause of death, character identity and level, deepest depth, turns, calculated score, gold, final messages, identified belongings and the native character sheet. The engine retains ownership of score eligibility and its normal dead-character save/cleanup path. Retirement and victory have distinct headings. The main-menu Graveyard reads one versioned, atomically written JSON file per run under the user directory/run-history; records survive save deletion and renaming, and unreadable records do not hide intact runs. Archive failures keep the in-memory summary and offer Retry archiving. Play Again on the current completed run reopens its dead-character save through Angband's original new-game/quickstart flow, using session.replay. It bypasses character selection and the new-save-name prompt. The original quickstart controls offer reuse, changes to identity, or a fresh birth. Archived runs retain a separate New character like this action, which creates a new named save with the previous race/class.
+After the fatal message is acknowledged, Deluxe captures an immutable engine-authored run summary after death identification and score entry. The native post-mortem presents cause of death, character identity and level, deepest depth, turns, calculated score, gold, final messages, identified belongings and the native character sheet. The engine retains ownership of score eligibility and its normal dead-character save/cleanup path. Retirement and victory have distinct headings. The main-menu Graveyard reads one versioned, atomically written JSON file per run under the user directory/run-history; records survive save deletion and renaming, and unreadable records do not hide intact runs. Archive failures keep the in-memory summary and offer Retry archiving. Play Again on the current completed run reopens its dead-character save through Angband's original new-game/quickstart flow, using session.replay. It bypasses character selection and the new-save-name prompt. Native quickstart offers reuse of the original starting race, class and stats, changes to name/background, birth options, or a fresh character. Opening a dead save uses this same screen. Cancelling preserves the dead save unchanged; clients that do not request native birth retain the terminal flow. Archived runs retain a separate New character like this action, which creates a new named save with the previous race/class.
 
 Acknowledging death opens the native post-mortem immediately, without a CRT shutdown animation or shutdown sound. Backend completion cannot dismiss the post-mortem automatically.
 
@@ -991,3 +991,23 @@ priority. Death-transition freezing does not override nested disabled styling.
 Blink/teleport ripples play at both visible departure and arrival points.
 Arrival visibility is sampled after the native view update, so newly visible
 landing tiles light up while unseen monster destinations remain undisclosed.
+
+
+### Scene transitions
+
+Animations > Scene transitions enables a shared, brief terminal-style treatment
+for entering a character, changing floors, entering/leaving shops, and death.
+Loading scans in the semantic dungeon and traces its frame in the save's accent
+colour. Stair ascents/descents sweep upwards/downwards; other floor changes
+dissolve. Shops retain the last composed GPU image while fading out, switch
+at black, then fade in the live incoming scene. Death softly drains colour from the entire
+composed window, including UI and CRT glow, over 900 ms. The final message
+remains readable and acknowledgement opens the post-mortem without delay.
+The native death screen smoothly regains colour over 600 ms from the current
+desaturation, so early acknowledgement does not cause a colour jump.
+
+Transitions observe level identities and store boundaries, never ordinary turns
+or prompts. They are local, brief (300-900 ms), independent of CRT, and do not
+queue commands, pause the backend, or delay the final save/archive. Continued
+input skips non-death flourishes. Only a single outgoing glyph grid is retained
+when needed; turning the setting off dismisses active transitions immediately.

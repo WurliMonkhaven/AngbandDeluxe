@@ -9,6 +9,10 @@ struct CrtFrame {
  ImDrawList *game=nullptr;
  ImVec2 game_pos{},game_size{};
  double seconds=0;
+ bool retain_scene=false; // Keep the last composed image for shop fade-out.
+ bool hold_scene=false;
+ float scene_darkness=0;
+ float desaturation=0; // Full-screen colour drain, applied after CRT and UI.
  float health_glitch=0; // Visual intensity only; gameplay remains in the engine.
  float ui_scale=1;
  std::string session;
@@ -29,6 +33,7 @@ public:
  const std::string &error() const { return error_; }
  void render(SDL_GPUCommandBuffer*,SDL_GPUTexture *destination,Uint32 width,Uint32 height,ImDrawData*,const CrtFrame&);
 private:
+ void render_scene(SDL_GPUCommandBuffer*,SDL_GPUTexture*,Uint32,Uint32,ImDrawData*,const CrtFrame&);
  bool resize(Uint32,Uint32);
  bool ensure_target(int index);
  void release_targets();
@@ -37,7 +42,10 @@ private:
                 SDL_GPUTexture **inputs,unsigned count,const void *uniforms,unsigned bytes);
  SDL_GPUDevice *device_=nullptr;
  SDL_GPUTextureFormat format_{};
- SDL_GPUGraphicsPipeline *blur_=nullptr,*composite_=nullptr;
+ SDL_GPUGraphicsPipeline *blur_=nullptr,*composite_=nullptr,*colour_drain_=nullptr;
+ SDL_GPUTexture *transition_target_=nullptr;
+ bool retained_scene_valid_=false;
+ Uint32 transition_width_=0,transition_height_=0;
  SDL_GPUSampler *sampler_=nullptr;
  std::array<SDL_GPUTexture*,9> targets_{}; // scene, glow pair, bloom pair, history pair, glass pair
  Uint32 width_=0,height_=0;

@@ -802,7 +802,7 @@ static void pump(void)
   }
   my_strcpy(birth_race,str(p,"race"),sizeof(birth_race));
   my_strcpy(birth_class,str(p,"class"),sizeof(birth_class));
-  use_native_birth=!streq(method,"session.replay") && cJSON_IsTrue(cJSON_GetObjectItem(p,"native_birth"));
+  use_native_birth=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_birth"));
   launch_mode = streq(method, "session.load") ? GAME_LOAD : GAME_NEW;
   response(id, cJSON_CreateObject());
  } else if (streq(method, "saves.rename") || streq(method, "saves.delete")) {
