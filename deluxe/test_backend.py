@@ -32,6 +32,7 @@ class Engine:
         self.knowledge_events = []
         self.activity_events = []
         self.combat_events = []
+        self.projectile_events = []
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._errors, daemon=True).start()
 
@@ -68,6 +69,8 @@ class Engine:
                 self.travel = j["data"]
             elif j["event"] == "activity.changed":
                 self.activity_events.append(j["data"])
+            elif j["event"] == "projectile.feedback":
+                self.projectile_events.append(j["data"])
             elif j["event"] == "combat.feedback":
                 self.combat_events.append(j["data"])
             elif j["event"] == "prompt.requested":
@@ -1092,6 +1095,15 @@ class BackendTests(unittest.TestCase):
             e.key('enter')
         self.assertEqual(e.state['readiness'],'ready')
         self.assertGreater(e.state['turn'],before['turn'])
+        self.assertTrue(e.projectile_events, 'Throwing must emit visible path feedback')
+        batch=e.projectile_events[-1]
+        self.assertEqual(batch['level_id'],e.state['dungeon']['level_id'])
+        paths=[fx for fx in batch['effects'] if not fx['blast']]
+        self.assertTrue(paths)
+        self.assertTrue(all(len(tile)==3 for fx in paths for tile in fx['tiles']))
+        count=len(e.projectile_events)
+        e.call('state.get')
+        self.assertEqual(len(e.projectile_events),count,'Queries must not replay paths')
         remaining=sum(o['quantity'] for o in e.state['items'] if o['location']=='Pack' and o['actual']['kind']==kind)
         self.assertEqual(remaining,item['quantity']-1)
         self.assertNotIn('targeting',e.state)

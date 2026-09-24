@@ -21,6 +21,7 @@
 #include "obj-util.h"
 #include "obj-tval.h"
 #include "player.h"
+#include "project.h"
 #include "player-birth.h"
 #include "ui-birth.h"
 #include "player-properties.h"
@@ -404,6 +405,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
 #include "deluxe-status.h"
 #include "deluxe-knowledge.h"
 #include "deluxe-view.h"
+#include "deluxe-projectiles.h"
 #include "deluxe-compare.h"
 #include "deluxe-travel.h"
 #include "deluxe-store.h"
@@ -535,6 +537,7 @@ static cJSON *capture(void)
 }
 static void publish(void)
 {
+ deluxe_projectiles_publish();
  ++revision; ++context_id;
  item_handle_count = 0;
  strnfmt(revision_text, sizeof(revision_text), "%lu", revision);
@@ -1217,6 +1220,9 @@ int main(int argc, char **argv)
  sound_event_hook=deluxe_sound_event;
  target_selected_hook=deluxe_target_selected;
  event_add_handler(EVENT_COMBAT_FEEDBACK, combat_feedback, NULL);
+ event_add_handler(EVENT_BOLT, deluxe_projectile, NULL);
+ event_add_handler(EVENT_MISSILE, deluxe_projectile, NULL);
+ event_add_handler(EVENT_EXPLOSION, deluxe_projectile, NULL);
  event_add_handler(EVENT_CHECK_INTERRUPT, rest_activity, NULL);
  event_add_handler(EVENT_ENTER_BIRTH, lifecycle, NULL);
  event_add_handler(EVENT_ENTER_WORLD, lifecycle, NULL);

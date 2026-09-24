@@ -32,6 +32,10 @@ int main(int argc,char **argv) {
   ImGui::GetStyle().ScaleAllSizes(ui.scale); ImGui::GetStyle().FontScaleMain=ui.scale;
   for(const auto &item:c.state.value("items",json::array())) if(item.value("location","")=="Pack") { ui.selected=item.value("id",""); break; }
   for(int i=0;i<3;++i) {
+   if(fixture.contains("projectiles")) {
+    auto batch=fixture["projectiles"]; batch["received"]=double(SDL_GetTicksNS())/1e9-fixture.value("projectile_elapsed",.15);
+    ui.projectile_feedback.tiles.clear(); c.projectile_events.push_back(batch);
+   }
    ImGui_ImplSDLGPU3_NewFrame(); ImGui::NewFrame(); ui.draw(nullptr);
    if(fixture.contains("keybindings")) {
     if(i==0) ui.keybinding_editor.load(fixture["keybindings"]);

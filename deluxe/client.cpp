@@ -100,7 +100,7 @@ struct Connection {
  std::unique_ptr<SDL_Process,decltype(&SDL_DestroyProcess)> process{nullptr,SDL_DestroyProcess};
  std::string outgoing, diagnostic, menu_error, character_save, replay_save;
  std::deque<json> messages;
- std::deque<json> combat_events;
+ std::deque<json> combat_events, projectile_events;
  json previous_messages = json::array();
  json capabilities = json::object();
  json comparisons = json::object();
@@ -200,6 +200,10 @@ struct Connection {
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
+   if(name=="projectile.feedback") {
+    auto feedback=std::move(j.at("data")); feedback["received"]=double(SDL_GetTicksNS())/1e9;
+    if(projectile_events.size()>=16) projectile_events.pop_front(); projectile_events.push_back(std::move(feedback)); return;
+   }
    if(name=="combat.feedback") {
     auto feedback=std::move(j.at("data")); feedback["received"]=double(SDL_GetTicksNS())/1e9;
     if(combat_events.size()>=64) combat_events.pop_front(); combat_events.push_back(std::move(feedback)); return;
@@ -428,6 +432,7 @@ static void properties(const json &value) {
 #include "dev_status_dialog.h"
 #include "dungeon_feedback.h"
 #include "combat_feedback.h"
+#include "projectile_feedback.h"
 #include "monster_feedback.h"
 #include "dungeon_tooltip.h"
 #include "rest_dialog.h"
@@ -467,6 +472,8 @@ struct UI {
  float scale = 1.0f, game_fraction = .72f;
  bool fullscreen=false, draft_fullscreen=false;
  CombatFeedback combat_feedback;
+ ProjectileFeedback projectile_feedback;
+ bool projectile_animation=true, draft_projectile_animation=true;
  bool combat_animation=true, draft_combat_animation=true;
  bool sleep_animation=true, draft_sleep_animation=true;
  bool fear_animation=true, draft_fear_animation=true;
@@ -521,6 +528,7 @@ struct UI {
    quickbar_enabled=j.value("quickbar_enabled",false);
    quickbar.load(j.value("quickbar_profiles",json::object()));
    audio_settings.load(j.value("audio",json::object()));
+   projectile_animation=j.value("projectile_animation",true);
    combat_animation=j.value("combat_animation",true);
    sleep_animation=j.value("sleep_animation",true);
    fear_animation=j.value("fear_animation",true);
@@ -534,10 +542,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -557,6 +565,7 @@ struct UI {
   draft_click_exits_look=click_exits_look;
   draft_quick_targeting=quick_targeting;
   draft_quickbar_enabled=quickbar_enabled;
+  draft_projectile_animation=projectile_animation;
   draft_combat_animation=combat_animation;
   draft_sleep_animation=sleep_animation;
   draft_fear_animation=fear_animation;
@@ -569,11 +578,12 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
   audio_settings=draft_audio_settings; audio.configure(audio_settings,window_active);
+  projectile_animation=draft_projectile_animation;
   combat_animation=draft_combat_animation;
   sleep_animation=draft_sleep_animation;
   fear_animation=draft_fear_animation;
@@ -669,6 +679,7 @@ struct UI {
     }
     if(ImGui::BeginTabItem("Animations")) {
      ImGui::Spacing(); ImGui::Checkbox("Low Health Animation",&draft_low_animation);
+     ImGui::Checkbox("Projectiles and spells",&draft_projectile_animation);
      ImGui::Checkbox("Combat feedback",&draft_combat_animation);
      ImGui::Checkbox("Sleeping monsters",&draft_sleep_animation);
      ImGui::Checkbox("Frightened monsters",&draft_fear_animation);
@@ -945,6 +956,7 @@ struct UI {
    if(routing) c.preview_route(x,y);
    DungeonFeedback::route(c,draw,origin,size,cw,ch,ox,oy,routing,x,y);
    if(sleep_animation || fear_animation) MonsterFeedback::draw(draw,c.state,origin,size,cw,ch,double(SDL_GetTicksNS())/1e9,sleep_animation,fear_animation);
+   projectile_feedback.draw(draw,origin,size,cw,ch,ox,oy,double(SDL_GetTicksNS())/1e9);
    combat_feedback.draw(draw,origin,size,cw,ch,ox,oy,double(SDL_GetTicksNS())/1e9);
    if(mouse_target) {
     target_box(x,y);
@@ -1403,6 +1415,7 @@ struct UI {
   }
  }
  void draw(SDL_Window *window) {
+  projectile_feedback.update(c.projectile_events,c.state,projectile_animation,double(SDL_GetTicksNS())/1e9);
   combat_feedback.update(c.combat_events,c.state,combat_animation,double(SDL_GetTicksNS())/1e9);
   quickbar.sync_saves(c.save_changes);
   quickbar.profile=c.character_save;

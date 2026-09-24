@@ -892,6 +892,25 @@ int main(int argc,char **argv) {
    ImGui::NewFrame(); ImGui::Begin("Quantity test"); picker.draw(quantity_connection,false); ImGui::End(); ImGui::Render();
   }
   check(quantity_connection.outgoing.empty(),"Changing quantity must not execute an action before confirmation");
+  {
+   ProjectileFeedback fx;
+   json state={{"phase","playing"},{"dungeon",{{"level_id","one"}}}};
+   json batch={{"received",10.0},{"level_id","one"},{"effects",json::array({
+    {{"element","FIRE"},{"blast",false},{"tiles",json::array({{2,3,0},{3,3,0}})}},
+    {{"element","COLD"},{"blast",true},{"tiles",json::array({{4,3,0},{5,3,1}})}}})}};
+   std::deque<json> events{batch}; fx.update(events,state,true,10.05);
+   check(events.empty() && fx.tiles.size()==4,"Projectile events are consumed once");
+   check(fx.tiles[1].delay>fx.tiles[0].delay && fx.tiles[3].delay>fx.tiles[2].delay,"Trails advance and blasts expand by native distance");
+   ImGui::NewFrame(); ImGui::Begin("Projectile test");
+   fx.draw(ImGui::GetWindowDrawList(),{0,0},{400,300},18,24,0,0,10.16);
+   ImGui::End(); ImGui::Render();
+   fx.update(events,state,true,10.5); check(fx.tiles.empty(),"Effects expire without new input");
+   events.push_back(batch); fx.update(events,state,true,11); check(fx.tiles.empty(),"Stale queued effects are discarded");
+   batch["received"]=11.; events.push_back(batch); fx.update(events,state,false,11);
+   check(events.empty() && fx.tiles.empty(),"Disabled effects do not accumulate");
+   events.push_back(batch); state["dungeon"]["level_id"]="two"; fx.update(events,state,true,11);
+   check(fx.tiles.empty(),"Effects cannot leak to another level");
+  }
   KeybindingEditor binding_editor;
   const json binding_data={{"mode",0},{"revision",2},{"bindings",json::array()},
    {"commands",json::array({{{"id",82},{"label","Rest for a while"},{"group","Action commands"},{"original","R"},{"rogue","R"}}})},

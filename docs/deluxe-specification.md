@@ -910,3 +910,8 @@ Quantity prompts show the engine-selected item and its colour, an amount field a
 - Changes are drafts until Save and Close. Bindings persist across characters/restarts in a separate deluxe-keybindings.json in the backend user directory. Native preference-file keymaps are preserved as the underlying baseline, including multi-key sequences; restoring removes Deluxe overrides only.
 - Supported triggers are letters/symbols (using text input for keyboard-layout accuracy), Ctrl+letters, and unmodified F1-F12. Digits, keypad, arrows, prompt controls, and native keymap escape prefixes are reserved; existing movement and quickbar behavior stays intact. Alt/GUI combinations and modified function keys are not captured.
 - keybindings.get returns command/default/conflict data and the overlay revision; keybindings.set validates the complete batch before persisting or installing it through Angband keymaps. Bindings retain command prerequisites, native prompts and confirmations; semantic sidebar actions continue to bypass user keymaps. Only normal living-character play can apply changes.
+
+
+### Projectile and spell feedback
+
+Settings > Animations includes Projectiles and spells (enabled by default). Visible native bolt/missile paths become short directional ASCII trails; explosions expand over the actual visible affected tiles, with elemental colours. Presentation is non-blocking and independent of CRT effects. Hidden tiles are never inferred. Events are bounded and batched at engine input boundaries; stale effects and effects from previous levels are discarded.
