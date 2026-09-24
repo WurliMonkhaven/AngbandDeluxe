@@ -58,6 +58,10 @@ int main(int argc,char **argv) {
    check(!c.can_view_character(),"Character modal does not stack over an unanswered native prompt");
    c.prompt=json::object(); c.pending_prompt={{"type","confirmation"}};
    check(!c.can_view_character(),"Deferred native prompts also own the modal");
+   c.state["message_pending"]=false;
+   check(!c.ready() && !c.key(54),"Deferred prompts block save and movement before their modal opens");
+   c.target("dungeon.click",{{"x",1},{"y",1}});
+   check(c.outgoing.empty(),"Deferred prompts cannot be bypassed through mouse actions");
    c.pending_prompt=json::object(); c.state["message_pending"]=false;
    check(c.ready() && c.can_view_character(),"Controls become available again after continuation");
    c.save(true); check(c.close_requested && c.busy && !c.outgoing.empty(),"Ready save and quit still submits normally");

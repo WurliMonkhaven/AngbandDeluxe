@@ -937,8 +937,8 @@ class BackendTests(unittest.TestCase):
                 if e.prompt:
                     p = e.prompt; e.prompt = None
                     old = e.state['revision']
-                    e.call('prompt.reply', {'prompt_id': p['prompt_id'],
-                           'value': True if p['type'] == 'confirmation' else value})
+                    answer=True if p['type']=='confirmation' else int(value if value is not None else p['maximum']) if p['type']=='quantity' else str(value)
+                    self.assertIn('result',e.call('prompt.reply', {'prompt_id': p['prompt_id'], 'value':answer}))
                     e.next_state(old)
                 else:
                     e.key('enter')
@@ -949,13 +949,14 @@ class BackendTests(unittest.TestCase):
 
         e.key(ord('>')); settle()
         self.assertEqual(e.state['player']['depth'], 1)
-        wizard('z')
+        wizard('z'); wizard('d')
         floors = {f['id'] for f in e.call('catalog.get')['result']['features']
                   if f['name'] == 'open floor'}
         for attempt in range(5):
             p = e.state['player']; origin = (p['x'], p['y'])
             cells = e.state['map']['actual']
             occupied = {(o['x'], o['y']) for o in e.state['items'] if o['location'] == 'Floor'}
+            occupied.update((a['x'],a['y']) for a in e.state['terrain_actions'] if a['action']=='disarm')
             candidates = [(p['x']+dx, p['y']+dy)
                           for dx,dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1))
                           if cells[p['y']+dy][p['x']+dx] in floors
@@ -963,13 +964,15 @@ class BackendTests(unittest.TestCase):
             if candidates: break
             # Some random stairs have no empty adjacent floor. Regenerate only
             # this disposable fixture; never weaken the disarming assertions.
-            wizard('j', 1); wizard('z')
+            wizard('j', e.state['player']['depth']+1); wizard('z'); wizard('d')
         self.assertTrue(candidates, 'No empty floor for the gas-trap fixture')
         trap_pos = candidates[0]
         self.targeting('dungeon.click', x=trap_pos[0], y=trap_pos[1]); settle()
         wizard('T', 'gas trap')
         wizard('d')
         self.targeting('dungeon.click', x=origin[0], y=origin[1]); settle()
+        self.assertEqual((e.state['player']['x'],e.state['player']['y']),origin)
+        self.assertFalse(any(v['id'] in ('CONFUSED','BLIND','IMAGE') for v in e.state['player']['statuses']), 'Trap fixture must start unimpaired')
         args = {'x': trap_pos[0], 'y': trap_pos[1]}
         if method == 'dungeon.terrain':
             action = next(a for a in e.state['terrain_actions'] if (a['x'], a['y']) == trap_pos)
@@ -1494,7 +1497,13 @@ class BackendTests(unittest.TestCase):
         e.hello(); e.birth()
         d=e.state['dungeon']; player=e.state['player']
         visible={(d['x']+x,d['y']+y) for y,row in enumerate(d['cells']) for x,cell in enumerate(row) if cell[10]}
-        walls=[(d['x']+x,d['y']+y) for y,row in enumerate(d['cells']) for x,cell in enumerate(row) if cell[0]==ord('#') and cell[10] and 0<d['x']+x<len(e.state['map']['actual'][0])-1 and 0<d['y']+y<len(e.state['map']['actual'])-1]
+        # Geometry tests need a known solid wall, not just a '#' glyph (which
+        # may represent other terrain or an outdated visual observation).
+        solid={f['id'] for f in e.call('catalog.get')['result']['features'] if f['name'] in ('granite wall','permanent wall')}
+        walls=[(d['x']+x,d['y']+y) for y,row in enumerate(d['cells']) for x,cell in enumerate(row)
+               if cell[10] and cell[8] in solid
+               and e.state['map']['known'][d['y']+y][d['x']+x] in solid
+               and 0<d['x']+x<len(e.state['map']['actual'][0])-1 and 0<d['y']+y<len(e.state['map']['actual'])-1]
         self.assertTrue(walls)
         x,y=min(walls,key=lambda p:abs(p[0]-player['x'])+abs(p[1]-player['y']))
         old=e.state['revision']; e.call('debug.blast',{'radius':3}); e.next_state(old)

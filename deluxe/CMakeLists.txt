@@ -53,6 +53,9 @@ foreach(sample IN LISTS DELUXE_AUDIO_SAMPLES)
     add_custom_command(TARGET deluxe-audio POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${sample}" "$<TARGET_FILE_DIR:angband-deluxe>/audio/")
 endforeach()
+add_custom_command(TARGET deluxe-audio POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:angband-deluxe>/fonts"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${imgui_SOURCE_DIR}/misc/fonts/Cousine-Regular.ttf" "$<TARGET_FILE_DIR:angband-deluxe>/fonts/Cousine-Regular.ttf")
 add_dependencies(angband-deluxe deluxe-audio)
 add_executable(deluxe-audio-tests EXCLUDE_FROM_ALL test_audio.cpp)
 target_compile_features(deluxe-audio-tests PRIVATE cxx_std_17)

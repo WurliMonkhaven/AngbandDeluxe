@@ -6,6 +6,8 @@
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 #include "crt_renderer.h"
+#include "runtime_paths.h"
+#include <iostream>
 #include "dungeon_view.h"
 #include "backend_reader.h"
 #include <nlohmann/json.hpp>
@@ -381,9 +383,10 @@ struct Connection {
   // EOF must be drained by the reader before interpreting the final game state.
   else if(batch.finished) process_stopped(exit_code);
  }
- bool ready() const { return run_report.is_null() && connected && !busy && prompt.empty() && !state.value("message_pending",false) && state.value("readiness","") == "ready"; }
+ bool has_prompt() const { return !prompt.empty() || !pending_prompt.empty(); }
+ bool ready() const { return run_report.is_null() && connected && !busy && !has_prompt() && !state.value("message_pending",false) && state.value("readiness","") == "ready"; }
  bool can_view_character() const {
-  return run_report.is_null() && prompt.empty() && pending_prompt.empty() &&
+  return run_report.is_null() && !has_prompt() &&
    state.contains("player") && state["player"].contains("character_sheet");
  }
  const char *save_unavailable_reason() const {
@@ -393,24 +396,24 @@ struct Connection {
  bool native_targeting() const { return capabilities.value("interaction.targeting",0)>0; }
  bool mouse_movement() const { return capabilities.value("interaction.mouse",0)>0; }
  bool key(const json &k) {
-  if(connected && resting && prompt.empty() && k=="escape") {
+  if(connected && resting && !has_prompt() && k=="escape") {
    send("rest.cancel",{{"context",state.value("context","")}}); return true;
   }
-  if(connected && busy && pickup_travel && prompt.empty() && k=="escape") {
+  if(connected && busy && pickup_travel && !has_prompt() && k=="escape") {
    send("terminal.input",{{"context",state.value("context","")},{"key","escape"}});
    pickup_travel=false; return true;
   }
-  if (!connected || busy || !prompt.empty() || state.empty()) return false;
+  if (!connected || busy || has_prompt() || state.empty()) return false;
   send("terminal.input",{{"context",state.value("context","")},{"key",k}}); busy = true;
   return true;
  }
  void target(const std::string &method,json params=json::object()) {
-  if(!connected || busy || !prompt.empty()) return;
+  if(!connected || busy || has_prompt()) return;
   params["context"]=state.value("context",""); send(method,std::move(params)); busy=true;
   pickup_travel=method=="dungeon.pickup" || method=="dungeon.terrain" || method=="dungeon.click";
  }
  void preview_blast(int x,int y) {
-  if(!connected || busy || !prompt.empty() || state.value("blast_radius",0)<=0 ||
+  if(!connected || busy || has_prompt() || state.value("blast_radius",0)<=0 ||
      capabilities.value("targeting.blast",0)==0 || !blast_request.empty()) return;
   const auto context=state.value("context","");
   if(blast.value("context","")==context && blast.value("x",-1)==x && blast.value("y",-1)==y) return;
@@ -1830,6 +1833,33 @@ struct UI {
 
 #ifndef DELUXE_CLIENT_TEST
 int main(int argc,char **argv) {
+ const char *base=SDL_GetBasePath();
+ auto paths=RuntimePaths::discover(base?base:".",DELUXE_DATA_DIR,DELUXE_FONT_FILE);
+ std::string user_override;
+ bool check_assets=false;
+ for(int i=1;i<argc;++i) {
+  const std::string arg=argv[i];
+  if(arg=="--check-assets") { check_assets=true; continue; }
+  if((arg!="--backend" && arg!="--data-dir" && arg!="--user-dir") || i+1>=argc) {
+   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Angband Deluxe","Expected --backend PATH, --data-dir PATH, or --user-dir PATH.",nullptr); return 2;
+  }
+  const std::string value=argv[++i];
+  if(arg=="--backend") paths.backend=value;
+  else if(arg=="--data-dir") paths.data=value;
+  else user_override=value;
+ }
+ const auto missing=paths.missing();
+ if(check_assets) {
+  std::cout<<"backend="<<paths.backend.string()<<"\ndata="<<paths.data.string()<<"\nfont="<<paths.font.string()<<"\naudio="<<paths.audio.string()<<"\n";
+  for(const auto &path:missing) std::cerr<<"Missing: "<<path<<"\n";
+  return missing.empty()?0:1;
+ }
+ // Report missing required assets before font loading can assert or the engine exits.
+ if(!fs::is_regular_file(paths.font) || !fs::is_regular_file(paths.backend) || !fs::is_regular_file(paths.data/"gamedata"/"constants.txt")) {
+  std::string message="Some game files are missing. Extract the entire archive before launching.\n";
+  for(const auto &path:missing) message+="\n"+path;
+  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Angband Deluxe",message.c_str(),nullptr); return 1;
+ }
  if(!SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMEPAD)) return 1;
  const float dpi=SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
  SDL_Rect bounds{}; SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &bounds);
@@ -1845,7 +1875,7 @@ int main(int argc,char **argv) {
  SDL_SetGPUAllowedFramesInFlight(gpu,1); // Bound presentation latency; still paced by vsync.
  IMGUI_CHECKVERSION(); ImGui::CreateContext();
  auto &io=ImGui::GetIO(); io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad;
- io.Fonts->AddFontFromFileTTF(DELUXE_FONT_FILE,18.f);
+ io.Fonts->AddFontFromFileTTF(paths.font.string().c_str(),18.f);
  DeluxeTheme::apply();
  ImGui::GetStyle().FontSizeBase=18.f;
  ImGui_ImplSDL3_InitForSDLGPU(window);
@@ -1855,24 +1885,15 @@ int main(int argc,char **argv) {
  crt_renderer.initialize(gpu,info.ColorTargetFormat);
  std::string renderer_error;
  ui.base_style=ImGui::GetStyle();
- const char *base=SDL_GetBasePath();
  char *pref=SDL_GetPrefPath("AngbandDeluxe","AngbandDeluxe");
- std::string user=pref?pref:"deluxe-user"; SDL_free(pref);
- std::string backend=(fs::path(base?base:".")/
-#ifdef _WIN32
- "angband-backend.exe"
-#else
- "angband-backend"
-#endif
- ).string();
- std::string data=DELUXE_DATA_DIR;
- for(int i=1;i+1<argc;i+=2) {
-  if(std::string(argv[i])=="--backend") backend=argv[i+1];
-  else if(std::string(argv[i])=="--data-dir") data=argv[i+1];
-  else if(std::string(argv[i])=="--user-dir") user=argv[i+1];
+ std::string user=user_override.empty()?(pref?pref:"deluxe-user"):user_override; SDL_free(pref);
+ const std::string backend=paths.backend.string(),data=paths.data.string();
+ try { fs::create_directories(user); }
+ catch(const fs::filesystem_error &error) {
+  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Angband Deluxe",("Cannot open the save/settings folder: "+std::string(error.what())).c_str(),window); return 1;
  }
- fs::create_directories(user); ui.settings_path=(fs::path(user)/"settings.json").string(); ui.load_settings();
- if(!ui.audio.open(fs::path(base?base:".")/"audio")) connection.notice("Audio unavailable: "+ui.audio.error);
+ ui.settings_path=(fs::path(user)/"settings.json").string(); ui.load_settings();
+ if(!ui.audio.open(paths.audio)) connection.notice("Audio unavailable: "+ui.audio.error);
  ui.audio.configure(ui.audio_settings,true);
  if(ui.fullscreen && !SDL_SetWindowFullscreen(window,true)) { ui.fullscreen=false; connection.notice(std::string("Fullscreen unavailable: ")+SDL_GetError()); }
  std::string ini=(fs::path(user)/"layout.ini").string(); io.IniFilename=ini.c_str();

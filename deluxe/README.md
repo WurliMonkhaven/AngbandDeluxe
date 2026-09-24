@@ -1,189 +1,79 @@
-# Angband Deluxe development build
+# Angband Deluxe
 
-The applications are native C and C++: `angband-backend` runs the existing
-Angband engine in a separate process, and `angband-deluxe` renders with SDL3,
-SDL_GPU and Dear ImGui. Python is used only for building and testing.
+A native Windows frontend for Angband. The C engine runs in a separate process;
+the C++ client uses SDL3, SDL_GPU and Dear ImGui. Python is development tooling
+only. Current scope and behaviour live in the [specification](../docs/deluxe-specification.md).
 
-This is the first playable development implementation, not completion of the
-[product specification](../docs/deluxe-specification.md). Its protocol is 0.1;
-the [v1 API document](../docs/deluxe-api.md) remains the target design.
+## Playtest build
 
-## Build and run
+See [START HERE](PLAYTEST.md) for launch instructions and a short playtest route.
+Windows ZIPs contain both executables, game data, font, generated audio, runtime
+DLLs, licence notices, matching source and a SHA-256 manifest. Extract the whole
+archive before launching. User saves/settings stay in the OS preference directory,
+separate from the application. `--user-dir PATH` selects an isolated profile.
 
-Install Git, CMake 3.24 or newer, and a C/C++17 compiler. The first configure
-fetches pinned SDL3, Dear ImGui, cJSON and nlohmann/json sources from GitHub.
-Keep the source and dependency directories available while running this build:
-game data and the font currently use build-time source paths.
+## Build
 
-On this Windows development machine, with Visual Studio Community's C++ tools:
+On Windows, install Visual Studio's C++ tools, CMake and Python, then:
 
 ```powershell
-python deluxe/build.py --ninja --configure
-./build-deluxe-native/game/angband-deluxe.exe
-python deluxe/test_backend.py --backend build-deluxe-native/game/angband-backend.exe
+python -B deluxe/build.py --ninja --configure
+.\build-deluxe-native\game\angband-deluxe.exe
 ```
 
-For other compiler installations, configure CMake directly from an appropriate
-developer shell. On Linux, install SDL3's platform development dependencies
-first. These commands have not yet been validated on macOS or Linux:
+The build pins SDL3, Dear ImGui, cJSON and nlohmann/json revisions. First-time
+configuration fetches those dependencies. RelWithDebInfo is the default;
+`--config Debug` is useful for diagnosis but substantially slower for JSON work.
+The applications use sibling `data`, `fonts` and `audio` directories when present.
+Development builds can fall back to the source game-data directory. Explicit
+`--data-dir PATH` and `--backend PATH` override discovery. `--check-assets` validates
+runtime file discovery without opening a desktop window or creating a profile.
 
-```sh
-cmake -S . -B build-deluxe -DSUPPORT_DELUXE_FRONTEND=ON -DBUILD_DELUXE_CLIENT=ON -DSUPPORT_BORG=OFF -DSUPPORT_SPOIL_FRONTEND=OFF
-cmake --build build-deluxe --target OurExecutable angband-deluxe
-./build-deluxe/game/angband-deluxe
-python3 deluxe/test_backend.py --backend build-deluxe/game/angband-backend
+## Release-readiness checks
+
+```powershell
+python -B deluxe/readiness.py --package
 ```
 
-The build helper defaults to RelWithDebInfo (optimised, with debugging symbols).
-Use `--config Debug` for an unoptimised diagnostic build. With Ninja, changing
-`--config` automatically reconfigures the cached build. Unoptimised client JSON
-processing can substantially increase input latency.
+This builds the applications and check targets, then runs client state/layout
+checks, all real-engine integration tests, audio checks, GPU pixel checks,
+1080p frame-pacing/private-memory samples, and the SDL pipe/movement benchmark
+using a freshly generated first-floor save. Test profiles are disposable;
+personal saves are never used. Logs and results live under
+`build-deluxe/readiness-<timestamp>`. `--skip-build` reuses existing binaries.
 
-Multi-configuration generators may add a Debug or Release directory. The
-backend and client must be beside one another, or specify `--backend PATH`.
-Both accept `--data-dir PATH` and `--user-dir PATH`. The client defaults to the
-operating system's application preference directory for saves and settings.
-Use a separate user directory when testing an existing save.
+With `--package`, it also builds a ZIP, relocates it into a folder with spaces,
+checks source-independent asset discovery, and exercises native birth,
+cancellation, death/replay and dungeon travel using the packaged backend/data.
+Packaging alone is available with `python -B deluxe/package_windows.py`.
+The Windows packager currently expects the dependency tree under
+`build-deluxe/_deps` and an installed Visual C++ x64 redist directory.
 
-## Using this build
+Useful individual checks:
 
-Choose New character to enter a save name, or choose a saved character. The main
-menu shows only character choices and Settings; game panels appear after starting.
-Each saved character has Rename and Delete buttons. Rename changes the save's
-filename, preserving character data; Delete asks for confirmation before permanently
-removing it. Existing save names cannot be overwritten.
-The game takes keyboard focus
-automatically when starting/loading and after commands or prompts. Its thin blue
-border indicates focus; click it to return from another panel. Character creation and remaining classic menus use Angband's
-normal controls. Enter acknowledges its `-more-` messages. The engine's Help
-command documents gameplay controls.
-The terminal cursor is drawn as a cell outline, including the selected birth stat.
+```powershell
+python -B deluxe/test_backend.py --backend build-deluxe-native/game/angband-backend.exe
+.\build-deluxe-native\game\deluxe-client-tests.exe build-deluxe/unused-settings.json
+.\build-deluxe-native\game\deluxe-gpu-tests.exe direct3d12
+.\build-deluxe-native\game\deluxe-gpu-tests.exe direct3d12 --bench
+.\build-deluxe-native\game\deluxe-audio-tests.exe build-deluxe-native/game/audio
+```
 
-The side panels provide searchable items, inspection, selected-item actions,
-creatures, a minimap and a searchable command list. The magnifying glass beside
-Messages opens an inline search box. Inspection uses ticks and crosses for
-boolean properties, and action buttons are filtered by item type and location.
-Full engine inspection prose appears beneath those buttons, including origin,
-use effects and equipment calculations, and scrolls with the Items panel.
-Confirmation, quantity, text and ordinary item-choice prompts use native
-widgets. The top-left Save and... menu offers Save and continue, Save and return
-to main menu, and Save and quit. Returning to the menu starts a fresh backend only
-after the save succeeds. System notices appear in Messages with a [SYSTEM] prefix.
-Settings at the top right opens a tabbed window. Graphics contains fullscreen
-and UI scale choices from 75% to 150%. The CRT effects tab contains Effects Enabled
-(Off, Game Window Only, or Full) and the Effect Strength preset selector (Subtle,
-Classic, Deluxe, Zero Cool). Selecting a preset resets all component sliders and
-switches. Each component has an independent checkbox and 0–100% slider: scanlines,
-phosphor glow, bloom, chromatic aberration, vignetting, barrel distortion, hum
-bar, and ghosting. Manual adjustments show Custom in the preset selector and persist across restarts.
-Existing preferences migrate using their previous preset and hum-bar switch.
-The hum bar has a hard downward-facing leading edge and a smoothly fading trail;
-it rolls every twelve seconds. Phosphor glow creates a soft local halo; bloom spreads farther and favours bright
-text. Both are separable GPU blurs composed with the sharp source image. Ghosting retains the previous rendered image briefly as changed pixels fade out.
-Its slider controls a short decay (up to roughly 0.09 seconds for 95% of the
-afterimage to disappear). The fade is time-based and does not brighten static
-images. History resets on resize, scope/settings changes and session transitions.
-Existing settings leave the new ghosting effect off until enabled or a preset is selected. CRT applies to the
-selected surface; barrel distortion is applied after the effects, so scanlines
-curve with the image. Mouse targeting follows the barrel curve. Save and Close applies
-and persists all changes; Cancel discards them.
-UI scale resizes text, controls and
-spacing together. Character information stays fixed while tab contents scroll.
-HP, SP and food bars are red, blue and green respectively.
-UI settings persist.
+Use a new path for each client settings check. GPU checks also accept `vulkan`.
+Offscreen checks create no desktop window. Their timing measures CPU recording,
+GPU backpressure and input-to-state latency, **not physical key-to-display latency**.
+A human playtest is still needed to judge visual pacing, comfort and scanout.
 
-The complete game screen always fits inside its view without scrollbars, using
-the largest text that fits. Drag the horizontal divider above Messages to adjust
-the game/message heights; the split persists between launches. Double-click the
-divider to reset it. Message history scrolls separately. The character panel shows
-food as a bar with its percentage and raw nutrition value.
+## Architecture and remaining scope
 
-The panels use player-facing descriptions, visible creatures and the known map.
-The backend still provides actual state, including hidden information, alongside
-player-known state for future presentation features. There is no backend disclosure
-restriction. Reading these values does not identify objects or spend turns.
+Native interfaces cover character creation/replay, inventory and comparison,
+shops, spells/targeting, character details, knowledge, options/keybindings,
+resting and post-mortem history. The semantic dungeon view and overlays use
+engine-authored data; the classic terminal remains a fallback for unsupported
+interactions. GPU CRT and transition details are in [shaders/README.md](shaders/README.md).
+The implemented wire contract is [protocol 0.1](../docs/deluxe-protocol-0.1.md).
 
-## Current limits and next milestones
-
-- The main game surface still renders Angband's terminal cells through the GPU.
-  The independent semantic panels already use structured API data. A fully
-  semantic dungeon renderer and aesthetic overhaul remain future work.
-- Native character creation, stores, spells, direction/target selection,
-  comparison, advanced bindings, save profiles, run reports and full controller
-  support remain to be implemented. Classic menus provide access in the meantime.
-- Stable entity handles, deltas, reconnect/retry semantics, package discovery,
-  alternate-backend conformance and drag-and-drop fork packages are not implemented.
-- The build has been compiled and manually exercised on Windows. Cross-platform
-  source support is not a substitute for macOS/Linux build and desktop tests.
-- This is a source-tree build, not an installer or relocatable distribution.
-  Accessibility integration and distribution licensing still need a release audit.
-
-## Validation recorded on Windows
-
-The earlier native Debug build passed all 934 existing Angband unit tests. The
-current RelWithDebInfo build passed seven
-real-engine integration tests: protocol validation; gameplay/save/reload;
-item prompt validation, cancellation and inscription; and same-save keyboard/API
-wait-action parity with repeated inspection queries; and descending into the
-dungeon, inspecting its items and returning upstairs; and terminal cursor position
-and visibility while changing the selected birth stat; and save rename/delete,
-including reload, collision/path validation and active-session protection. Debug capture asserts RNG
-purity. Manual desktop checks exercised character creation, load, item selection,
-native inscription prompts, cancellation, saving and closing.
-
-These checks do not establish parity for every command or validate other platforms.
-Headless client checks cover staged settings, persistence, failed saves, and CRT
-input mapping and decay. Build with `python deluxe/build.py --ninja --target deluxe-client-tests`
-and run `build-deluxe-native/game/deluxe-client-tests.exe` with an unused temporary
-settings-file path as its argument. These checks do not visually validate fullscreen
-or CRT appearance.
-Offscreen GPU readback tests cover pass-through/orientation, glow and bloom,
-curved scanlines, scope and popup layering, and temporal history. Build with
-`python deluxe/build.py --ninja --target deluxe-gpu-tests`, then run
-`build-deluxe-native/game/deluxe-gpu-tests.exe direct3d12` or `vulkan`.
-These tests create no desktop window. Both backends were checked on Windows;
-Metal still needs validation on macOS. Shader sources, regeneration instructions
-and the rendering architecture are documented in [shaders/README.md](shaders/README.md).
-
-The development wire contract is documented in
-[protocol 0.1](../docs/deluxe-protocol-0.1.md).
-
-## Dependencies
-
-| Component | Pinned release | Licence |
-| --- | --- | --- |
-| SDL | 3.2.28 | zlib |
-| Dear ImGui | 1.92.5 | MIT |
-| cJSON | 1.7.19 | MIT |
-| nlohmann/json | 3.12.0 | MIT |
-| Cousine font from ImGui's source tree | bundled revision | SIL Open Font License 1.1 |
-
-Exact source commits are in the CMake files. Cousine is by Steve Matteson,
-digitized data copyright 2010 Google Corporation. The font remains in the fetched
-dependency source tree. Angband's existing licensing applies to this fork.
-
-
-## Semantic dungeon milestone (September 2026)
-
-Normal ready play now draws a dungeon-only semantic viewport. Terrain, traps,
-items and actors arrive as separate layers captured during existing engine
-drawing, with no extra map queries or gameplay RNG use. The full current engine
-viewport fits the game panel; the whole level is not squeezed onto the screen.
-Character rank, experience, light, floor state, pending activities, level
-feelings and tracked health are shown in the fixed character information panel.
-Birth, stores, targeting, character sheets and other nested interactions retain
-the complete terminal, including its cursor. Level changes invalidate cached
-visuals. The appearance remains glyph-based, ready for later rendering styles.
-
-Windows is the current target. macOS/Linux validation and packaging are deferred
-by the user; earlier cross-platform goals remain future work. Hands-on UI testing
-is user-performed, without computer-use automation. See the updated product
-specification for the authoritative scale, settings, menu and presentation decisions.
-
-
-## Quick-action bar
-
-Enable Quick-action bar under Settings > Gameplay. Right-click a slot, inventory
-item, spell or command to assign it. Click or press top-row 1-0 to activate;
-numpad movement is unchanged. Slots persist per save and resolve current items,
-including replacement consumable stacks. Right-click a slot to replace or clear.
+The release pass targets Windows only. Signing, an installer, clean-machine
+manual certification, accessibility validation and macOS/Linux certification
+remain separate work. Protocol v1, alternate-engine conformance and reconnect
+semantics remain future architecture; this build does not claim them.

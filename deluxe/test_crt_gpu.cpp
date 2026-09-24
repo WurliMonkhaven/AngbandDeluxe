@@ -6,6 +6,18 @@
 #include <vector>
 #include <chrono>
 #include <deque>
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#include <psapi.h>
+#endif
+static size_t private_bytes() {
+#ifdef _WIN32
+ PROCESS_MEMORY_COUNTERS_EX memory{};
+ if(K32GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory))) return memory.PrivateUsage;
+#endif
+ return 0;
+}
 static void check(bool value,const char *message) { if(!value) throw std::runtime_error(std::string(message)+": "+SDL_GetError()); }
 int main(int argc,char **argv) {
  try {
@@ -31,7 +43,8 @@ int main(int argc,char **argv) {
     std::deque<SDL_GPUFence*> pending;
     std::vector<double> records,waits;
     unsigned long long steady_growths=0;
-    for(int sample=0;sample<240;++sample) {
+    size_t warm_memory=0;
+    for(int sample=0;sample<600;++sample) {
      auto now=[] { return std::chrono::steady_clock::now(); };
      auto elapsed=[&](auto start) { return std::chrono::duration<double,std::milli>(now()-start).count(); };
      auto wait_start=now();
@@ -54,6 +67,7 @@ int main(int argc,char **argv) {
      const double record_ms=elapsed(start);
      const auto after=DeluxeGpuGetUploadStats();
      check(after.uploads==before.uploads+1,"Benchmark frame uploaded twice");
+     if(sample==60) warm_memory=private_bytes();
      if(sample>20) steady_growths+=after.buffer_growths-before.buffer_growths;
      pending.push_back(SDL_SubmitGPUCommandBufferAndAcquireFence(cmd));
      if(sample>20) { records.push_back(record_ms); waits.push_back(wait_ms); }
@@ -63,7 +77,7 @@ int main(int argc,char **argv) {
      std::sort(times.begin(),times.end());
      std::cout<<label<<" p50="<<times[times.size()/2]<<" p95="<<times[times.size()*95/100]<<" max="<<times.back()<<" ms ";
     };
-    std::cout<<"scope="<<scope<<" "; report("record",records); report("wait",waits); std::cout<<" steady buffer growths="<<steady_growths<<"\n";
+    std::cout<<"scope="<<scope<<" "; report("record",records); report("wait",waits); std::cout<<" steady buffer growths="<<steady_growths<<" private MiB (warm/end)="<<warm_memory/(1024.*1024.)<<"/"<<private_bytes()/(1024.*1024.)<<"\n";
     check(steady_growths==0,"Idle frames keep reallocating upload buffers");
    }
    renderer.shutdown(); SDL_ReleaseGPUTransferBuffer(gpu,download); SDL_ReleaseGPUTexture(gpu,target);

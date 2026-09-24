@@ -58,6 +58,7 @@ int main(int argc,char **argv) {
     if(xx<0 || yy<0 || yy>=int(c.state["map"]["actual"].size()) || xx>=int(c.state["map"]["actual"][yy].size())) continue;
     auto feature=c.state["map"]["actual"][yy][xx];
     bool floor=false,occupied=false;
+    for(const auto &a:c.state.value("terrain_actions",json::array())) if(a.value("x",-1)==xx && a.value("y",-1)==yy && a.value("action","")=="disarm") occupied=true;
     for(const auto &f:c.catalog["features"]) if(f["id"]==feature && f.value("name","")=="open floor") floor=true;
     for(const auto &m:c.state["monsters"]) if(m.value("x",-1)==xx && m.value("y",-1)==yy) occupied=true;
     if(floor && !occupied) { dx=step[0]; dy=step[1]; break; }

@@ -1011,3 +1011,26 @@ or prompts. They are local, brief (300-900 ms), independent of CRT, and do not
 queue commands, pause the backend, or delay the final save/archive. Continued
 input skips non-death flourishes. Only a single outgoing glyph grid is retained
 when needed; turning the setting off dismisses active transitions immediately.
+
+
+### Windows release-readiness tooling (implemented)
+
+The client resolves packaged data, font, audio and backend files relative to its
+executable, with explicit command-line overrides and development-only fallbacks.
+A packaged build missing its font reports an asset error instead of reaching
+into the source tree. --check-assets verifies discovery without opening a window
+or touching a user profile. Startup reports missing assets and inaccessible user
+folders. A shared prompt-ownership predicate prevents save, movement and target
+actions from bypassing a deferred native dialog.
+
+python -B deluxe/readiness.py --package builds and runs the client, real-engine,
+audio and GPU checks, creates a disposable first-floor save for input/transport
+measurements, samples frame pacing and private memory, then packages and relocates
+a Windows ZIP for another set of birth, cancellation, death/replay and dungeon
+journeys. Package contents include local runtime dependencies, licences, matching
+working-tree source and a SHA-256 manifest. No personal saves enter the package.
+
+This is a Windows playtest distribution, not a signed installer. Offscreen timings
+measure input-to-state and GPU submission/backpressure, not physical display
+latency. A fresh-machine human playtest and accessibility review remain necessary;
+macOS and Linux validation remain deferred.
