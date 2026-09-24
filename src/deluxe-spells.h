@@ -20,6 +20,12 @@ static cJSON *deluxe_spell_record(int index, bool available)
  number(record,"level",spell->slevel); number(record,"mana",spell->smana);
  number(record,"failure",spell_chance(index));
  json_bool(record,"can_cast",available && player_can_cast(player,false) && spell_okay_to_cast(player,index));
+ string(record,"cast_reason",!available?"Spellbook is not available.":
+  !player->class->magic.total_spells?"Your class cannot cast spells.":
+  player->timed[TMD_BLIND]?"You are blind.":no_light(player)?"There is no light to read by.":
+  player->timed[TMD_CONFUSED]?"You are too confused to cast.":
+  (flags&PY_SPELL_FORGOTTEN)?"This spell has been forgotten.":
+  !(flags&PY_SPELL_LEARNED)?"This spell has not been learned.":"");
  json_bool(record,"can_study",available && player_can_study(player,false) && spell_okay_to_study(player,index));
  json_bool(record,"needs_aim",spell_needs_aim(index));
  json_bool(record,"low_mana",spell->smana > player->csp);

@@ -794,3 +794,15 @@ the current filtered list. The window uses the existing bounded 400-entry client
 log (including system notices); it is session history, not a persistent journal.
 The backend adds a semantic group derived from native message types. Untyped
 messages remain Other; no classification is inferred from localized prose.
+
+### Quickbar inspection
+
+Hover cards resolve against the current carried item/spell, retaining useful
+details while actions are unavailable. Spells show mana, failure chance, level,
+learning state, effect text and dynamic effect information. Low mana remains a
+warning with normal engine confirmation. Items show stack quantity, location,
+charges or recharge counts when applicable, inscription and use description.
+Missing items/books and engine-provided casting blockers have explicit reasons.
+Descriptions wrap and long equipment descriptions are abbreviated with a pointer
+to Inventory. Hovering is local and read-only; slot size and activation rules are
+unchanged. Device metadata uses charges/charging; spells add cast_reason.

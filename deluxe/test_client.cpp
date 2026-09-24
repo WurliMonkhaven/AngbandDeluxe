@@ -405,6 +405,21 @@ int main(int argc,char **argv) {
   hot.state["items"][1]["spells"][0]["low_mana"]=true;
   auto cast=Quickbar::resolve(spell_binding,hot);
   check(cast.reason.empty() && cast.item=="book-now" && cast.spell=="0" && cast.mana && cast.amount==1,"Learned low-mana spell must retain engine confirmation path");
+  hot.state["items"][1]["spells"][0]["failure"]=19;
+  hot.state["items"][1]["spells"][0]["description"]="Fires a bolt of magic.";
+  auto spell_tip=Quickbar::tooltip_details(spell_binding,hot,cast);
+  check(spell_tip["description"]=="Fires a bolt of magic." && spell_tip["facts"][0]=="Mana 1   Failure 19%" && !spell_tip.value("warning","").empty(),"Spell tooltip must expose live effect, cost, failure and low-mana warning");
+  hot.state["items"][1]["spells"][0]["can_cast"]=false;
+  hot.state["items"][1]["spells"][0]["cast_reason"]="You are too confused to cast.";
+  check(Quickbar::tooltip_details(spell_binding,hot,Quickbar::resolve(spell_binding,hot))["reason"]=="You are too confused to cast.","Spell tooltip uses the engine's current failure reason");
+  hot.state["items"][1]["spells"][0]["can_cast"]=true;
+  auto item_tip=Quickbar::tooltip_details(binding,hot,Quickbar::resolve(binding,hot));
+  check(item_tip.value("title","").find(potion.value("label",""))!=std::string::npos,"Item tooltip follows the current item");
+  for(float tooltip_width:{350.f,850.f}) {
+   ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(tooltip_width,180)); ImGui::Begin("Quickbar tooltip host");
+   Quickbar::tooltip(spell_binding,hot,cast,0);
+   ImGui::End(); ImGui::Render();
+  }
   SDL_Event digit{}; digit.type=SDL_EVENT_KEY_DOWN; digit.key.scancode=SDL_SCANCODE_1;
   check(hot_ui.quickbar_event(digit),"Top-row shortcut must be captured");
   check(hot.busy && hot.next==1 && hot.outgoing.find("new-handle")!=std::string::npos,"Shortcut must execute current item once");

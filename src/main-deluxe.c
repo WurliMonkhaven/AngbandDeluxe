@@ -369,6 +369,9 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  number(a, "armour", o->ac); number(a, "to_armour", o->to_a);
  number(a, "dice", o->dd); number(a, "sides", o->ds);
  number(a, "weight", o->weight); number(a, "timeout", o->timeout);
+ if(tval_can_have_charges(o)) number(j,"charges",o->pval);
+ if(tval_is_rod(o)) number(j,"charging",number_charging(o));
+ else if(obj_is_activatable(o)) number(j,"charging",o->timeout>0?1:0);
  cJSON_AddItemToObject(a, "modifiers", cJSON_CreateArray());
  for (i = 0; i < OBJ_MOD_MAX; ++i)
   cJSON_AddItemToArray(cJSON_GetObjectItem(a, "modifiers"), cJSON_CreateNumber(o->modifiers[i]));

@@ -168,10 +168,93 @@ struct Quickbar {
      if(allowed) { if(!usable) r.item=item.value("id",""); usable=true; r.amount+=item.value("quantity",0); }
     }
    }
-   if(!usable) r.reason=!found?"No matching item in your belongings.":type=="spell"?"This spell cannot currently be cast.":"This action is not currently available for the item.";
+   if(!usable) r.reason=!found?(type=="spell"?"Spellbook no longer carried.":"Item no longer carried."):type=="spell"?"This spell cannot currently be cast.":"This action is not currently available for the item.";
   }
   if(r.reason.empty() && (!c.ready() || !normal_play(c))) r.reason="Finish the current interaction first.";
   return r;
+ }
+ static json tooltip_details(const json &binding,const Connection &c,const Action &action) {
+  json result={{"title",binding.is_null()?"Empty slot":binding.value("label","")},
+   {"facts",json::array()},{"description",""},{"reason",action.reason},{"warning",""}};
+  if(binding.is_null()) return result;
+  if(binding.value("type","")=="command" && binding.value("command","")=="core.fire" && c.state.contains("items")) {
+   bool ammunition=false;
+   for(const auto &item:c.state["items"]) if(carried(item))
+    for(const auto &command:item.value("actions",json::array())) if(command=="core.fire") ammunition=true;
+   if(!ammunition) result["warning"]="No carried ammunition is currently eligible for firing. Angband may still offer ammunition on the ground.";
+  }
+  const json *chosen=nullptr;
+  if(c.state.contains("items")) for(const auto &item:c.state["items"]) {
+   if(!carried(item) || binding.value("key","").empty() || item.value("binding_key","")!=binding.value("key","")) continue;
+   if(!chosen || item.value("id","")==action.item) chosen=&item;
+   if(item.value("id","")==action.item) break;
+  }
+  if(!chosen) return result;
+  auto &facts=result["facts"];
+  if(binding.value("type","")=="spell") {
+   for(const auto &spell:chosen->value("spells",json::array()))
+    if(spell.value("id","")==binding.value("spell","") && spell.value("label","")==binding.value("spell_name","")) {
+     result["title"]=spell.value("label","");
+     facts.push_back("Mana "+std::to_string(spell.value("mana",0))+"   Failure "+std::to_string(spell.value("failure",0))+"%");
+     facts.push_back("Level "+std::to_string(spell.value("level",0))+"   "+spell.value("status",""));
+     result["description"]=spell.value("description","");
+     const auto info=spell.value("info",""); if(!info.empty()) facts.push_back(info);
+     if(!spell.value("can_cast",false)) {
+      const auto status=spell.value("status","");
+      if(!spell.value("cast_reason","").empty()) result["reason"]=spell["cast_reason"];
+      else if(status=="Forgotten") result["reason"]="This spell has been forgotten.";
+      else if(status=="Unknown") result["reason"]="This spell has not been learned.";
+      else if(status=="Difficult") result["reason"]="Your level is too low for this spell.";
+      else if(status=="Illegible") result["reason"]="You cannot learn this spell.";
+     } else if(spell.value("low_mana",false)) result["warning"]="Not enough mana — Angband will ask whether to attempt it anyway.";
+     break;
+    }
+  } else {
+   result["title"]=std::string(action_label(binding.value("command","")))+": "+chosen->value("label","");
+   facts.push_back("Quantity "+std::to_string(chosen->value("quantity",0))+"   "+chosen->value("location",""));
+   if(chosen->contains("charges")) facts.push_back("Charges "+std::to_string(chosen->value("charges",0))+" (this stack)");
+   if(binding.value("command","")=="core.use" && chosen->contains("charges") && chosen->value("charges",0)==0)
+    result["warning"]="No charges remaining in this stack.";
+   if(chosen->contains("charging")) {
+    const int charging=chosen->value("charging",0);
+    facts.push_back(charging?"Recharging: "+std::to_string(charging):"Fully charged");
+    if(binding.value("command","")=="core.use" && charging>=chosen->value("quantity",1)) result["warning"]="This item is still recharging.";
+   }
+   for(const auto &section:chosen->value("description_sections",json::array()))
+    if(section.value("id","")=="use") { result["description"]=section.value("text",""); break; }
+   if(result["description"]=="") result["description"]=chosen->value("description","");
+   const auto inscription=chosen->value("inscription",""); if(!inscription.empty()) facts.push_back("Inscription: "+inscription);
+  }
+  return result;
+ }
+ static void tooltip(const json &binding,const Connection &c,const Action &action,int slot) {
+  const auto details=tooltip_details(binding,c,action);
+  ImGui::BeginTooltip();
+  const float width=std::min(ImGui::GetFontSize()*30,ImGui::GetMainViewport()->WorkSize.x-32);
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX()+width);
+  ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(.65f,.82f,1,1));
+  ImGui::TextWrapped("%s",details.value("title","").c_str()); ImGui::PopStyleColor();
+  ImGui::TextDisabled("Quickbar · %d",(slot+1)%10);
+  if(!details["facts"].empty()) {
+   ImGui::Separator();
+   for(const auto &fact:details["facts"]) ImGui::TextWrapped("%s",fact.get_ref<const std::string&>().c_str());
+  }
+  auto description=details.value("description","");
+  if(!description.empty()) {
+   // Keep long equipment lore from producing a tooltip taller than the screen.
+   bool shortened=description.size()>600;
+   if(shortened) { size_t end=description.rfind(' ',600); description.resize(end==std::string::npos?600:end); description+="..."; }
+   ImGui::Separator(); ImGui::TextWrapped("%s",description.c_str());
+   if(shortened) ImGui::TextDisabled("%s",binding.value("type","")=="spell"?"Full description in Spells.":"Full description in Inventory.");
+  }
+  for(const char *field:{"reason","warning"}) {
+   const auto text=details.value(field,"");
+   if(!text.empty()) { ImGui::Separator(); ImGui::TextWrapped("%s",text.c_str()); }
+  }
+  ImGui::Separator();
+  if(action.reason.empty()) ImGui::TextWrapped("Click or press the top-row number to activate.");
+  ImGui::TextDisabled("Right-click to customize or assign.");
+  ImGui::PopTextWrapPos(); ImGui::EndTooltip();
  }
  void slot_choices(const json &binding) {
   auto &s=slots();
@@ -311,13 +394,7 @@ struct Quickbar {
     }
    }
    const auto number=std::to_string((i+1)%10); draw->AddText(ImVec2(a.x+3,a.y+2),ImGui::GetColorU32(ImGuiCol_TextDisabled),number.c_str());
-   if(hovered) {
-    ImGui::BeginTooltip();
-    ImGui::TextUnformatted(s[i].is_null()?"Empty slot":s[i].value("label","").c_str());
-    if(!action.reason.empty()) ImGui::TextWrapped("%s",action.reason.c_str());
-    if(usable) ImGui::TextUnformatted("Click or press the top-row number to activate.");
-    ImGui::TextDisabled("Right-click to assign, replace or clear."); ImGui::EndTooltip();
-   }
+   if(hovered) tooltip(s[i],c,action,i);
    if(ImGui::BeginPopupContextItem("Slot menu")) {
     choose_binding(c,i);
     if(!s[i].is_null()) { ImGui::Separator(); if(ImGui::MenuItem("Customize")) { begin_customize(i); open_customize=true; } if(ImGui::MenuItem("Clear slot")) { s[i]=nullptr; dirty=true; } }
