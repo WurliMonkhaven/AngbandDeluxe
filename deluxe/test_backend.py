@@ -1358,6 +1358,8 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(report["messages"])
         self.assertTrue(all(i["location"] != "Floor" and "actions" not in i and "id" not in i for i in report["items"]))
         self.assertTrue(all(i["player_known"]["identified"] for i in report["items"]))
+        self.assertEqual(report['journal']['entries'][-1]['kind'],'ending')
+        self.assertTrue(any(v['kind']=='beginning' for v in report['journal']['entries']))
         self.assertEqual(e.call("state.get")["result"]["run"], report)
         self.assertIn("result", e.call("run.finish"))
         for _ in range(20):
@@ -1481,6 +1483,31 @@ class BackendTests(unittest.TestCase):
             e.key('escape')
         self.assertEqual(e.state['readiness'],'ready',e.screen())
         self.assertNotIn('blast_radius',e.state)
+
+    def test_run_journal_persistence(self):
+        e=self.engine
+        e.hello()
+        self.assertEqual(e.call('journal.get')['error']['code'],'wrong_phase')
+        e.birth()
+        before=e.call('journal.get')['result']
+        self.assertTrue(any(v['kind']=='beginning' for v in before['entries']))
+        old=e.state['revision']; e.call('debug.experience',{'amount':1000}); e.next_state(old)
+        for _ in range(30):
+            if e.state['readiness']=='ready': break
+            e.key('enter')
+        journal=e.call('journal.get')['result']
+        levels=[v['level'] for v in journal['entries'] if v['kind']=='level']
+        self.assertEqual(levels,list(range(2,e.state['player']['level']+1)))
+        state=e.call('state.get')['result']
+        for _ in range(5): self.assertEqual(e.call('journal.get')['result'],journal)
+        self.assertEqual(e.call('state.get')['result'],state,'Reading the journal is observational')
+        e.call('session.close'); e.process.wait(timeout=10); e.stop()
+        self.engine=e=Engine(self.temp.name); e.hello()
+        e.call('session.load',{'save':'ProtocolTest'}); e.next_state(None)
+        for _ in range(30):
+            if e.state['readiness']=='ready': break
+            e.key('enter')
+        self.assertEqual(e.call('journal.get')['result'],journal,'Native saves preserve the journal without duplicate load milestones')
 
     def test_debug_experience(self):
         e=self.engine
@@ -1653,6 +1680,8 @@ class BackendTests(unittest.TestCase):
         self.targeting('dungeon.terrain',**down)
         while e.state["readiness"] != "ready":
             e.key("enter")
+        depth_entries=[v for v in e.call('journal.get')['result']['entries'] if v['kind']=='depth']
+        self.assertEqual(len([v for v in depth_entries if v['depth']==1]),1)
         dungeon = e.call("state.get")["result"]
         self.assertEqual(dungeon["player"]["depth"], 1)
         self.assert_semantic_view(dungeon)

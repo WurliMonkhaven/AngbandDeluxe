@@ -929,3 +929,10 @@ Protocol: targeting.blast accepts context, x and y while a known ball effect is 
 ### Character-sheet equipment portrait
 
 The live character sheet has an Equipment page with an ASCII humanoid silhouette, occupied/empty slot cards and a single body-slot connector for the hovered or selected slot. The figure uses a shared character grid for aligned boots and limbs; ring cards sit on their matching sides. It uses the save roster accent colour. Hover reveals full item names and inscriptions; selecting a slot shows the existing structured item descriptions underneath. Equipment and empty slots come from the current engine snapshot, with left/right rings kept distinct. Narrow windows fall back to stacked cards. The portrait is read-only and does not send commands or consume turns.
+
+
+### Run journal
+
+More > Run journal opens a read-only milestone timeline with search, category filters and a newest-first toggle. Entries show level, dungeon depth and native player turn. It uses Angband's saved history for the beginning of the quest, first attainment of each character level, unique kills and known artifact discoveries. Reattaining drained levels is not duplicated. Unidentified and never-discovered artifacts are omitted. The first recorded visit to each dungeon depth is now added to the native history on level transitions; loading and revisiting do not duplicate it. Existing saves recover their existing milestones, but no historical depth timestamps are invented.
+
+journal.get returns the history projection on demand, with no turn, RNG or state mutation and no additional per-movement payload. The final run record embeds an immutable journal and adds an ending entry. Journal tabs on the end-of-game screen and graveyard display that same timeline; older archived reports without a journal remain readable. Ordinary saves persist the engine history, so save renaming, reloads and replay follow native history semantics. The appended history flag fits the existing history bitfield size and does not change the save block format.

@@ -21,5 +21,6 @@ static cJSON *deluxe_run_record(const cJSON *state)
   cJSON_DeleteItemFromObject(copy,"id"); /* Live revision handles have no meaning in an archive. */
   cJSON_AddItemToArray(items,copy);
  }
+ cJSON_AddItemToObject(out,"journal",deluxe_journal(true));
  return out;
 }

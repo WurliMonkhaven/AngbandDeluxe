@@ -119,6 +119,8 @@ struct Connection {
  std::string knowledge_list_request,knowledge_detail_request;
  json route=json::object(), travel=json::object();
  std::string route_request, blast_request;
+ std::string journal_request;
+ json journal_data=nullptr;
  json blast=json::object();
  Uint64 blast_sent=0;
  Uint64 route_sent=0;
@@ -244,6 +246,13 @@ struct Connection {
   if(method=="keybindings.set") {
    bindings_saved=j.contains("error")?json{{"error",j["error"].value("message","Bindings could not be saved.")}}:j["result"];
    busy=false; return;
+  }
+  if(method=="journal.get") {
+   if(id==journal_request) {
+    journal_data=j.contains("error")?json{{"error",j["error"].value("message","Journal unavailable.")}}:j["result"];
+    journal_request.clear();
+   }
+   return;
   }
   if(method=="options.get") {
    if(id==options_request) options_result=j.contains("error")?json{{"error",j["error"].value("message","Options unavailable.")}}:j["result"];
@@ -465,10 +474,12 @@ static void properties(const json &value) {
 #include "character_select.h"
 #include "equipment_portrait.h"
 #include "character_sheet.h"
+#include "run_journal.h"
 #include "run_history.h"
 struct UI {
  Connection &c;
  RunHistory run_history;
+ RunJournal run_journal;
  CharacterSelect character_select;
  std::string pending_replay;
  bool run_report_started=false;
@@ -1692,6 +1703,7 @@ struct UI {
     }
     if(ImGui::BeginTabItem("More")) {
      ImGui::BeginChild("More content");
+     if(c.capabilities.value("journal",0)>0 && ImGui::Button("Run journal")) { keys.clear(); run_journal.open=true; }
      if(c.capabilities.value("item.rules",0)>0 && ImGui::Button("Item rules")) item_rules_panel.open=true;
      ImGui::EndChild(); ImGui::EndTabItem();
     }
@@ -1704,6 +1716,7 @@ struct UI {
   if(quickbar.customize_window()) focus_game();
   if(quickbar.dirty) { quickbar.dirty=false; save_settings(); }
   if(message_history.draw(c)) focus_game();
+  if(run_journal.draw(c)) focus_game();
   if(item_rules_panel.draw(c)) focus_game();
   if(knowledge_browser.draw(c)) focus_game();
   if(c.state.contains("player")) {

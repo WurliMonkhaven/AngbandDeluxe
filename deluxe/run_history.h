@@ -5,6 +5,7 @@ struct RunHistory {
  std::string error;
  bool browsing=false, archived=false;
  int selected_item=-1;
+ RunJournal journal;
  char search[128]{};
  static bool valid(const json &r) {
   return r.is_object() && r.value("schema",0)==1 && r.contains("player") && r["player"].is_object()
@@ -97,6 +98,10 @@ struct RunHistory {
      if(count==1) { ImGui::PopStyleColor(); ImGui::Spacing(); ImGui::Separator(); }
     }
     ImGui::EndChild(); ImGui::EndTabItem();
+   }
+   if(ImGui::BeginTabItem("Journal")) {
+    journal.contents(current.value("journal",json::object()));
+    ImGui::EndTabItem();
    }
    if(ImGui::BeginTabItem("Final belongings")) {
     if(ImGui::BeginTable("Final belongings split",2,ImGuiTableFlags_Resizable)) {

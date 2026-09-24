@@ -21,6 +21,7 @@
 #include "obj-util.h"
 #include "obj-tval.h"
 #include "player.h"
+#include "player-history.h"
 #include "project.h"
 #include "effects.h"
 #include "z-dice.h"
@@ -402,6 +403,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
 #include "deluxe-character.h"
 #include "deluxe-options.h"
 #include "deluxe-keybindings.h"
+#include "deluxe-journal.h"
 #include "deluxe-run.h"
 #include "deluxe-save-summary.h"
 #include "deluxe-status.h"
@@ -700,7 +702,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.experience\":1,\"debug.blast\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.experience\":1,\"debug.blast\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -844,6 +846,9 @@ static void pump(void)
    (streq(type, "quantity") && cJSON_IsNumber(v) && v->valuedouble == v->valueint && v->valueint >= 0 && v->valueint <= num(active_prompt, "maximum", 0))))
    error(id, "invalid_argument", "Invalid prompt value.");
   else { reply_value = cJSON_Duplicate(v, true); response(id, cJSON_CreateObject()); }
+ } else if (streq(method,"journal.get")) {
+  if(!character_generated) error(id,"wrong_phase","Start a character first.");
+  else response(id,deluxe_journal(false));
  } else if (streq(method,"targeting.blast")) {
   deluxe_blast_preview(id,p);
  } else if (streq(method,"dungeon.route")) {

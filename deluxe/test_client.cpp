@@ -939,6 +939,16 @@ int main(int argc,char **argv) {
     check(ImGui::GetDrawData()->TotalVtxCount>0,"Portrait renders both diagram and compact layouts");
    }
   }
+  {
+   RunJournal journal;
+   json entry={{"kind","artifact"},{"text","Found the Phial of Galadriel"},{"turn",250},{"level",8},{"depth",12}};
+   check(RunJournal::accepts(entry,4,"phial") && !RunJournal::accepts(entry,1,""),"Journal filters meaningful milestone categories and text");
+   json history={{"entries",json::array({entry})}};
+   for(float width:{850.f,430.f}) {
+    ImGui::NewFrame(); ImGui::SetNextWindowSize({width,600}); ImGui::Begin("Journal test");
+    journal.contents(history); ImGui::End(); ImGui::Render();
+   }
+  }
   KeybindingEditor binding_editor;
   const json binding_data={{"mode",0},{"revision",2},{"bindings",json::array()},
    {"commands",json::array({{{"id",82},{"label","Rest for a while"},{"group","Action commands"},{"original","R"},{"rogue","R"}}})},

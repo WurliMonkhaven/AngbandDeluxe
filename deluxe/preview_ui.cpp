@@ -38,6 +38,12 @@ int main(int argc,char **argv) {
     ui.projectile_feedback.tiles.clear(); c.projectile_events.push_back(batch);
    }
    ImGui_ImplSDLGPU3_NewFrame(); ImGui::NewFrame(); ui.draw(nullptr);
+   if(fixture.contains("journal")) {
+    ImGui::SetNextWindowSize({std::min(float(w)-40,ImGui::GetFontSize()*48),float(h)-80});
+    ImGui::SetNextWindowPos({30,40}); ImGui::SetNextWindowFocus();
+    ImGui::Begin("Run journal - offscreen review",nullptr,ImGuiWindowFlags_NoSavedSettings);
+    ui.run_journal.contents(fixture["journal"]); ImGui::End();
+   }
    if(fixture.value("equipment_portrait",false)) {
     ImGui::SetNextWindowSize({std::min(float(w)-40,ImGui::GetFontSize()*53),float(h)-80});
     ImGui::SetNextWindowPos({20,40});
