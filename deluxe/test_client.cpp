@@ -45,6 +45,23 @@ int main(int argc,char **argv) {
    events.push_back(batch(walk,3)); state["dungeon"]["level_id"]="two"; motion.update(events,state,true,true,3);
    check(motion.walks.empty(),"Old-level events are discarded");
   }
+  {
+   Connection c; c.connected=true;
+   c.state={{"phase","playing"},{"readiness","ready"},{"message_pending",true},
+    {"player",{{"character_sheet",json::object()}}}};
+   check(!c.ready(),"Pending messages block gameplay actions even with stale ready metadata");
+   c.save(true); check(c.outgoing.empty() && !c.close_requested,"Blocked save must not send a request or close the app");
+   check(c.can_view_character(),"Read-only character details remain available during continuation messages");
+   UI ui{c}; ui.execute("core.character");
+   check(ui.open_character_sheet && c.outgoing.empty() && c.state["message_pending"].get<bool>(),"Details opens locally without consuming a waiting message");
+   c.prompt={{"type","confirmation"}};
+   check(!c.can_view_character(),"Character modal does not stack over an unanswered native prompt");
+   c.prompt=json::object(); c.pending_prompt={{"type","confirmation"}};
+   check(!c.can_view_character(),"Deferred native prompts also own the modal");
+   c.pending_prompt=json::object(); c.state["message_pending"]=false;
+   check(c.ready() && c.can_view_character(),"Controls become available again after continuation");
+   c.save(true); check(c.close_requested && c.busy && !c.outgoing.empty(),"Ready save and quit still submits normally");
+  }
   auto messages=read_test_frames("{\"seq\":1}\n{\"seq\":2}\n");
   check(messages.error.empty() && messages.frames.size()==2 && messages.frames[0]["seq"]==1 && messages.frames[1]["seq"]==2,"Reader must preserve final message order at EOF");
   check(!read_test_frames("{bad}\n").error.empty(),"Malformed frame must be reported");

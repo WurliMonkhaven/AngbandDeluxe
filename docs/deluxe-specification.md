@@ -976,3 +976,14 @@ Spell presentation uses saturated elemental halos, bright hot cores and larger
 outlined ASCII wisps. Short brightness holds make breaths, explosions and trails
 more emphatic without extending their lifetimes or changing affected tiles.
 The treatment is visible with CRT disabled and uses bounded draw geometry.
+
+
+### Availability during pending input
+
+Unavailable gameplay actions retain visibly dimmed disabled styling, including
+save/quit and developer actions. The top-level save button is also disabled
+until normal play resumes, with a reason on hover; the window-close dialog
+explains pending messages and keeps Save and quit disabled. Character Details
+can open from the current snapshot during continuation messages without
+acknowledging them or sending gameplay input. Native prompts retain modal
+priority. Death-transition freezing does not override nested disabled styling.

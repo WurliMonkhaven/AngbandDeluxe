@@ -375,7 +375,15 @@ struct Connection {
   // EOF must be drained by the reader before interpreting the final game state.
   else if(batch.finished) process_stopped(exit_code);
  }
- bool ready() const { return run_report.is_null() && connected && !busy && prompt.empty() && state.value("readiness","") == "ready"; }
+ bool ready() const { return run_report.is_null() && connected && !busy && prompt.empty() && !state.value("message_pending",false) && state.value("readiness","") == "ready"; }
+ bool can_view_character() const {
+  return run_report.is_null() && prompt.empty() && pending_prompt.empty() &&
+   state.contains("player") && state["player"].contains("character_sheet");
+ }
+ const char *save_unavailable_reason() const {
+  return state.value("message_pending",false)?"Finish the waiting message before saving.":
+   "Finish the current action or menu before saving.";
+ }
  bool native_targeting() const { return capabilities.value("interaction.targeting",0)>0; }
  bool mouse_movement() const { return capabilities.value("interaction.mouse",0)>0; }
  bool key(const json &k) {
@@ -837,7 +845,7 @@ struct UI {
  void execute(const std::string &id,const std::string &item="") {
   if(id=="core.knowledge" && c.capabilities.value("knowledge",0)>0 && c.state.value("phase","")=="playing") { keys.clear(); knowledge_browser.open(c); return; }
   if(id=="core.inscribe" && c.ready()) inscription_edit=true;
-  if(id=="core.character" && c.state.contains("player") && c.state["player"].contains("character_sheet")) { keys.clear(); open_character_sheet=true; return; }
+  if(id=="core.character" && c.can_view_character()) { keys.clear(); open_character_sheet=true; return; }
   if(c.native_targeting() && (id=="core.look" || id=="core.target")) c.target("targeting.begin",{{"mode",id=="core.look"?"look":"target"}});
   else c.command(id,item);
   focus_game();
@@ -1123,7 +1131,7 @@ struct UI {
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
  void character() {
-  if(c.state.contains("player") && CharacterOverview::draw(c.state["player"],c.ready(),c.capabilities.value("spells",0)>0 && c.state["player"].value("spellcasting",false)?&select_spells_tab:nullptr,level_animation?&c.level_feedback:nullptr,double(SDL_GetTicksNS())/1e9)) execute("core.character");
+  if(c.state.contains("player") && CharacterOverview::draw(c.state["player"],c.can_view_character(),c.capabilities.value("spells",0)>0 && c.state["player"].value("spellcasting",false)?&select_spells_tab:nullptr,level_animation?&c.level_feedback:nullptr,double(SDL_GetTicksNS())/1e9)) execute("core.character");
  }
  void tile_details(int x,int y,bool full) {
   ImGui::Text("Tile %d, %d",x,y);
@@ -1524,17 +1532,22 @@ struct UI {
   if(!c.replay_save.empty() && !c.state.contains("terminal")) {
    ImGui::TextUnformatted("Preparing your next character..."); ImGui::End(); return;
   }
-  ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha,1.f); ImGui::BeginDisabled(ending);
+  // Freeze the death transition without dimming it, but restore normal
+  // disabled styling immediately for controls nested inside this scope.
+  ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha,1.f); ImGui::BeginDisabled(ending); ImGui::PopStyleVar();
   const bool in_game=c.state.contains("terminal");
   if(in_game && !c.state.contains("birth")) {
+   ImGui::BeginDisabled(!c.ready());
    if(ImGui::Button("Save and...")) ImGui::OpenPopup("Save menu");
+   ImGui::EndDisabled();
+   if(!c.ready() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s",c.save_unavailable_reason());
    if(ImGui::BeginPopup("Save menu")) {
     ImGui::BeginDisabled(!c.ready());
     if(ImGui::MenuItem("Save and continue")) { c.save(); focus_game(); }
     if(ImGui::MenuItem("Save and return to main menu")) c.save(true,true);
     if(ImGui::MenuItem("Save and quit")) c.save(true);
     ImGui::EndDisabled();
-    if(!c.ready()) ImGui::TextUnformatted("Return to normal play to save.");
+    if(!c.ready()) ImGui::TextUnformatted(c.save_unavailable_reason());
     ImGui::EndPopup();
    }
    ImGui::SameLine();
@@ -1770,7 +1783,7 @@ struct UI {
   open_character_sheet=false;
   if(quit_dialog) { ImGui::OpenPopup("Close game"); quit_dialog=false; }
   if(ImGui::BeginPopupModal("Close game",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-   ImGui::TextWrapped(c.ready()?"Save this character and close Deluxe?":"Return to normal play to save. You can finish the current menu first.");
+   ImGui::TextWrapped("%s",c.ready()?"Save this character and close Deluxe?":c.save_unavailable_reason());
    ImGui::BeginDisabled(!c.ready());
    if(ImGui::Button("Save and quit")) { c.save(true); ImGui::CloseCurrentPopup(); }
    ImGui::EndDisabled(); ImGui::SameLine();
@@ -1779,7 +1792,7 @@ struct UI {
    ImGui::EndPopup();
   }
   }
-  ImGui::EndDisabled(); ImGui::PopStyleVar();
+  ImGui::EndDisabled();
   if(!ending) prompts(); ImGui::End();
   dispatch_keys();
  }

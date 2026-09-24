@@ -29,6 +29,7 @@ int main(int argc,char **argv) {
   if(fixture.contains("prompt")) c.prompt=fixture["prompt"];
   if(fixture.contains("blast")) c.blast=fixture["blast"];
   UI ui{c}; ui.base_style=ImGui::GetStyle();
+  ui.quit_dialog=fixture.value("quit_dialog",false);
   ui.scale=std::clamp(fixture.value("scale",1.f),.75f,1.5f);
   ImGui::GetStyle().ScaleAllSizes(ui.scale); ImGui::GetStyle().FontScaleMain=ui.scale;
   for(const auto &item:c.state.value("items",json::array())) if(item.value("location","")=="Pack") { ui.selected=item.value("id",""); break; }
