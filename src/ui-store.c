@@ -540,7 +540,7 @@ static bool store_sell(struct store_context *ctx)
 	}
 
 	/* Get a quantity */
-	amt = get_quantity(NULL, obj->number);
+	amt = get_quantity_for_item(NULL, obj->number, obj);
 
 	/* Allow user abort */
 	if (amt <= 0) return false;
@@ -689,7 +689,7 @@ static bool store_purchase(struct store_context *ctx, int item, bool single)
 				num ? format(" (you have %d)", num) : "", amt);
 
 		/* Get a quantity */
-		amt = get_quantity(o_name, amt);
+		amt = get_quantity_for_item(o_name, amt, obj);
 
 		/* Allow user abort */
 		if (amt <= 0) return false;

@@ -1110,7 +1110,11 @@ int cmd_get_quantity(struct command *cmd, const char *arg, int *amt, int max)
 	if (cmd_get_arg_number(cmd, arg, amt) == CMD_OK)
 		return CMD_OK;
 
-	*amt = get_quantity(NULL, max);
+	{
+		struct object *obj = NULL;
+		(void) cmd_get_arg_item(cmd, "item", &obj);
+		*amt = get_quantity_for_item(NULL, max, obj);
+	}
 	if (*amt > 0) {
 		cmd_set_arg_number(cmd, arg, *amt);
 		return CMD_OK;

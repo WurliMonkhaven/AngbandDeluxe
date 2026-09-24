@@ -897,3 +897,8 @@ are bounded by current carried item identities and do not persist across loads.
 - New highest character levels trigger a brief amber sweep and Level N notice inside the existing XP bar, plus a matching emphasis on an available Study badge. No popup, input capture or layout shift. Loading, duplicate snapshots and restoration of drained levels are silent. Animations settings include a staged, persisted Level up flourish checkbox.
 
 - Dev tools includes Give player XP: a positive whole-number amount (up to 99,999,999), applied through native experience/level-up handling without consuming a turn. Only available during normal living-character play.
+
+
+### Native quantity picker
+
+Quantity prompts show the engine-selected item and its colour, an amount field and slider, and One / Half / All shortcuts (Half rounds down). Bounds remain engine-owned. Purchase totals are quoted per quantity using the native split-stack pricing path, including device charges, rather than estimated from a unit price. Confirm/Enter submits, Cancel/Escape aborts; adjusting controls does not advance gameplay. Original transaction confirmations remain intact.

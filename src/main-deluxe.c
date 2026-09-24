@@ -573,6 +573,25 @@ static cJSON *prompt(const char *type, const char *text, int maximum, const char
  ready = false; publish();
  string(p, "prompt_id", context_text); string(p, "type", type); string(p, "text", text);
  number(p, "maximum", maximum); string(p, "initial", initial);
+ if(streq(type,"quantity") && quantity_item) {
+  char label[512];
+  cJSON *item=cJSON_CreateObject();
+  describe(quantity_item,false,label,sizeof(label),0);
+  string(item,"label",label); number(item,"name_color",quantity_item->kind->base->attr);
+  number(item,"quantity",quantity_item->number); cJSON_AddItemToObject(p,"item",item);
+  if(active_store && store_operation==STORE_BUY && active_store->feat!=FEAT_HOME) {
+   cJSON *prices=cJSON_CreateArray(); int n;
+   /* Quote the exact split stack, including its share of device charges. */
+   for(n=1;n<=maximum;++n) {
+    struct object *part=object_new();
+    object_copy_amt(part,quantity_item,n);
+    cJSON_AddItemToArray(prices,cJSON_CreateNumber(price_item(active_store,part,false,n)));
+    object_delete(NULL,NULL,&part);
+   }
+   cJSON_AddItemToObject(p,"purchase_totals",prices); number(p,"gold",player->au);
+  }
+ }
+
  if(textui_rest_prompt) string(p,"selection_kind","rest");
  if(spell_selection) {
   string(p,"selection_kind","spell"); json_bool(p,"browse",spell_browsing);

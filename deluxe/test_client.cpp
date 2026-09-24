@@ -882,6 +882,16 @@ int main(int argc,char **argv) {
   check(FloorItems::collect(floor_state).size()==2,"Current pile includes uncarryable items but excludes distant and owned items");
   floor_state["phase"]="store";
   check(FloorItems::collect(floor_state).empty(),"Floor section is limited to dungeon play");
+  check(QuantityPicker::half(5)==2 && QuantityPicker::half(1)==1,"Quantity halves round down and remain usable");
+  check(!QuantityPicker::valid(0,5) && !QuantityPicker::valid(6,5) && QuantityPicker::valid(5,5),"Quantity bounds protect native replies");
+  Connection quantity_connection;
+  quantity_connection.prompt={{"type","quantity"},{"maximum",5},{"item",{{"label","5 Rations of Food"},{"name_color",3}}},{"gold",30},{"purchase_totals",json::array({5,10,15,20,25})}};
+  QuantityPicker picker;
+  for(int n: {1,3,5,0,6}) {
+   picker.amount=n;
+   ImGui::NewFrame(); ImGui::Begin("Quantity test"); picker.draw(quantity_connection,false); ImGui::End(); ImGui::Render();
+  }
+  check(quantity_connection.outgoing.empty(),"Changing quantity must not execute an action before confirmation");
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";

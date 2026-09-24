@@ -260,7 +260,7 @@ static void player_pickup_aux(struct player *p, struct object *obj,
 		if (auto_max)
 			num = auto_max;
 		else
-			num = get_quantity(NULL, max);
+			num = get_quantity_for_item(NULL, max, obj);
 		if (!num) return;
 		picked_up = floor_object_for_use(p, obj, num, false, &dummy);
 		inven_carry(p, picked_up, true, domsg);

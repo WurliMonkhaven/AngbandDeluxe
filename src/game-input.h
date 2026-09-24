@@ -70,6 +70,9 @@ extern bool (*check_break_hook)(bool user_event, int messaging);
 
 bool get_string(const char *prompt, char *buf, size_t len);
 int get_quantity(const char *prompt, int max);
+/* Optional presentation context; does not change quantity rules. */
+extern const struct object *quantity_item;
+int get_quantity_for_item(const char *prompt, int max, const struct object *obj);
 bool get_check(const char *prompt);
 bool get_com(const char *prompt, char *command);
 bool get_rep_dir(int *dir, bool allow_none);

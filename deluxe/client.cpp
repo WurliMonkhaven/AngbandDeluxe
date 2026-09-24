@@ -420,6 +420,7 @@ static void properties(const json &value) {
 #include "monster_feedback.h"
 #include "dungeon_tooltip.h"
 #include "rest_dialog.h"
+#include "quantity_picker.h"
 #include "message_history.h"
 #include "birth_panel.h"
 #include "quickbar.h"
@@ -1313,6 +1314,7 @@ struct UI {
   if(!answer.empty()) { c.answer(answer); return true; }
   return false;
  }
+ QuantityPicker quantity_picker;
  void prompts() {
   if(c.prompt.empty()) return;
   auto id=c.prompt.value("prompt_id","");
@@ -1322,13 +1324,16 @@ struct UI {
   const bool spell_selection=c.prompt.value("selection_kind","")=="spell";
   if(fresh) { last_prompt=id; SDL_strlcpy(prompt_text,c.prompt.value("initial","").c_str(),sizeof(prompt_text)); }
   const bool editing_inscription=inscription_edit && c.prompt.value("type","")=="text";
-  const char *prompt_title=rest_selection?"Rest":editing_inscription?"Item inscription":"Angband asks";
+  const bool quantity_selection=c.prompt.value("type","")=="quantity";
+  const char *prompt_title=quantity_selection?"Choose quantity":rest_selection?"Rest":editing_inscription?"Item inscription":"Angband asks";
   if(!ImGui::IsPopupOpen(prompt_title)) ImGui::OpenPopup(prompt_title);
+  if(quantity_selection) ImGui::SetNextWindowSize(ImVec2(std::min(ImGui::GetMainViewport()->WorkSize.x-24,ImGui::GetFontSize()*30),0),ImGuiCond_Always);
   if(item_selection || spell_selection) ImGui::SetNextWindowSize(ImVec2(std::min(ImGui::GetMainViewport()->WorkSize.x-24,ImGui::GetFontSize()*48),0),ImGuiCond_Always);
   if(ImGui::BeginPopupModal(prompt_title,nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
    if(!rest_selection) ImGui::TextWrapped("%s",c.prompt.value("text","").c_str());
    auto type=c.prompt.value("type",""); bool answered=false;
    if(rest_selection) { answered=rest_dialog.draw(c,fresh); }
+   else if(quantity_selection) { answered=quantity_picker.draw(c,fresh); }
    else if(type=="confirmation") {
     if(ImGui::Button("Yes")) { c.answer(true); answered=true; } ImGui::SameLine();
     if(ImGui::Button("No")) { c.answer(false); answered=true; }
@@ -1348,8 +1353,7 @@ struct UI {
     if(fresh) ImGui::SetKeyboardFocusHere();
     const bool submitted=ImGui::InputText("##answer",prompt_text,std::min(sizeof(prompt_text),size_t(std::max(0,c.prompt.value("maximum",4095)))+1),ImGuiInputTextFlags_EnterReturnsTrue);
     if(ImGui::Button(editing_inscription?"Save inscription":"OK") || submitted) {
-     if(type=="quantity") { try { c.answer(std::stoi(prompt_text)); answered=true; } catch(...) { c.notice("Enter a number."); } }
-     else { c.answer(std::string(prompt_text)); answered=true; }
+     c.answer(std::string(prompt_text)); answered=true;
     }
    }
    if(type!="choice") ImGui::SameLine();

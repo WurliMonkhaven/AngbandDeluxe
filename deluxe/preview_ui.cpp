@@ -26,6 +26,7 @@ int main(int argc,char **argv) {
   if(fixture.contains("previous_state")) { c.inventory_changes.update(fixture["previous_state"]); c.level_feedback.update(fixture["previous_state"],double(SDL_GetTicksNS())/1e9); }
   c.receive({{"kind","event"},{"event","state.changed"},{"data",fixture.at("state")}});
   if(fixture.contains("level_elapsed")) c.level_feedback.started=double(SDL_GetTicksNS())/1e9-fixture["level_elapsed"].get<double>();
+  if(fixture.contains("prompt")) c.prompt=fixture["prompt"];
   UI ui{c}; ui.base_style=ImGui::GetStyle();
   ui.scale=std::clamp(fixture.value("scale",1.f),.75f,1.5f);
   ImGui::GetStyle().ScaleAllSizes(ui.scale); ImGui::GetStyle().FontScaleMain=ui.scale;
