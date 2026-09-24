@@ -24,7 +24,7 @@ struct StorePanel {
    heading=store.value("name",home?"Home":"Stock");
    if(store.contains("owner")) heading+=" — "+store.value("owner","");
   }
-  ImGui::SeparatorText(heading.c_str());
+  DeluxeTheme::section(heading.c_str());
   const float rows_height=std::max(ImGui::GetTextLineHeightWithSpacing()*3,height*.43f);
   if(ImGui::BeginTable("List",2+(!stock)+(!home),ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,rows_height))) {
    ImGui::TableSetupColumn("Item",ImGuiTableColumnFlags_WidthStretch,3);
@@ -38,7 +38,7 @@ struct StorePanel {
     ImGui::PushID(i); ImGui::TableNextRow(); ImGui::TableNextColumn();
     const auto label=o->value("label","");
     ImGui::PushStyleColor(ImGuiCol_Text,color(o->value("name_color",1)));
-    if(ImGui::Selectable(label.c_str(),selection==i,ImGuiSelectableFlags_SpanAllColumns)) selection=i;
+    if(DeluxeTheme::table_choice(label.c_str(),selection==i)) selection=i;
     if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",label.c_str());
     ImGui::PopStyleColor();
     ImGui::TableNextColumn(); ImGui::Text("%d",o->value("quantity",0));
@@ -92,7 +92,7 @@ struct StorePanel {
    for(const auto &id:entry->value("compare_with",json::array())) {
     const auto *equipped=item(c,id.get<std::string>());
     if(!equipped) continue;
-    ImGui::SeparatorText("Currently equipped");
+    DeluxeTheme::section("Currently equipped");
     ImGui::PushStyleColor(ImGuiCol_Text,color(equipped->value("name_color",1)));
     ImGui::TextWrapped("%s — %s",display_label(equipped->value("location","")).c_str(),equipped->value("label","").c_str());
     ImGui::PopStyleColor();

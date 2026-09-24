@@ -423,8 +423,8 @@ struct Quickbar {
    if(ImGui::InvisibleButton("Slot",ImVec2(width,h)) && usable && !dragging) activated=i;
    const bool hovered=ImGui::IsItemHovered();
    auto *draw=ImGui::GetWindowDrawList();
-   draw->AddRectFilled(a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(hovered?ImVec4(.20f,.28f,.38f,1):ImVec4(.08f,.12f,.17f,1)),3);
-   draw->AddRect(a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(usable?ImVec4(.35f,.55f,.72f,1):ImVec4(.22f,.25f,.29f,1)),3);
+   draw->AddRectFilled(a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(hovered?ImVec4(.13f,.23f,.20f,1):ImVec4(.04f,.075f,.09f,1)),3);
+   draw->AddRect(a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(usable?ImVec4(.32f,.49f,.40f,1):ImVec4(.18f,.24f,.25f,1)),3);
    const auto ink=usable?appearance_color(s[i]):ImGui::GetColorU32(ImGuiCol_TextDisabled);
    if(!s[i].is_null()) {
     content(draw,a,width,h,s[i],ink);
@@ -434,6 +434,7 @@ struct Quickbar {
      draw->AddText(ImVec2(a.x+std::max(2.f,width-measure.x-3),a.y+h-ImGui::GetFontSize()-2),ink,count.c_str());
     }
    }
+   DeluxeTheme::corners(draw,a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(usable?DeluxeTheme::green():ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)),h*.12f);
    const auto number=std::to_string((i+1)%10); draw->AddText(ImVec2(a.x+3,a.y+2),ImGui::GetColorU32(ImGuiCol_TextDisabled),number.c_str());
    drag_source(s[i],i);
    drop_target(i);

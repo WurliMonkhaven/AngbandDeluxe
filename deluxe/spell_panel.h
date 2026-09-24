@@ -32,7 +32,7 @@ struct SpellPanel {
     ImGui::PushID(id.c_str()); ImGui::TableNextRow(); ImGui::TableNextColumn();
     const bool cast=s.value("can_cast",false), study=s.value("can_study",false);
     ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(cast||study?ImGuiCol_Text:ImGuiCol_TextDisabled));
-    if(ImGui::Selectable(label.c_str(),selection==id,ImGuiSelectableFlags_SpanAllColumns|ImGuiSelectableFlags_AllowDoubleClick)) {
+    if(DeluxeTheme::table_choice(label.c_str(),selection==id,ImGuiSelectableFlags_SpanAllColumns|ImGuiSelectableFlags_AllowDoubleClick)) {
      selection=id; if(ImGui::IsMouseDoubleClicked(0)) activated=id;
     }
     if(bar && book && Quickbar::carried(*book)) bar->drag_source(Quickbar::spell_binding(*book,s));

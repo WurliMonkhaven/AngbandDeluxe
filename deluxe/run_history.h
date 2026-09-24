@@ -43,7 +43,7 @@ struct RunHistory {
  // 1 returns to menu/list; 2 starts creation with the previous race/class.
  int draw(bool can_leave=true) {
   if(current.is_null()) {
-   ImGui::SeparatorText("Graveyard");
+   DeluxeTheme::section("Graveyard");
    ImGui::TextWrapped("The lives and last moments of your adventurers.");
    if(ImGui::Button("Back to characters")) { browsing=false; return 1; }
    ImGui::SameLine(); ImGui::SetNextItemWidth(ImGui::GetFontSize()*22);

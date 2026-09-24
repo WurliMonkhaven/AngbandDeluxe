@@ -9,6 +9,19 @@ struct CharacterOverview {
   const float pad=ImGui::GetStyle().FramePadding.x;
   const float y=a.y+(b.y-a.y-ImGui::GetFontSize())*.5f;
   auto *draw=ImGui::GetWindowDrawList(); const auto ink=ImGui::GetColorU32(ImGuiCol_Text);
+  // A lit glass face, a thin bright edge, and fine scale marks below the text.
+  const float edge=a.x+(b.x-a.x)*std::clamp(fraction,0.f,1.f);
+  if(edge>a.x) {
+   const auto top=ImGui::GetColorU32(ImVec4(fill.x*1.15f,fill.y*1.15f,fill.z*1.15f,1));
+   const auto bottom=ImGui::GetColorU32(ImVec4(fill.x*.55f,fill.y*.55f,fill.z*.55f,1));
+   draw->AddRectFilledMultiColor(a,ImVec2(edge,b.y),top,top,bottom,bottom);
+   draw->AddLine(ImVec2(a.x+1,a.y+1),ImVec2(edge,a.y+1),ImGui::GetColorU32(ImVec4(fill.x+.18f,fill.y+.18f,fill.z+.18f,.8f)));
+  }
+  for(int i=1;i<10;++i) {
+   const float x=a.x+(b.x-a.x)*i/10.f;
+   draw->AddLine(ImVec2(x,b.y-3),ImVec2(x,b.y-1),IM_COL32(180,210,200,65));
+  }
+  draw->AddRect(a,b,ImGui::GetColorU32(ImGuiCol_Border),2);
   const float value_width=ImGui::CalcTextSize(value.c_str()).x;
   draw->PushClipRect(a,b,true);
   if(ImGui::CalcTextSize(label).x+value_width+3*pad<b.x-a.x) draw->AddText(ImVec2(a.x+pad,y),ink,label);
@@ -25,8 +38,9 @@ struct CharacterOverview {
   const float height=ImGui::GetFontSize()*(stacked?2.f:1.f)+2*pad;
   const ImVec2 b(a.x+width,a.y+height);
   auto *draw=ImGui::GetWindowDrawList();
-  draw->AddRectFilled(a,b,ImGui::GetColorU32(ImVec4(.18f,.21f,.25f,.35f)),pad*.5f);
-  draw->AddRect(a,b,ImGui::GetColorU32(ImVec4(.40f,.45f,.52f,.25f)),pad*.5f);
+  draw->AddRectFilledMultiColor(a,b,IM_COL32(23,37,40,255),IM_COL32(17,28,32,255),IM_COL32(12,22,27,255),IM_COL32(17,28,31,255));
+  draw->AddRect(a,b,ImGui::GetColorU32(ImGuiCol_Border),2);
+  DeluxeTheme::corners(draw,a,b,IM_COL32(74,109,92,180),pad);
   draw->PushClipRect(a,b,true);
   draw->AddText(ImVec2(a.x+pad,a.y+pad),ImGui::GetColorU32(ImGuiCol_TextDisabled),label);
   draw->AddText(ImVec2(a.x+pad+(stacked?0:label_width+gap),a.y+pad+(stacked?ImGui::GetFontSize():0)),ImGui::GetColorU32(ImGuiCol_Text),value.c_str());
@@ -39,7 +53,7 @@ struct CharacterOverview {
  }
  static void section(const char *label) {
   ImGui::Dummy(ImVec2(0,ImGui::GetFontSize()*.55f));
-  ImGui::SeparatorText(label);
+  DeluxeTheme::section(label);
   ImGui::Dummy(ImVec2(0,ImGui::GetFontSize()*.1f));
  }
  static bool draw(const json &p,bool can_open,bool *open_spells=nullptr) {
@@ -54,8 +68,13 @@ struct CharacterOverview {
    ImGui::TableSetupColumn("Details",ImGuiTableColumnFlags_WidthFixed,ImGui::CalcTextSize("Details").x+2*ImGui::GetStyle().FramePadding.x);
    ImGui::TableNextRow(); ImGui::TableNextColumn();
    if(ImGui::CalcTextSize(identity.c_str()).x+2*ImGui::GetStyle().SeparatorTextPadding.x<=ImGui::GetContentRegionAvail().x)
-    ImGui::SeparatorText(identity.c_str());
-   else { ImGui::TextWrapped("%s",identity.c_str()); ImGui::Separator(); }
+    DeluxeTheme::section(identity.c_str());
+   else {
+    auto name=p.value("name",""); if(name.empty()) name=p.value("race","")+" "+p.value("class","");
+    if(!title.empty()) name+=" / "+display_label(title);
+    DeluxeTheme::section(name.c_str());
+    ImGui::TextDisabled("%s %s / Lv %d",p.value("race","").c_str(),p.value("class","").c_str(),p.value("level",1));
+   }
    ImGui::TableNextColumn(); ImGui::BeginDisabled(!can_open); open=ImGui::Button("Details"); ImGui::EndDisabled();
    if(ImGui::IsItemHovered()) ImGui::SetTooltip("Open character details");
    ImGui::EndTable();
@@ -91,6 +110,7 @@ struct CharacterOverview {
    ImGui::TableNextRow();
    for(size_t i=0;i<p["stats"].size();++i) {
     ImGui::TableNextColumn();
+    ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,IM_COL32(18,31,34,255));
     const int v=p["stats"][i]; char value[32];
     if(v>18) SDL_snprintf(value,sizeof(value),"18/%02d",v-18); else SDL_snprintf(value,sizeof(value),"%d",v);
     auto centered=[&](const char *text,bool muted) {

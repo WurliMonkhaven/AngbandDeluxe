@@ -62,6 +62,7 @@ static bool matches(std::string text, std::string term) {
  std::transform(term.begin(), term.end(), term.begin(), lower);
  return text.find(term) != std::string::npos;
 }
+#include "ui_theme.h"
 #include "engine_options.h"
 #include "audio_player.h"
 
@@ -815,7 +816,7 @@ struct UI {
  }
  void grid(float height) {
   if (!c.state.contains("terminal")) { launcher(); return; }
-  ImGui::PushStyleColor(ImGuiCol_Border,owns_keyboard()?ImVec4(.35f,.58f,.78f,1):ImVec4(.16f,.19f,.23f,1));
+  ImGui::PushStyleColor(ImGuiCol_Border,owns_keyboard()?DeluxeTheme::green():ImVec4(.16f,.24f,.24f,1));
   ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize,display_scale);
   ImGui::BeginChild("Dungeon",ImVec2(0,height),ImGuiChildFlags_Borders,
    ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
@@ -1046,7 +1047,7 @@ struct UI {
   return id=="core.browse"?"Browse spells":id=="core.wield"?"Wield / wear":id=="core.use"?"Use":id=="core.quaff"?"Quaff":id=="core.read"?"Read":id=="core.eat"?"Eat":id=="core.fire"?"Fire":id=="core.throw"?"Throw":id=="core.takeoff"?"Take off":id=="core.drop"?"Drop":"Inscribe";
  }
  void items() {
-  if(ImGui::BeginTabBar("Item categories")) {
+  if(ImGui::BeginTabBar("Item categories",ImGuiTabBarFlags_DrawSelectedOverline)) {
    const char *tabs[]={"Pack","Equipment","Quiver"};
    for(int category=0;category<3;++category) if(ImGui::BeginTabItem(tabs[category])) {
     ImGui::PushID(tabs[category]); items_category(category); ImGui::PopID();
@@ -1056,7 +1057,7 @@ struct UI {
   }
  }
  void items_category(int category) {
-  ImGui::InputTextWithHint("##items","Search items",item_filter,sizeof(item_filter));
+  ImGui::SetNextItemWidth(-1); ImGui::InputTextWithHint("##items","Search items",item_filter,sizeof(item_filter));
   if(!c.state.contains("items")) return;
   std::vector<const json*> values;
   for(const auto &o:c.state["items"]) {
@@ -1078,7 +1079,7 @@ struct UI {
     auto id=o.value("id",""); ImGui::PushID(id.c_str());
     ImGui::TableNextRow(); ImGui::TableNextColumn();
     ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
-    if(ImGui::Selectable(label.c_str(),selected==id,ImGuiSelectableFlags_SpanAllColumns)) selected=id;
+    if(DeluxeTheme::table_choice(label.c_str(),selected==id)) selected=id;
     ImGui::PopStyleColor();
     if(quickbar_enabled) quickbar.drag_source(Quickbar::default_item_binding(o));
     if(ImGui::BeginPopupContextItem("Item actions")) {
@@ -1108,7 +1109,7 @@ struct UI {
   }
   for(const auto *item:values) if(item->value("id","")==selected) {
    const auto &o=*item;
-   ImGui::SeparatorText("Inspection");
+   DeluxeTheme::section("Inspection");
    ImGui::BeginDisabled(!c.ready());
    bool first=true;
    for(const auto &action:o.value("actions",json::array())) {
@@ -1218,7 +1219,7 @@ struct UI {
     if(!option) ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     ImGui::TextUnformatted(option?option->value("shortcut","").c_str():""); ImGui::TableNextColumn();
     ImGui::PushStyleColor(ImGuiCol_Text,option?color(item->value("name_color",1)):ImGui::GetColorU32(ImGuiCol_TextDisabled));
-    if(ImGui::Selectable(item->value("label","").c_str(),prompt_item==id,ImGuiSelectableFlags_SpanAllColumns|ImGuiSelectableFlags_AllowDoubleClick)) {
+    if(DeluxeTheme::table_choice(item->value("label","").c_str(),prompt_item==id,ImGuiSelectableFlags_SpanAllColumns|ImGuiSelectableFlags_AllowDoubleClick)) {
      prompt_item=id;
      if(option && ImGui::IsMouseDoubleClicked(0)) answer=option->value("id","");
     }
@@ -1437,8 +1438,9 @@ struct UI {
      ImVec2(divider.x+width,divider.y+divider_height*.5f),
      ImGui::GetColorU32(highlighted?ImGuiCol_SeparatorHovered:ImGuiCol_Separator),display_scale);
    }
-   ImGui::BeginChild("Message history");
-   ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Messages"); ImGui::SameLine();
+   ImGui::BeginChild("Message history",ImVec2(0,0),ImGuiChildFlags_AlwaysUseWindowPadding);
+   DeluxeTheme::panel();
+   ImGui::AlignTextToFramePadding(); ImGui::TextColored(DeluxeTheme::green(),"Messages"); ImGui::SameLine();
    if(c.state.value("message_pending",false)) { ImGui::TextColored(ImVec4(1,.73f,.3f,1),"WAITING"); ImGui::SameLine(); }
    const float icon=ImGui::GetFrameHeight();
    const auto icon_pos=ImGui::GetCursorScreenPos();
@@ -1460,17 +1462,25 @@ struct UI {
     ImGui::InputTextWithHint("##messages","Search messages",message_filter,sizeof(message_filter));
    }
    for(const auto &m:c.messages) {
-    auto text=m.value("text",""); if(matches(text,message_filter)) ImGui::TextWrapped("%s%s",text.c_str(),m.value("count",1)>1?(" (x"+std::to_string(m.value("count",1))+")").c_str():"");
+    auto text=m.value("text",""); if(!matches(text,message_filter)) continue;
+    const auto a=ImGui::GetCursorScreenPos();
+    ImGui::Indent(ImGui::GetFontSize()*.65f);
+    ImGui::TextWrapped("%s%s",text.c_str(),m.value("count",1)>1?(" (x"+std::to_string(m.value("count",1))+")").c_str():"");
+    const auto bottom=ImGui::GetItemRectMax().y; ImGui::Unindent(ImGui::GetFontSize()*.65f);
+    const auto group=m.value("group","");
+    const auto ink=m.value("system",false)?IM_COL32(100,160,185,180):group=="combat"?IM_COL32(200,143,95,180):group=="loot"?IM_COL32(177,169,98,180):IM_COL32(91,138,113,160);
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x+1,a.y+3),ImVec2(a.x+1,bottom-2),ink,2);
    }
    ImGui::EndChild();
    ImGui::EndChild(); ImGui::TableNextColumn();
-   ImGui::BeginChild("Panels",ImVec2(0,0),ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
+   ImGui::BeginChild("Panels",ImVec2(0,0),ImGuiChildFlags_AlwaysUseWindowPadding,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
+   DeluxeTheme::panel();
    ImGui::SetScrollX(0); ImGui::SetScrollY(0);
    character();
    ImGui::Dummy(ImVec2(0,ImGui::GetTextLineHeight()*.45f));
    ImGui::Separator();
    const bool targeting_active=c.state.contains("targeting") || c.state.value("aiming",false) || c.state.value("direction_prompt",false);
-   if(ImGui::BeginTabBar("panels")) {
+   if(ImGui::BeginTabBar("panels",ImGuiTabBarFlags_DrawSelectedOverline)) {
     if(targeting_active && ImGui::BeginTabItem("Look / Target",nullptr,targeting_was_active?ImGuiTabItemFlags_None:ImGuiTabItemFlags_SetSelected)) {
      ImGui::BeginChild("Target content"); targeting_panel(); ImGui::EndChild(); ImGui::EndTabItem();
     }
@@ -1560,7 +1570,7 @@ int main(int argc,char **argv) {
  IMGUI_CHECKVERSION(); ImGui::CreateContext();
  auto &io=ImGui::GetIO(); io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad;
  io.Fonts->AddFontFromFileTTF(DELUXE_FONT_FILE,18.f);
- ImGui::StyleColorsDark(); ImGui::GetStyle().WindowRounding=5;
+ DeluxeTheme::apply();
  ImGui::GetStyle().FontSizeBase=18.f;
  ImGui_ImplSDL3_InitForSDLGPU(window);
  ImGui_ImplSDLGPU3_InitInfo info{}; info.Device=gpu; info.ColorTargetFormat=SDL_GetGPUSwapchainTextureFormat(gpu,window); info.MSAASamples=SDL_GPU_SAMPLECOUNT_1;

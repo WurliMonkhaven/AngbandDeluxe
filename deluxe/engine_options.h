@@ -61,7 +61,7 @@ struct EngineOptions {
     if(id=="use_sound") continue; // Deluxe sound is controlled in the Audio tab.
     const auto note=help(id);
     if(std::string(note.group)!=group || !matches(label+" "+id+" "+note.text+" "+group,search)) continue;
-    if(!heading) { ImGui::Spacing(); ImGui::SeparatorText(group); heading=true; }
+    if(!heading) { ImGui::Spacing(); DeluxeTheme::section(group); heading=true; }
     any=true; ImGui::PushID(id.c_str());
     bool value=values[id].get<bool>();
     if(ImGui::Checkbox("##value",&value)) values[id]=value;
@@ -84,7 +84,7 @@ struct EngineOptions {
   bool heading=false;
   for(const auto &n:numbers) {
    if(!matches(std::string(n.label)+" "+n.id+" "+n.help,search)) continue;
-   if(!heading) { ImGui::Spacing(); ImGui::SeparatorText("Warnings and timing"); heading=true; }
+   if(!heading) { ImGui::Spacing(); DeluxeTheme::section("Warnings and timing"); heading=true; }
    any=true; ImGui::TextUnformatted(n.label);
    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",n.help);
    int value=values[n.id].get<int>()*n.multiplier;

@@ -1,7 +1,7 @@
 // Native, read-only character sheet. Values and descriptions belong to the engine.
 struct CharacterSheet {
  static void rows(const json &sheet,const char *group) {
-  ImGui::SeparatorText(group);
+  DeluxeTheme::section(group);
   ImGui::PushID(group);
   if(ImGui::BeginTable("Values",2,ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_RowBg)) {
    ImGui::TableSetupColumn("Label",ImGuiTableColumnFlags_WidthStretch,1.2f);
@@ -17,7 +17,7 @@ struct CharacterSheet {
   ImGui::PopID();
  }
  static void attributes(const json &sheet) {
-  ImGui::SeparatorText("Attributes");
+  DeluxeTheme::section("Attributes");
   if(ImGui::BeginTable("Stat breakdown",7,ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV)) {
    for(const char *label:{"Stat","Base","Race","Class","Gear","Best","Current"}) ImGui::TableSetupColumn(label);
    ImGui::TableHeadersRow();
@@ -43,7 +43,7 @@ struct CharacterSheet {
     ImGui::EndChild(); ImGui::EndTabItem();
    }
    if(ImGui::BeginTabItem("Resistances & abilities")) {
-    ImGui::BeginChild("Defences scroll"); ImGui::SeparatorText("Resistances");
+    ImGui::BeginChild("Defences scroll"); DeluxeTheme::section("Resistances");
     if(ImGui::BeginTable("Resistances",2,ImGuiTableFlags_RowBg|ImGuiTableFlags_SizingStretchSame)) {
      for(const auto &row:sheet.value("resistances",json::array())) {
       ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::TextUnformatted(row.value("label","").c_str());
@@ -53,7 +53,7 @@ struct CharacterSheet {
      }
      ImGui::EndTable();
     }
-    ImGui::SeparatorText("Abilities & sustains");
+    DeluxeTheme::section("Abilities & sustains");
     const auto abilities=sheet.value("abilities",json::array());
     if(abilities.empty()) ImGui::TextDisabled("No known abilities.");
     for(const auto &row:abilities) {
@@ -63,7 +63,7 @@ struct CharacterSheet {
     ImGui::EndChild(); ImGui::EndTabItem();
    }
    if(ImGui::BeginTabItem("Background")) {
-    ImGui::BeginChild("Background scroll"); ImGui::SeparatorText("History");
+    ImGui::BeginChild("Background scroll"); DeluxeTheme::section("History");
     ImGui::TextWrapped("%s",sheet.value("history","").c_str()); rows(sheet,"Background");
     ImGui::EndChild(); ImGui::EndTabItem();
    }

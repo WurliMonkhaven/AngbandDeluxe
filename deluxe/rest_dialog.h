@@ -11,14 +11,14 @@ struct RestDialog {
  template<class C> bool draw(C &c,bool fresh) {
   if(fresh) mode=0;
   ImGui::PushTextWrapPos(ImGui::GetCursorPosX()+ImGui::GetFontSize()*32);
-  ImGui::SeparatorText("Recover");
+  DeluxeTheme::section("Recover");
   ImGui::RadioButton("Fully recovered",&mode,0);
   if(mode==0) ImGui::TextWrapped("Recover HP and mana, wait out harmful conditions, and finish pending recall or descent. Uses Angband's normal recovery rules.");
   ImGui::RadioButton("HP and mana",&mode,1);
   if(mode==1) ImGui::TextWrapped("Stop when both are full.");
   ImGui::RadioButton("HP or mana",&mode,2);
   if(mode==2) ImGui::TextWrapped("Stop as soon as either is full, even if the other is still low.");
-  ImGui::SeparatorText("Timed rest");
+  DeluxeTheme::section("Timed rest");
   ImGui::RadioButton("Number of turns",&mode,3);
   ImGui::BeginDisabled(mode!=3);
   ImGui::SetNextItemWidth(ImGui::GetFontSize()*10);

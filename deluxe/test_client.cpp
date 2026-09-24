@@ -302,7 +302,7 @@ int main(int argc,char **argv) {
   check(!target_connector(ImVec2(0,0),ImVec2(0,0),10,20,connector_start,connector_end),"Same-cell connector must not divide by zero");
   // Exercise the real store layout headlessly, including empty home, shrinking
   // stock and modal-busy states. No desktop input or native window is used.
-  ImGui::CreateContext();
+  ImGui::CreateContext(); DeluxeTheme::apply();
   auto &io=ImGui::GetIO(); io.IniFilename=nullptr; io.DisplaySize=ImVec2(1280,800);
   unsigned char *pixels; int atlas_w,atlas_h;
   io.Fonts->GetTexDataAsRGBA32(&pixels,&atlas_w,&atlas_h); io.Fonts->SetTexID(1);

@@ -847,3 +847,21 @@ Sleeping monsters defaults on and follows staged Save and Close / Cancel.
 World entry establishes the playing phase before the first command prompt, so
 startup study reminders use the normal panels and continuation ribbon even when
 they pause character loading for acknowledgement.
+
+### Native visual style
+
+Native UI uses a shared terminal-inspired theme: blue-black surfaces, muted
+phosphor-green interaction accents, warm amber secondary cues, and readable
+off-white text. Game item colours and HP/SP/Food semantics remain unchanged.
+Section titles use etched rails and subtle gradient backplates; resource meters
+have illuminated faces, fine scale marks and high-contrast text. Metric tiles
+and quickbar slots use small corner brackets. Selected tabs have a green edge.
+Messages have quiet category-coloured margin marks, with their original text.
+
+Table selection still spans a row, while names clip to their own column. Native
+shops, character creation, the character sheet and dialogs share the same visual
+vocabulary. Styling lives in deluxe/ui_theme.h and scales from the base style;
+no textures, animation loops, extra GPU passes or backend requests are required.
+The optional deluxe-ui-preview build target renders captured protocol fixtures
+to offscreen BMPs for visual review without opening or controlling a desktop
+window. Its fixture contains state, catalog and commands, plus optional scale.

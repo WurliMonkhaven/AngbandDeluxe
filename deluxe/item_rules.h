@@ -46,7 +46,7 @@ struct ItemRules {
     if(rules.empty()) ImGui::TextDisabled("No configured rules.");
     for(const auto &r:rules) {
      ImGui::PushID(r.value("id","").c_str());
-     ImGui::SeparatorText(display_label(r.value("type","")).c_str());
+     DeluxeTheme::section(display_label(r.value("type","")).c_str());
      ImGui::TextWrapped("%s",r.value("label","").c_str());
      ImGui::TextWrapped("%s",r.value("value","").c_str());
      ImGui::BeginDisabled(!c.ready());

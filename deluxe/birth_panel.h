@@ -44,7 +44,7 @@ struct BirthPanel {
    for(int i=0;i<5;++i) { ImGui::TableNextColumn(); ImGui::TextDisabled("%s",stats[i]); ImGui::Text("%+d",selected["modifiers"][i].get<int>()); }
    ImGui::EndTable();
   }
-  ImGui::Spacing(); ImGui::SeparatorText("Traits");
+  ImGui::Spacing(); DeluxeTheme::section("Traits");
   const int columns=ImGui::GetContentRegionAvail().x>ImGui::GetFontSize()*32?3:2;
   if(ImGui::BeginTable("Trait summary",columns,ImGuiTableFlags_SizingStretchSame)) {
    const int hp=selected.value("hit_die",0),xp=selected.value("experience",0);
@@ -55,7 +55,7 @@ struct BirthPanel {
    ImGui::EndTable();
   }
   if(!selected.at("abilities").empty()) {
-   ImGui::Spacing(); ImGui::SeparatorText("Abilities");
+   ImGui::Spacing(); DeluxeTheme::section("Abilities");
    int index=0;
    for(const auto &ability:selected.at("abilities")) {
     ImGui::PushID(index++); ability_card(ability); ImGui::PopID();
@@ -99,7 +99,7 @@ struct BirthPanel {
   }
   if(!history_edited) SDL_strlcpy(history,b.value("history","").c_str(),sizeof(history));
   const char *steps[]={"Race","Class","Attributes","Identity","Review"};
-  ImGui::SeparatorText("Create a character");
+  DeluxeTheme::section("Create a character");
   ImGui::Text("Step %d of 5 - %s",step+1,steps[step]);
   ImGui::ProgressBar(float(step+1)/5,ImVec2(-1,4),"");
   ImGui::Spacing();
@@ -111,7 +111,7 @@ struct BirthPanel {
    ImGui::TableSetupColumn("Choices",ImGuiTableColumnFlags_WidthStretch,.62f);
    if(wide) ImGui::TableSetupColumn("Preview",ImGuiTableColumnFlags_WidthStretch,.38f);
    ImGui::TableNextColumn();
-   ImGui::SeparatorText(steps[step]);
+   DeluxeTheme::section(steps[step]);
    if(step<2) {
     if(step==0 && b.value("quickstart",false) && ImGui::Button("Use previous character")) { act(c,"quickstart"); step=4; }
     choices(c,b,step==0?"races":"classes",step==0?"race":"class");
@@ -158,7 +158,7 @@ struct BirthPanel {
     bool enabled=opt.value("value",false);
     if(ImGui::Checkbox(opt.value("description","").c_str(),&enabled)) act(c,"option",{{"option",opt["id"]},{"value",enabled}});
    }
-   ImGui::TableNextColumn(); ImGui::SeparatorText("Character preview");
+   ImGui::TableNextColumn(); DeluxeTheme::section("Character preview");
    ImGui::TextWrapped("%s",name);
    ImGui::TextWrapped("%s %s",chosen(b,"races","race").value("name","").c_str(),chosen(b,"classes","class").value("name","").c_str());
    ImGui::Spacing(); ImGui::Text("HP %d    SP %d",b.value("hp",0),b.value("sp",0));
