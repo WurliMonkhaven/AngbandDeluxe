@@ -1048,3 +1048,59 @@ remains independent. Saved file IDs are validated against the bundled catalog,
 with unknown IDs falling back to Cousine. Missing glyphs use Cousine where
 available. Dungeon geometry, hit testing and outgoing stair snapshots use actual
 font advances rather than assuming every face has Cousine's character width.
+
+
+### Customizable workspace layouts (implemented)
+
+The Layout button, immediately left of Knowledge, opens layout customization,
+Classic / Dungeon first / Command centre presets, named layouts and panel recovery.
+Customize layout unlocks panel tabs, split dividers and in-window floating controls.
+Drag tabs onto another pane's docking guides to split left/right/above/below or
+stack tabs. Right-click a tab to float or hide it. Done locks and saves the
+arrangement; Cancel restores the geometry from before editing. Gameplay inputs
+inside panels are disabled during editing.
+
+Dungeon, character overview, messages, inventory, spells, creatures, map, commands,
+More, Look / Target and quickbar use stable panel identities and shared gameplay
+state. The dungeon cannot be hidden, floated or covered by a tab group. Conditional
+panels (spells, quickbar, targeting) collapse when unavailable and remain visible
+as placeholders while editing. Study/creature shortcuts reveal the relevant panel even if previously hidden.
+Look/target activation selects its existing tab, but respects an explicitly hidden
+panel; it never creates a floating overlay automatically. Stores, birth, character sheet, settings
+and end-of-game screens keep their dedicated presentation.
+
+Current and up to 32 named layouts persist in Deluxe settings, with bounded schema
+validation and recovery from invalid layouts. Floating positions are relative to
+the available workspace and constrained inside it on resize. Recursive minimum
+pane sizes protect controls where screen space permits. Game-only CRT follows
+the dungeon draw list; full-window CRT continues to cover the whole UI.
+
+Validation includes layout model round trips, malformed and duplicate panels,
+docking and hiding invariants, and scripted offscreen mouse interaction checks
+(deluxe/test_layout_ui.py) for docking, tab stacking, float movement/resizing,
+split dividers, edit cancellation and locked layouts.
+
+Layout refinement: Panels now provides direct show/hide toggles, including outside
+edit mode; unavailable conditional panels are disabled with an explanation.
+Dungeon first hides optional tool panels, retaining character, dungeon, messages
+and the enabled quickbar. Command centre places Map and Messages in separate
+panes below the dungeon, with Inventory and optional Spells beside it. Classic
+retains the original arrangement. Preset menu tooltips describe the differences.
+
+Dungeon details is an independent dockable panel, below Character in presets.
+Character retains its own resources, stats, status badges and tracked creature.
+Layout > Lock dividers is enabled by default; disabling it permits divider
+resizing during play without unlocking panel dragging. The preference persists.
+Version 1 layouts migrate dungeon details beneath their character panel; version 2
+layouts preserve intentionally hidden dungeon details.
+
+Floating panels are movable during normal play by default, using their title bar.
+Layout > Lock floating panels disables this independently of divider locking.
+Customization always permits floating-panel movement and resizing. Positions are
+saved on drag release, and the lock preference persists across launches.
+
+Dedicated quickbar panes fit the quickbar content height (plus panel chrome),
+rather than taking a percentage of available height. Adjacent vertical space is
+returned to the other pane, and that horizontal divider cannot stretch the bar.
+Floating quickbars also fit their height; their editor resize control changes
+width only. Mixed tab groups retain flexible height for their other contents.

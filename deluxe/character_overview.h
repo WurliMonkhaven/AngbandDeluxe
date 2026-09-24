@@ -154,7 +154,19 @@ struct CharacterOverview {
   }
   if(p.value("extra_moves",0)) ImGui::Text("Extra moves: %+d",p.value("extra_moves",0));
   StatusEffects::draw(p,open_spells,level_up?level_up->intensity(now):0);
-  section("Dungeon");
+  if(p.contains("tracked_creature")) {
+   const auto &m=p["tracked_creature"];
+   section("Tracked creature");
+   if(m.value("visible",false)) {
+    ImGui::TextWrapped("%s",display_label(m.value("name","")).c_str());
+    meter("HP",std::to_string(std::max(0,m.value("hp",0)))+" / "+std::to_string(m.value("max_hp",0)),
+     resource_fraction(m.value("hp",0),m.value("max_hp",0)),ImVec4(.56f,.37f,.12f,1));
+   } else ImGui::TextDisabled("Out of sight");
+  }
+  return open;
+ }
+ static void dungeon(const json &p) {
+  DeluxeTheme::section("Dungeon");
   const char *dungeon_labels[]={"Depth","Light","Feel",""};
   const std::string dungeon_values[]={std::to_string(p.value("depth",0)),std::to_string(p.value("light",0)),p.value("feeling","—"),display_label(p.value("floor",""))};
   const std::string dungeon_tips[]={"Depth: "+std::to_string(p.value("depth_feet",p.value("depth",0)*50))+" feet","",p.value("feeling_description",""),""};
@@ -180,15 +192,6 @@ struct CharacterOverview {
   if(p.value("running",0)) ImGui::TextUnformatted("Running");
   if(p.value("repeat",0)) ImGui::Text("Repeating: %d",p.value("repeat",0));
   if(p.value("unignoring",false)) ImGui::TextUnformatted("Showing ignored items");
-  if(p.contains("tracked_creature")) {
-   const auto &m=p["tracked_creature"];
-   section("Tracked creature");
-   if(m.value("visible",false)) {
-    ImGui::TextWrapped("%s",display_label(m.value("name","")).c_str());
-    meter("HP",std::to_string(std::max(0,m.value("hp",0)))+" / "+std::to_string(m.value("max_hp",0)),
-     resource_fraction(m.value("hp",0),m.value("max_hp",0)),ImVec4(.56f,.37f,.12f,1));
-   } else ImGui::TextDisabled("Out of sight");
-  }
-  return open;
  }
+
 };

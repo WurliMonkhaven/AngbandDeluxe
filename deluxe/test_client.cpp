@@ -313,6 +313,71 @@ int main(int argc,char **argv) {
   connection.state["message_pending"]=true; connection.prompt={{"prompt_id","test"}};
   check(!ui.proceed_click(),"Structured prompts must not be dismissed by click");
   connection.prompt=json::object();
+  // Layout persistence and structural edits must preserve a single, visible dungeon.
+  {
+   WorkspaceLayout layout;
+   const auto original=layout.arrangement();
+   auto panel_node=[&](int panel) {
+    std::function<int(const WorkspaceLayout::Node&)> find=[&](const WorkspaceLayout::Node &n) -> int {
+     if(!n.axis && WorkspaceLayout::contains(n,panel)) return n.id;
+     for(const auto &child:n.children) if(int id=find(child)) return id;
+     return 0;
+    };
+    return find(layout.root);
+   };
+   check(layout.move({WorkspaceLayout::Inventory,0,5}),"Inventory can float without losing its state ID");
+   check(layout.floating.size()==1 && layout.contains(WorkspaceLayout::Inventory),"Floating panel retained");
+   check(layout.move({WorkspaceLayout::Inventory,panel_node(WorkspaceLayout::Dungeon),2}),"Dock inventory beside dungeon");
+   check(layout.floating.empty(),"Empty floating group removed after docking");
+   check(layout.move({WorkspaceLayout::Spells,panel_node(WorkspaceLayout::Inventory),0}),"Stack spells with inventory");
+   check(!layout.move({WorkspaceLayout::Dungeon,0,6}),"Dungeon cannot be hidden");
+   check(!layout.move({WorkspaceLayout::Messages,panel_node(WorkspaceLayout::Dungeon),0}),"Dungeon cannot be covered by tabs");
+   check(layout.move({WorkspaceLayout::Messages,0,6}) && !layout.contains(WorkspaceLayout::Messages),"Hide optional panel");
+   layout.reveal(WorkspaceLayout::Messages); check(layout.contains(WorkspaceLayout::Messages),"Recover hidden panel");
+   WorkspaceLayout restored; check(restored.restore(layout.arrangement()),"Round trip custom layout");
+   check(restored.contains(WorkspaceLayout::Dungeon) && restored.contains(WorkspaceLayout::Spells),"Round trip preserves panels");
+   auto malformed=original; malformed["root"]["axis"]=20;
+   const auto valid=restored.arrangement();
+   check(!restored.restore(malformed) && restored.arrangement()==valid,"Malformed layout is transactional");
+   auto duplicate=original; duplicate["floating"]={{{"node",WorkspaceLayout::encode(layout.leaf({WorkspaceLayout::Dungeon}))}}};
+   check(!restored.restore(duplicate),"Duplicate panels rejected");
+   layout.before=original; layout.editing=true;
+   check(layout.serialize()["current"]==original,"Unsaved edits must not leak into settings writes");
+   check(layout.restore(layout.before),"Cancel recovers original arrangement");
+   for(int preset=0;preset<3;++preset) { layout.preset(preset); check(restored.restore(layout.arrangement()),"Every preset is valid"); }
+   layout.preset(1);
+   check(!layout.contains(WorkspaceLayout::Inventory) && !layout.contains(WorkspaceLayout::Map) && layout.contains(WorkspaceLayout::Character),"Dungeon first hides optional panels");
+   layout.toggle(WorkspaceLayout::Inventory);
+   check(layout.contains(WorkspaceLayout::Inventory) && layout.floating.size()==1,"Visibility toggle restores a hidden panel");
+   layout.toggle(WorkspaceLayout::Inventory);
+   check(!layout.contains(WorkspaceLayout::Inventory) && layout.floating.empty(),"Visibility toggle hides a present panel");
+   layout.toggle(WorkspaceLayout::Dungeon); check(layout.contains(WorkspaceLayout::Dungeon),"Visibility toggle protects dungeon");
+   layout.preset(2);
+   std::function<bool(const WorkspaceLayout::Node&,int)> standalone=[&](const WorkspaceLayout::Node &n,int p) {
+    if(!n.axis) return n.tabs.size()==1 && n.tabs[0]==p;
+    return standalone(n.children[0],p)||standalone(n.children[1],p);
+   };
+   check(standalone(layout.root,WorkspaceLayout::Map) && standalone(layout.root,WorkspaceLayout::Messages) && standalone(layout.root,WorkspaceLayout::Spells),"Command centre has separate map, message and spell panes");
+   auto legacy=layout.arrangement(); legacy.erase("version");
+   WorkspaceLayout old; old.restore(legacy); old.move({WorkspaceLayout::DungeonDetails,0,6});
+   legacy=old.arrangement(); legacy.erase("version");
+   check(restored.restore(legacy) && restored.contains(WorkspaceLayout::DungeonDetails),"Legacy layout gains independent dungeon details");
+   restored.toggle(WorkspaceLayout::DungeonDetails);
+   check(old.restore(restored.arrangement()) && !old.contains(WorkspaceLayout::DungeonDetails),"New layout preserves hidden dungeon details");
+   old.dividers_locked=false; restored.load(old.serialize());
+   check(!restored.dividers_locked,"Divider unlock preference persists");
+   check(!old.floating_locked,"Floating panels are movable by default");
+   old.floating_locked=true; restored.load(old.serialize());
+   check(restored.floating_locked,"Floating lock preference persists");
+   layout.preset(0);
+   layout.toggle(WorkspaceLayout::Target);
+   const auto hidden_target_layout=layout.arrangement();
+   layout.reveal(WorkspaceLayout::Target,false);
+   check(layout.arrangement()==hidden_target_layout && layout.floating.empty(),"Look must respect a hidden target panel without creating an overlay");
+   layout.preset(0); layout.reveal(WorkspaceLayout::Target,false);
+   check(layout.find(panel_node(WorkspaceLayout::Target))->active==WorkspaceLayout::Target,"Look still selects an existing target tab");
+   ui.layout.preset(1); ui.layout.saved["Test layout"]=ui.layout.arrangement();
+  }
   // Legacy preferences acquire sensible defaults.
   { std::ofstream out(path); out<<R"({"scale":1.25,"game_fraction":0.65})"; }
   ui.load_settings(); check(ui.scale==1.25f && !ui.fullscreen && ui.crt==0,"Legacy settings");
@@ -429,6 +494,7 @@ int main(int argc,char **argv) {
    check(ratio>.1f && ratio<3.f,"Dungeon cell metrics must be usable");
    check(font_library.fonts[i]->GetFontBaked(18)->FindGlyphNoFallback('@')!=nullptr,"Every dungeon face needs the player glyph");
   }
+  check(ui.layout.saved.contains("Test layout"),"Named layout retained by preferences");
   FontSettings invalid_fonts; invalid_fonts.load({{"interface","../outside.ttf"},{"dungeon",42}});
   check(invalid_fonts.interface_font=="Cousine-Regular.ttf" && invalid_fonts.dungeon()==invalid_fonts.interface_font,"Unknown fonts safely default and dungeon inherits");
   {

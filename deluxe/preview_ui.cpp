@@ -30,11 +30,24 @@ int main(int argc,char **argv) {
   if(fixture.contains("blast")) c.blast=fixture["blast"];
   UI ui{c}; ui.font_library=&fonts; ui.font_settings.load(fixture.value("fonts",json::object())); ui.base_style=ImGui::GetStyle();
   ui.quit_dialog=fixture.value("quit_dialog",false);
+  ui.quickbar_enabled=fixture.value("quickbar_enabled",false);
+  c.capabilities=fixture.value("capabilities",json::object());
+  if(fixture.contains("layout_preset")) ui.layout.preset(fixture["layout_preset"].get<int>());
+  if(fixture.contains("layout")) ui.layout.load(fixture["layout"]);
+  ui.layout.dividers_locked=fixture.value("layout_dividers_locked",true);
+  ui.layout.floating_locked=fixture.value("layout_floating_locked",false);
+  if(fixture.value("layout_edit",false)) { ui.layout.before=ui.layout.arrangement(); ui.layout.editing=true; }
+  if(fixture.value("layout_float",false)) ui.layout.move({WorkspaceLayout::Inventory,0,5});
   ui.scene_animation=fixture.contains("transition");
   ui.scale=std::clamp(fixture.value("scale",1.f),.75f,1.5f);
   ImGui::GetStyle().ScaleAllSizes(ui.scale); ImGui::GetStyle().FontScaleMain=ui.scale;
   for(const auto &item:c.state.value("items",json::array())) if(item.value("location","")=="Pack") { ui.selected=item.value("id",""); break; }
-  for(int i=0;i<3;++i) {
+  for(int i=0;i<std::clamp(fixture.value("frames",3),3,120);++i) {
+   for(const auto &event:fixture.value("input",json::array())) if(event.value("frame",-1)==i) {
+    if(event.contains("mouse")) io.AddMousePosEvent(event["mouse"][0].get<float>(),event["mouse"][1].get<float>());
+    if(event.contains("down")) io.AddMouseButtonEvent(0,event["down"].get<bool>());
+    if(event.contains("right")) io.AddMouseButtonEvent(1,event["right"].get<bool>());
+   }
    if(fixture.contains("transition")) {
     const auto name=fixture["transition"].value("kind","");
     using K=SceneTransitions::Kind;
@@ -94,6 +107,7 @@ int main(int argc,char **argv) {
    SDL_DownloadFromGPUTexture(copy,&region,&dest); SDL_EndGPUCopyPass(copy);
    auto *fence=SDL_SubmitGPUCommandBufferAndAcquireFence(cmd); SDL_WaitForGPUFences(gpu,true,&fence,1); SDL_ReleaseGPUFence(gpu,fence);
   }
+  if(fixture.value("layout_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); out<<ui.layout.arrangement().dump(2); }
   auto *bytes=SDL_MapGPUTransferBuffer(gpu,download,false);
   auto *surface=SDL_CreateSurfaceFrom(w,h,SDL_PIXELFORMAT_RGBA32,bytes,w*4);
   if(!surface || !SDL_SaveBMP(surface,argv[2])) throw std::runtime_error(SDL_GetError());
