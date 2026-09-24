@@ -34,6 +34,7 @@ class Engine:
         self.combat_events = []
         self.projectile_events = []
         self.motion_events = []
+        self.inventory_events = 0
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._errors, daemon=True).start()
 
@@ -62,6 +63,8 @@ class Engine:
         if j.get("kind") == "event":
             if j["event"] == "state.changed":
                 self.state = j["data"]
+            elif j["event"] == "inventory.open":
+                self.inventory_events += 1
             elif j["event"] == "sound.play":
                 self.sound_events.append(j["data"]["name"])
             elif j["event"] == "knowledge.changed":
@@ -114,8 +117,8 @@ class Engine:
         return "\n".join("".join(chr(c[0] or 32) for c in row)
                          for row in self.state.get("terminal", []))
 
-    def hello(self):
-        result = self.call("hello", {"protocols": [{"major": 0, "minor": 1}]})
+    def hello(self, native_inventory=False):
+        result = self.call("hello", {"protocols": [{"major": 0, "minor": 1}], "native_inventory": native_inventory})
         assert "result" in result, result
 
     def birth(self, name="ProtocolTest", class_index=0):
@@ -1086,6 +1089,15 @@ class BackendTests(unittest.TestCase):
         e = self.engine
         e.hello(); e.birth()
         before=e.state
+        # Town generation can put a wall immediately to the right. Choose a
+        # clear adjacent tile so this tests projectile feedback, not collision.
+        features=e.call('catalog.get')['result']['features']
+        floors={f['id'] for f in features if f['name'] in
+                ('open floor','open door','broken door','up staircase','down staircase')}
+        x,y=before['player']['x'],before['player']['y']
+        direction=next(key for dx,dy,key in
+                       ((1,0,'right'),(-1,0,'left'),(0,1,'down'),(0,-1,'up'))
+                       if before['map']['actual'][y+dy][x+dx] in floors)
         item=next(o for o in before['items'] if o['location']=='Pack')
         kind=item['actual']['kind']
         e.call('command.execute', {'revision':before['revision'], 'command':'core.throw', 'item':item['id']})
@@ -1093,7 +1105,7 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(e.state.get('aiming'))
         self.targeting('targeting.control', operation='target')
         self.targeting('targeting.control', operation='player')
-        e.key('right')
+        e.key(direction)
         self.assertTrue(e.state['targeting']['can_confirm'])
         self.targeting('targeting.control', operation='confirm')
         for _ in range(20):
@@ -2217,6 +2229,37 @@ class BackendTests(unittest.TestCase):
         direct=cast(False); browsed=cast(True)
         self.engine=Engine(Path(self.temp.name)/'cleanup')
         self.assertEqual(direct,browsed)
+
+    def test_native_inventory_browser(self):
+        e = self.engine
+        e.hello(native_inventory=True)
+        e.birth()
+        turn = e.state['turn']
+        e.key(ord('i'))
+        self.assertEqual(e.inventory_events, 1)
+        self.assertIsNone(e.prompt)
+        self.assertEqual(e.state['readiness'], 'ready')
+        self.assertEqual(e.state['turn'], turn)
+        self.assertIn('dungeon', e.state)
+        old = e.state['revision']
+        self.assertIn('result', e.call('command.execute', {'revision':old, 'command':'core.inventory'}))
+        e.next_state(old)
+        self.assertEqual(e.inventory_events, 2)
+        self.assertIsNone(e.prompt)
+        bindings = e.call('keybindings.get')['result']
+        e.call('keybindings.set', {'revision':bindings['revision'], 'bindings':[{'mode':0,'key':137,'command':ord('i')}]})
+        e.key(137)
+        self.assertEqual(e.inventory_events, 3)
+        self.assertEqual(e.state['turn'], turn)
+        potion = next(o for o in e.state['items'] if o['location']=='Pack' and 'core.quaff' in o['actions'])
+        kind = potion['actual']['kind']
+        count = sum(o['quantity'] for o in e.state['items'] if o['location']=='Pack' and o['actual']['kind']==kind)
+        old = e.state['revision']
+        self.assertIn('result',e.call('command.execute',{'revision':old,'command':'core.quaff','item':potion['id']}))
+        e.next_state(old)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertEqual(sum(o['quantity'] for o in e.state['items'] if o['location']=='Pack' and o['actual']['kind']==kind),count-1)
+        self.assertGreater(e.state['turn'],turn)
 
     def test_native_item_selection(self):
         e=self.engine

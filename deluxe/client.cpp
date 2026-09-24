@@ -206,9 +206,10 @@ struct Connection {
   auto errors=static_cast<SDL_IOStream*>(SDL_GetPointerProperty(SDL_GetProcessProperties(process.get()),SDL_PROP_PROCESS_STDERR_POINTER,nullptr));
   reader=std::make_unique<BackendReader>(SDL_GetProcessOutput(process.get()),errors);
   connected = true;
-  send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",1048576}});
+  send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",1048576},{"native_inventory",true}});
   return true;
  }
+ bool inventory_requested=false;
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
@@ -224,6 +225,7 @@ struct Connection {
     auto feedback=std::move(j.at("data")); feedback["received"]=double(SDL_GetTicksNS())/1e9;
     if(combat_events.size()>=64) combat_events.pop_front(); combat_events.push_back(std::move(feedback)); return;
    }
+   if(name=="inventory.open") { inventory_requested=true; return; }
    if(name=="activity.changed") { resting=j.at("data").value("resting",false); return; }
    if(name=="sound.play") {
     auto cue=AudioPlayer::engine_cue(j.at("data").value("name",""));
@@ -555,6 +557,9 @@ struct UI {
  ImDrawList *game_draw_list=nullptr;
  ImVec2 game_pos{},game_size{};
  bool quit_dialog = false;
+ bool inventory_window_open=false, inventory_window_drawing=false;
+ std::string inventory_selected,inventory_action,inventory_action_item;
+ char inventory_filter[128]{};
  bool grid_focus = false, focus_requested = false, window_active = true;
  bool return_from_prompt = false;
  bool message_search_open = false;
@@ -878,6 +883,7 @@ struct UI {
   focus_game(); return true;
  }
  void execute(const std::string &id,const std::string &item="") {
+  if(inventory_window_drawing && c.ready()) { inventory_action=id; inventory_action_item=item; return; }
   if(id=="core.knowledge" && c.capabilities.value("knowledge",0)>0 && c.state.value("phase","")=="playing") { keys.clear(); knowledge_browser.open(c); return; }
   if(id=="core.inscribe" && c.ready()) inscription_edit=true;
   if(id=="core.character" && c.can_view_character()) { keys.clear(); open_character_sheet=true; return; }
@@ -1270,7 +1276,7 @@ struct UI {
    ImGui::EndTabBar();
   }
  }
- void items_category(int category) {
+ void items_category(int category,bool pack_window=false) {
   ImGui::SetNextItemWidth(-1); ImGui::InputTextWithHint("##items","Search items",item_filter,sizeof(item_filter));
   if(!c.state.contains("items")) return;
   std::vector<const json*> values;
@@ -1281,7 +1287,8 @@ struct UI {
    values.push_back(&o);
   }
   std::stable_sort(values.begin(),values.end(),[](const json *a,const json *b){return a->value("location","")<b->value("location","");});
-  if(ImGui::BeginTable("items",category==1?3:2,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,ImGui::GetTextLineHeightWithSpacing()*10))) {
+  if(pack_window && values.empty()) ImGui::TextDisabled("Your pack is empty.");
+  if(ImGui::BeginTable("items",category==1?3:2,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,pack_window?std::max(ImGui::GetTextLineHeightWithSpacing()*3,ImGui::GetContentRegionAvail().y*.42f):ImGui::GetTextLineHeightWithSpacing()*10))) {
    ImGui::TableSetupColumn("Item",ImGuiTableColumnFlags_WidthStretch,1.f);
    if(category==1) ImGui::TableSetupColumn("Slot",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFontSize()*6.f);
    ImGui::TableSetupColumn("Qty",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFontSize()*2.5f);
@@ -1331,7 +1338,7 @@ struct UI {
    }
    ImGui::EndTable();
   }
-  for(const auto *item:FloorItems::collect(c.state)) values.push_back(item);
+  if(!pack_window) for(const auto *item:FloorItems::collect(c.state)) values.push_back(item);
   for(const auto *item:values) if(item->value("id","")==selected) {
    const auto &o=*item;
    DeluxeTheme::section("Inspection");
@@ -1371,6 +1378,42 @@ struct UI {
    const auto description=o.value("description","");
    ItemComparison::draw(c,o);
    if(!description.empty()) { ImGui::Spacing(); ItemDescription::draw(o); }
+  }
+ }
+ // Browse the current snapshot without parking the engine in an item prompt.
+ // Actions are dispatched only after closing this modal, so native quantity,
+ // inscription and targeting flows can take ownership of input immediately.
+ void inventory_window() {
+  if(c.inventory_requested && c.ready()) {
+   c.inventory_requested=false; inventory_window_open=true; keys.clear(); grid_focus=false;
+   inventory_filter[0]=0; ImGui::OpenPopup("Inventory");
+  }
+  if(!inventory_window_open) return;
+  const auto vp=ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos({vp->WorkPos.x+vp->WorkSize.x*.5f,vp->WorkPos.y+vp->WorkSize.y*.5f},ImGuiCond_Appearing,{.5f,.5f});
+  ImGui::SetNextWindowSize({std::min(vp->WorkSize.x-24,ImGui::GetFontSize()*52),std::min(vp->WorkSize.y-24,ImGui::GetFontSize()*34)},ImGuiCond_Appearing);
+  bool keep_open=true;
+  if(ImGui::BeginPopupModal("Inventory",&keep_open,ImGuiWindowFlags_NoSavedSettings)) {
+   inventory_action.clear(); inventory_action_item.clear();
+   bool selected_exists=false;
+   for(const auto &o:c.state.value("items",json::array())) if(o.value("location","")=="Pack" && o.value("id","")==inventory_selected) selected_exists=true;
+   if(!selected_exists) {
+    inventory_selected.clear();
+    for(const auto &o:c.state.value("items",json::array())) if(o.value("location","")=="Pack") { inventory_selected=o.value("id",""); break; }
+   }
+   DeluxeTheme::section("Pack");
+   ImGui::BeginChild("Pack browser",{0,-ImGui::GetFrameHeightWithSpacing()});
+   std::swap(selected,inventory_selected); std::swap(item_filter,inventory_filter);
+   inventory_window_drawing=true; items_category(0,true); inventory_window_drawing=false;
+   std::swap(selected,inventory_selected); std::swap(item_filter,inventory_filter);
+   ImGui::EndChild();
+   const bool close=ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape) || !keep_open || !inventory_action.empty() || !c.connected;
+   if(close) { inventory_window_open=false; ImGui::CloseCurrentPopup(); focus_game(); }
+   ImGui::EndPopup();
+  }
+  if(!keep_open && inventory_window_open) { inventory_window_open=false; focus_game(); }
+  if(!inventory_action.empty()) {
+   const auto command=inventory_action,item=inventory_action_item; inventory_action.clear(); inventory_action_item.clear(); execute(command,item);
   }
  }
  void inspect_creature(int race) {
@@ -1622,6 +1665,7 @@ struct UI {
    c.transitions.restore_colour(scene_now);
    ImGui::ClosePopupsOverWindow(nullptr,false);
    open_character_sheet=false; quickbar.open_customize=false;
+   inventory_window_open=false; c.inventory_requested=false;
    knowledge_browser.request_open=false; item_rules_panel.open=item_rules_panel.auto_open=false;
    quit_dialog=false; run_ui_reset=true;
   }
@@ -1807,6 +1851,7 @@ struct UI {
   }
   if(layout.dirty && !layout.editing) { layout.dirty=false; if(!settings_path.empty()) save_settings(); }
   if(!ending) {
+  inventory_window();
   if(quickbar.customize_window()) focus_game();
   if(quickbar.dirty) { quickbar.dirty=false; save_settings(); }
   if(message_history.draw(c)) focus_game();

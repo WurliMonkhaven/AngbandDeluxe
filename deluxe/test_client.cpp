@@ -538,6 +538,21 @@ int main(int argc,char **argv) {
   SDL_strlcpy(option_draft.search,"no matching setting",sizeof(option_draft.search));
   ImGui::NewFrame(); ImGui::Begin("Options empty search"); option_draft.draw(); ImGui::End(); ImGui::Render();
   {
+  {
+   Connection browser_connection; browser_connection.connected=true;
+   browser_connection.state={{"readiness","ready"},{"phase","playing"},{"revision","inventory-test"},
+    {"items",json::array({{{"id","sword"},{"label","a sword"},{"location","Weapon"}},
+      {{"id","potion"},{"label","a potion"},{"location","Pack"},{"quantity",1},{"actions",json::array({"core.quaff","core.drop"})}},
+      {{"id","floor"},{"label","a scroll"},{"location","Floor"},{"on_player_tile",true}}})}};
+   browser_connection.receive({{"kind","event"},{"event","inventory.open"},{"data",json::object()}});
+   UI browser{browser_connection}; browser.selected="sword"; SDL_strlcpy(browser.item_filter,"sword",sizeof(browser.item_filter));
+   ImGui::NewFrame(); ImGui::Begin("Inventory browser test"); browser.inventory_window(); ImGui::End(); ImGui::Render();
+   check(browser.inventory_window_open && browser.inventory_selected=="potion","Native inventory selects only pack items");
+   check(browser.selected=="sword" && std::string(browser.item_filter)=="sword","Inventory window preserves sidebar selection and search");
+   browser.inventory_window_drawing=true; browser.execute("core.quaff","potion"); browser.inventory_window_drawing=false;
+   check(browser.inventory_action=="core.quaff" && browser.inventory_action_item=="potion" && browser_connection.outgoing.empty(),"Inventory action must defer until the modal closes");
+   ImGui::ClosePopupsOverWindow(nullptr,false);
+  }
   ImGui::NewFrame(); ImGui::Begin("Quickbar text layout");
   const float text_size=ImGui::GetFontSize();
   auto roomy=Quickbar::text_layout("Bazinga",ImGui::CalcTextSize("Bazinga").x+8,text_size+1);

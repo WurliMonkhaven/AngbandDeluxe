@@ -1104,3 +1104,19 @@ rather than taking a percentage of available height. Adjacent vertical space is
 returned to the other pane, and that horizontal divider cannot stretch the bar.
 Floating quickbars also fit their height; their editor resize control changes
 width only. Mixed tab groups retain flexible height for their other contents.
+
+
+### Native inventory window (implemented)
+
+The inventory listing command (i, its keymapped equivalent, core.inventory and
+quickbar command bindings) opens a dedicated Inventory modal in normal play. It
+shows Pack contents only, with item colours, quantity, search and the same action
+buttons, right-click actions, structured inspection and comparison as the sidebar.
+An empty pack is still browsable. Sidebar selection and search remain independent.
+Selecting an action closes the window before dispatch, allowing normal quantity,
+inscription and targeting flows. Closing the window costs no turn.
+
+The client opts into native_inventory in hello; interaction.inventory capability
+and inventory.open event implement the listing handoff without an outstanding item
+selection prompt. Other frontends and clients without the opt-in retain the text
+UI. Actual action selection prompts remain eligibility-filtered as before.

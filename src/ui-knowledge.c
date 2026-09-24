@@ -4022,10 +4022,14 @@ void do_cmd_messages(void)
 /**
  * Display inventory
  */
+bool (*inventory_browse_hook)(void) = NULL;
+
 void do_cmd_inven(void)
 {
 	struct object *obj = NULL;
 	int ret = 3;
+
+	if (inventory_browse_hook && inventory_browse_hook()) return;
 
 	if (player->upkeep->inven[0] == NULL) {
 		msg("You have nothing in your inventory.");

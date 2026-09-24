@@ -46,6 +46,7 @@
 #include "ui-object.h"
 #include "ui-options.h"
 #include "ui-keymap.h"
+#include "ui-knowledge.h"
 #include "ui-map.h"
 #include "ui-menu.h"
 #include "ui-spell.h"
@@ -75,6 +76,7 @@
 #define SCREEN_H 34
 static term terminal;
 static bool connected = true, negotiated, initialized, ready, closing;
+static bool native_inventory;
 static unsigned long revision, sequence, context_id;
 static char revision_text[32], context_text[32];
 static const char *phase = "launcher";
@@ -706,7 +708,8 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  native_inventory=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_inventory"));
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -1166,6 +1169,12 @@ static errr xtra(int n, int v)
 static errr text_hook(int x, int y, int n, int a, const wchar_t *s) { return 0; }
 static errr wipe_hook(int x, int y, int n) { return 0; }
 static errr cursor_hook(int x, int y) { return 0; }
+static bool deluxe_inventory_browser(void)
+{
+ if(!native_inventory || !streq(phase,"playing")) return false;
+ event("inventory.open",cJSON_CreateObject());
+ return true;
+}
 static errr get_command(cmd_context context)
 {
  if (context != CTX_GAME) return textui_get_cmd(context);
@@ -1274,6 +1283,7 @@ int main(int argc, char **argv)
  original_get_item = get_item_hook; get_item_hook = item_hook;
  get_spell_hook = deluxe_get_spell; get_spell_from_book_hook = deluxe_spell_choose;
  book_browse_hook = deluxe_browse_book;
+ inventory_browse_hook = deluxe_inventory_browser;
  store_interact_hook = deluxe_store_session;
  cmd_get_hook = get_command;
  sound_event_hook=deluxe_sound_event;

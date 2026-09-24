@@ -30,6 +30,7 @@ int main(int argc,char **argv) {
   if(fixture.contains("blast")) c.blast=fixture["blast"];
   UI ui{c}; ui.font_library=&fonts; ui.font_settings.load(fixture.value("fonts",json::object())); ui.base_style=ImGui::GetStyle();
   ui.quit_dialog=fixture.value("quit_dialog",false);
+  c.inventory_requested=fixture.value("inventory_window",false);
   ui.quickbar_enabled=fixture.value("quickbar_enabled",false);
   c.capabilities=fixture.value("capabilities",json::object());
   if(fixture.contains("layout_preset")) ui.layout.preset(fixture["layout_preset"].get<int>());
@@ -108,6 +109,7 @@ int main(int argc,char **argv) {
    auto *fence=SDL_SubmitGPUCommandBufferAndAcquireFence(cmd); SDL_WaitForGPUFences(gpu,true,&fence,1); SDL_ReleaseGPUFence(gpu,fence);
   }
   if(fixture.value("layout_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); out<<ui.layout.arrangement().dump(2); }
+  if(fixture.value("inventory_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); out<<json{{"open",ui.inventory_window_open},{"selected",ui.inventory_selected},{"outgoing",c.outgoing}}.dump(2); }
   auto *bytes=SDL_MapGPUTransferBuffer(gpu,download,false);
   auto *surface=SDL_CreateSurfaceFrom(w,h,SDL_PIXELFORMAT_RGBA32,bytes,w*4);
   if(!surface || !SDL_SaveBMP(surface,argv[2])) throw std::runtime_error(SDL_GetError());
