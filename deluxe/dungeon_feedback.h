@@ -1,5 +1,18 @@
 // Non-interactive overlays; the engine retains all input and travel decisions.
 struct DungeonFeedback {
+ struct RibbonLayout { float body_height, hint_height, height; bool truncated; };
+ static RibbonLayout ribbon_layout(const std::string &message,const char *hint,float width,float available_height) {
+  const float font=ImGui::GetFontSize(),pad=font*.65f,gap=font*.35f;
+  const float wrap=width-2*pad;
+  const float body=message.empty()?0:ImGui::CalcTextSize(message.c_str(),nullptr,false,wrap).y;
+  const float hint_height=ImGui::CalcTextSize(hint,nullptr,false,wrap).y;
+  const float fixed=2*pad+font+gap+hint_height+(body>0?gap:0);
+  // Preserve whole lines and a separate overflow cue in unusually small views.
+  const float room=std::max(0.f,std::floor((available_height-fixed)/font)*font);
+  const bool truncated=body>room;
+  const float body_height=truncated?std::max(0.f,room-font):body;
+  return {body_height,hint_height,fixed+body_height+(truncated?font:0),truncated};
+ }
  static void route(const Connection &c,ImDrawList *draw,ImVec2 origin,ImVec2 size,float cw,float ch,int ox,int oy,bool hovered,int x,int y) {
   draw->PushClipRect(origin,ImVec2(origin.x+size.x,origin.y+size.y),true);
   const auto point=[&](int wx,int wy) { return ImVec2(origin.x+(wx-ox+.5f)*cw,origin.y+(wy-oy+.5f)*ch); };
@@ -19,7 +32,11 @@ struct DungeonFeedback {
   const float font=ImGui::GetFontSize(),pad=font*.65f;
   const float width=std::min(area.x-2*pad,font*33.f);
   if(width<font*8) return;
-  const float h=font*5.2f;
+  const std::string excerpt=c.previous_messages.empty()?"":c.previous_messages.front().value("text","");
+  const char *hint=click_to_continue?"Click to continue":"Continue with your usual key";
+  const auto layout=ribbon_layout(excerpt,hint,width,area.y-2*pad);
+  const float h=layout.height;
+  if(h>area.y-2*pad) return;
   const ImVec2 a(start.x+(area.x-width)/2,start.y+area.y-h-pad),b(a.x+width,a.y+h);
   const float pulse=.65f+.35f*float(std::sin(ImGui::GetTime()*3));
   const auto amber=IM_COL32(245,188,90,255);
@@ -40,12 +57,14 @@ struct DungeonFeedback {
   for(int i=0;i<2;++i) draw->AddRectFilled(ImVec2(text.x+i*font*.3f,text.y+font*.15f),ImVec2(text.x+i*font*.3f+font*.13f,text.y+font*.85f),amber);
   draw->AddText(ImVec2(text.x+font,text.y),amber,"Messages waiting");
   for(int i=0;i<3;++i) draw->AddCircleFilled(ImVec2(b.x-pad-font*(1.1f-.35f*i),text.y+font*.5f),font*.08f,IM_COL32(245,188,90,int(90+120*(.5+.5*std::sin(ImGui::GetTime()*3-i)))));
-  if(!c.previous_messages.empty()) {
-   const auto excerpt=c.previous_messages.front().value("text","");
-   const ImVec4 clip(text.x,text.y+font*1.35f,b.x-pad,text.y+font*3.35f);
-   draw->AddText(ImGui::GetFont(),font,ImVec2(text.x,text.y+font*1.35f),IM_COL32(225,220,210,255),excerpt.c_str(),nullptr,width-2*pad,&clip);
+  const float body_y=text.y+font*1.35f;
+  if(layout.body_height>0) {
+   draw->PushClipRect(ImVec2(text.x,body_y),ImVec2(b.x-pad,body_y+layout.body_height),true);
+   draw->AddText(ImGui::GetFont(),font,ImVec2(text.x,body_y),IM_COL32(225,220,210,255),excerpt.c_str(),nullptr,width-2*pad);
+   draw->PopClipRect();
   }
-  draw->AddText(ImVec2(text.x,b.y-pad-font),IM_COL32(185,180,165,255),click_to_continue?"Click to continue":"Continue with your usual key");
+  if(layout.truncated) draw->AddText(ImVec2(text.x,body_y+layout.body_height),IM_COL32(185,180,165,255),"...");
+  draw->AddText(ImGui::GetFont(),font,ImVec2(text.x,b.y-pad-layout.hint_height),IM_COL32(185,180,165,255),hint,nullptr,width-2*pad);
   draw->PopClipRect();
   // Fade the background, text and accents together, leaving the viewport cue intact.
   for(int i=first_vertex;i<draw->VtxBuffer.Size;++i) {

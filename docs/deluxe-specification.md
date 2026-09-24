@@ -628,7 +628,10 @@ does not resume interrupted travel or bypass checks.
 
 Message pauses replace the small corner '- more -' text with a centred dark
 ribbon near the bottom of the dungeon: an amber pause emblem, 'Messages waiting',
-a two-line excerpt, gentle breathing accents and a faint viewport border. The
+a wrapped excerpt, gentle breathing accents and a faint viewport border.
+Height follows measured message and hint wrapping, with a clear gap between
+them. The ribbon grows upwards; excerpts exceeding the available viewport
+height are clipped on whole lines with an ellipsis. The
 Messages heading also displays WAITING. White filled blocks are avoided for CRT
 readability. Existing acknowledgement keys remain authoritative, and clicking
 continues only when Proceed with click is enabled. No messages are auto-skipped.

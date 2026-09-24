@@ -605,6 +605,19 @@ int main(int argc,char **argv) {
     ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(i==0?350:900,450)); ImGui::Begin("Dungeon feedback test");
     auto origin=ImGui::GetCursorScreenPos(),area=ImGui::GetContentRegionAvail(); auto *draw=ImGui::GetWindowDrawList();
     DungeonFeedback::route(feedback,draw,origin,area,12,22,0,0,true,4,5);
+    const float font=ImGui::GetFontSize();
+    const float ribbon_width=font*33;
+    const std::string long_message="This seems a quiet, peaceful place, and there may not be much interesting here.";
+    const auto short_layout=DungeonFeedback::ribbon_layout("A short message.","Click to continue",ribbon_width,600);
+    const auto long_layout=DungeonFeedback::ribbon_layout(long_message,"Click to continue",ribbon_width,600);
+    check(long_layout.body_height>short_layout.body_height && long_layout.height>short_layout.height,"Wrapped messages must grow the ribbon");
+    const float body_bottom=font*.65f+font*1.35f+long_layout.body_height;
+    const float hint_top=long_layout.height-font*.65f-long_layout.hint_height;
+    check(hint_top>=body_bottom+font*.34f,"Continuation hint must have a gap below the wrapped message");
+    const auto narrow=DungeonFeedback::ribbon_layout(long_message,"Continue with your usual key",font*15,600);
+    check(narrow.hint_height>font && !narrow.truncated,"Narrow ribbon must account for wrapping in its hint too");
+    const auto bounded=DungeonFeedback::ribbon_layout(std::string(2000,'W'),"Click to continue",ribbon_width,font*9);
+    check(bounded.truncated && bounded.height<=font*9,"Long excerpts must stay inside the viewport with an overflow cue");
     DungeonFeedback::ribbon(feedback,draw,origin,area,i==0);
     ImGui::End(); ImGui::Render(); feedback.state["message_pending"]=i==0;
    }
