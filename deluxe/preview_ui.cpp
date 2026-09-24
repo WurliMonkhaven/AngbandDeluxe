@@ -32,7 +32,16 @@ int main(int argc,char **argv) {
   ImGui::GetStyle().ScaleAllSizes(ui.scale); ImGui::GetStyle().FontScaleMain=ui.scale;
   for(const auto &item:c.state.value("items",json::array())) if(item.value("location","")=="Pack") { ui.selected=item.value("id",""); break; }
   for(int i=0;i<3;++i) {
-   ImGui_ImplSDLGPU3_NewFrame(); ImGui::NewFrame(); ui.draw(nullptr); ImGui::Render();
+   ImGui_ImplSDLGPU3_NewFrame(); ImGui::NewFrame(); ui.draw(nullptr);
+   if(fixture.contains("keybindings")) {
+    if(i==0) ui.keybinding_editor.load(fixture["keybindings"]);
+    ImGui::SetNextWindowSize(ImVec2(504*ui.scale,612*ui.scale));
+    ImGui::SetNextWindowPos(ImVec2((w-504*ui.scale)*.5f,40));
+    ImGui::SetNextWindowFocus();
+    ImGui::Begin("Keybindings - offscreen review",nullptr,ImGuiWindowFlags_NoSavedSettings);
+    ui.keybinding_editor.draw(); ImGui::End();
+   }
+   ImGui::Render();
    auto *cmd=SDL_AcquireGPUCommandBuffer(gpu); CrtFrame frame; frame.scope=0;
    renderer.render(cmd,target,w,h,ImGui::GetDrawData(),frame);
    auto *copy=SDL_BeginGPUCopyPass(cmd);

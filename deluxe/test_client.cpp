@@ -892,6 +892,28 @@ int main(int argc,char **argv) {
    ImGui::NewFrame(); ImGui::Begin("Quantity test"); picker.draw(quantity_connection,false); ImGui::End(); ImGui::Render();
   }
   check(quantity_connection.outgoing.empty(),"Changing quantity must not execute an action before confirmation");
+  KeybindingEditor binding_editor;
+  const json binding_data={{"mode",0},{"revision",2},{"bindings",json::array()},
+   {"commands",json::array({{{"id",82},{"label","Rest for a while"},{"group","Action commands"},{"original","R"},{"rogue","R"}}})},
+   {"keys",json::array({{{"mode",0},{"key",114},{"default_action","Read a scroll"}}})}};
+  binding_editor.load(binding_data);
+  check(binding_editor.conflict(114)=="Read a scroll","Binding conflicts include the underlying native command");
+  binding_editor.command=82; binding_editor.listening=true;
+  SDL_Event capture{}; capture.type=SDL_EVENT_TEXT_INPUT; capture.text.text="r";
+  check(binding_editor.event(capture) && binding_editor.candidate==114 && !binding_editor.changed(),"Capture waits for explicit assignment");
+  binding_editor.assign(); check(binding_editor.changed() && binding_editor.conflict(114)=="Rest for a while","Assignment replaces one trigger in the draft");
+  binding_editor.mode=1; check(binding_editor.conflict(114)=="Unassigned","Draft bindings are keyset-specific");
+  binding_editor.mode=0; binding_editor.remove(114); check(!binding_editor.changed(),"Restoring removes only the override");
+  binding_editor.command=82; binding_editor.listening=true;
+  capture={}; capture.type=SDL_EVENT_KEY_DOWN; capture.key.key=SDLK_KP_PERIOD; capture.key.scancode=SDL_SCANCODE_KP_PERIOD;
+  binding_editor.event(capture); capture={}; capture.type=SDL_EVENT_TEXT_INPUT; capture.text.text="."; binding_editor.event(capture);
+  check(binding_editor.candidate==0 && binding_editor.listening,"Keypad text cannot accidentally become a captured binding");
+  capture={}; capture.type=SDL_EVENT_KEY_DOWN; capture.key.key=SDLK_F6;
+  binding_editor.event(capture); check(binding_editor.candidate==137,"Function-key capture matches game input encoding");
+  binding_editor.listening=true; capture.key.key=SDLK_ESCAPE; binding_editor.event(capture);
+  check(binding_editor.command==-1 && !binding_editor.listening,"Escape cancels capture without submitting a binding");
+  binding_editor.load(binding_data);
+  ImGui::NewFrame(); ImGui::Begin("Keybinding editor test"); binding_editor.draw(); ImGui::End(); ImGui::Render();
   ImGui::DestroyContext();
   fs::remove(path);
   std::cout<<"Session lifecycle, resource bars, graphics settings and CRT input/decay checks passed\n";

@@ -183,6 +183,71 @@ class BackendTests(unittest.TestCase):
         cell = view["cells"][player["y"]-view["y"]][player["x"]-view["x"]]
         self.assertTrue(cell[12])
 
+    def test_native_keybindings(self):
+        e=self.engine
+        e.hello()
+        self.assertIn('error',e.call('keybindings.get'))
+        (Path(self.temp.name)/'user'/'user.prf').write_text('keymap-act:R\nkeymap-input:0:[F7]\n',encoding='utf-8')
+        e.birth()
+        data=e.call('keybindings.get')['result']
+        self.assertGreater(len(data['commands']),35)
+        self.assertEqual(data['bindings'],[])
+        before=e.state['turn']
+        bind={'mode':0,'key':137,'command':ord(',')}
+        for rows in ([{**bind,'key':ord('1')}],[{**bind,'key':ord('\\')}],[{**bind,'mode':2}],[{**bind,'command':999}], [bind,bind]):
+            result=e.call('keybindings.set',{'revision':data['revision'],'bindings':rows})
+            self.assertEqual(result['error']['code'],'invalid_argument')
+            self.assertEqual(e.call('keybindings.get')['result'],data)
+        self.assertEqual(e.call('keybindings.set',{'revision':-1,'bindings':[bind]})['error']['code'],'stale_revision')
+        reply=e.call('keybindings.set',{'revision':data['revision'],'bindings':[bind]})
+        self.assertIn('result',reply); result=reply['result']
+        self.assertEqual(result['bindings'],[bind]); self.assertEqual(e.call('state.get')['result']['turn'],before)
+        e.key(137)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertGreater(e.state['turn'],before,'Function-key binding must execute the native wait command')
+        # Overriding then restoring an imported macro must recover its sequence.
+        data=e.call('keybindings.get')['result']
+        native=next(k for k in data['keys'] if k['mode']==0 and k['key']==138)
+        self.assertEqual(native['sequence'],'R')
+        data=e.call('keybindings.set',{'revision':data['revision'],'bindings':[bind,{**bind,'key':138}]})['result']
+        e.call('keybindings.set',{'revision':data['revision'],'bindings':[bind]})
+        e.key(138); e.wait_prompt(); self.assertEqual(e.prompt.get('selection_kind'),'rest')
+        prompt=e.prompt; e.prompt=None; old=e.state['revision']
+        e.call('prompt.reply',{'prompt_id':prompt['prompt_id'],'value':None}); e.next_state(old)
+        while e.state['readiness']!='ready': e.key('enter')
+        # Persist beyond a process and character boundary, without relying on a game save.
+        e.stop(); self.engine=Engine(Path(self.temp.name)); e=self.engine
+        e.hello(); e.birth('BindingsAgain')
+        data=e.call('keybindings.get')['result']; self.assertEqual(data['bindings'],[bind])
+        # A different command in the other keyset remains independent.
+        rogue={'mode':1,'key':137,'command':ord('R')}
+        data=e.call('keybindings.set',{'revision':data['revision'],'bindings':[bind,rogue]})['result']
+        options=e.call('options.get')['result']; old=e.state['revision']
+        e.call('options.set',{'context':options['context'],'values':{'rogue_like_commands':True}}); e.next_state(old)
+        e.key(137); e.wait_prompt()
+        self.assertEqual(e.prompt.get('selection_kind'),'rest')
+        prompt=e.prompt; e.prompt=None; old=e.state['revision']
+        e.call('prompt.reply',{'prompt_id':prompt['prompt_id'],'value':None}); e.next_state(old)
+        while e.state['readiness']!='ready': e.key('enter')
+        data=e.call('keybindings.get')['result']
+        self.assertEqual(data['mode'],1)
+        data=e.call('keybindings.set',{'revision':data['revision'],'bindings':[bind,{**rogue,'command':ord('l')}]})['result']
+        e.key(137)
+        self.assertEqual(e.state['targeting']['mode'],'look','Roguelike binding must expand to x, not the original movement key l')
+        e.key('escape')
+        while e.state['readiness']!='ready': e.key('enter')
+        data=e.call('keybindings.get')['result']
+        blocked=Path(self.temp.name)/'user'/'deluxe-keybindings.json.tmp'
+        blocked.mkdir()
+        self.assertEqual(e.call('keybindings.set',{'revision':data['revision'],'bindings':[]})['error']['code'],'io_error')
+        self.assertEqual(e.call('keybindings.get')['result']['bindings'],data['bindings'])
+        blocked.rmdir()
+        data=e.call('keybindings.set',{'revision':data['revision'],'bindings':[]})['result']
+        self.assertEqual(data['bindings'],[])
+        e.stop(); self.engine=Engine(Path(self.temp.name)); e=self.engine
+        e.hello(); e.birth('BindingsRestored')
+        self.assertEqual(e.call('keybindings.get')['result']['bindings'],[])
+
     def test_native_options(self):
         e = self.engine
         e.hello()

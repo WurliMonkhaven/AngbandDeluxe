@@ -902,3 +902,11 @@ are bounded by current carried item identities and do not persist across loads.
 ### Native quantity picker
 
 Quantity prompts show the engine-selected item and its colour, an amount field and slider, and One / Half / All shortcuts (Half rounds down). Bounds remain engine-owned. Purchase totals are quoted per quantity using the native split-stack pricing path, including device charges, rather than estimated from a unit price. Confirm/Enter submits, Cancel/Escape aborts; adjusting controls does not advance gameplay. Original transaction confirmations remain intact.
+
+
+### Native keybinding editor
+
+- Settings / Keybindings exposes the engine's command catalog with searchable groups, original defaults, key capture, explicit conflict replacement, and per-key/per-keyset restore. Original and Roguelike profiles are independent; editing a profile does not switch the active keyset.
+- Changes are drafts until Save and Close. Bindings persist across characters/restarts in a separate deluxe-keybindings.json in the backend user directory. Native preference-file keymaps are preserved as the underlying baseline, including multi-key sequences; restoring removes Deluxe overrides only.
+- Supported triggers are letters/symbols (using text input for keyboard-layout accuracy), Ctrl+letters, and unmodified F1-F12. Digits, keypad, arrows, prompt controls, and native keymap escape prefixes are reserved; existing movement and quickbar behavior stays intact. Alt/GUI combinations and modified function keys are not captured.
+- keybindings.get returns command/default/conflict data and the overlay revision; keybindings.set validates the complete batch before persisting or installing it through Angband keymaps. Bindings retain command prerequisites, native prompts and confirmations; semantic sidebar actions continue to bypass user keymaps. Only normal living-character play can apply changes.

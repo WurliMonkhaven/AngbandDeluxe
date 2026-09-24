@@ -55,6 +55,8 @@ bool keymap_remove(int keymap, struct keypress trigger);
  * Free all keymaps.
  */
 void keymap_free(void);
+/* Read-only provenance for clients which temporarily overlay bindings. */
+bool keymap_is_user(int mode, struct keypress trigger);
 
 /**
  * Save keymaps to the specified file.

@@ -398,6 +398,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
 }
 #include "deluxe-character.h"
 #include "deluxe-options.h"
+#include "deluxe-keybindings.h"
 #include "deluxe-run.h"
 #include "deluxe-save-summary.h"
 #include "deluxe-status.h"
@@ -692,7 +693,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.experience\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.experience\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -816,6 +817,7 @@ static void pump(void)
   }
   cleanup_savefile_getter(g); response(id, out);
  } else if (!streq(str(p, "session_id"), "session-1")) error(id, "wrong_session", "Stale session.");
+ else if(streq(method,"keybindings.get") || streq(method,"keybindings.set")) { deluxe_bindings_request(id,method,p); }
  else if (streq(method,"store.buy") || streq(method,"store.sell") || streq(method,"store.leave")) {
   deluxe_store_request(id, method, p);
  } else if (streq(method, "inspect.get")) {
@@ -1174,7 +1176,7 @@ static void lifecycle(game_event_type type, game_event_data *data, void *user)
  if (type == EVENT_ENTER_BIRTH) phase = "birth";
  /* Loading may pause on a study reminder before the first game command.
   * World entry, not command readiness, establishes the gameplay layout. */
- else if (type == EVENT_ENTER_WORLD) phase = "playing";
+ else if (type == EVENT_ENTER_WORLD) { phase = "playing"; deluxe_bindings_init(); }
  else if (type == EVENT_ENTER_STORE) phase = "store";
  else if (type == EVENT_LEAVE_STORE) phase = "playing";
  else if (type == EVENT_ENTER_DEATH) phase = "dead";

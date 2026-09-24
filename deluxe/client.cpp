@@ -64,6 +64,7 @@ static bool matches(std::string text, std::string term) {
 }
 #include "ui_theme.h"
 #include "engine_options.h"
+#include "keybinding_editor.h"
 #include "audio_player.h"
 #include "inventory_changes.h"
 #include "level_feedback.h"
@@ -108,6 +109,8 @@ struct Connection {
  json run_report=nullptr;
  bool postgame_finished=false;
  json options_result=nullptr,options_saved=nullptr;
+ json bindings_result=nullptr,bindings_saved=nullptr;
+ std::string bindings_request;
  std::string options_request;
  json knowledge_list=nullptr,knowledge_detail=nullptr;
  json creature_detail=nullptr;
@@ -228,6 +231,14 @@ struct Connection {
   auto id = j.value("id",""); auto it = requests.find(id);
   if (it == requests.end()) return;
   auto method = it->second; requests.erase(it);
+  if(method=="keybindings.get") {
+   if(id==bindings_request) bindings_result=j.contains("error")?json{{"error",j["error"].value("message","Bindings unavailable.")}}:j["result"];
+   return;
+  }
+  if(method=="keybindings.set") {
+   bindings_saved=j.contains("error")?json{{"error",j["error"].value("message","Bindings could not be saved.")}}:j["result"];
+   busy=false; return;
+  }
   if(method=="options.get") {
    if(id==options_request) options_result=j.contains("error")?json{{"error",j["error"].value("message","Options unavailable.")}}:j["result"];
    return;
@@ -471,6 +482,8 @@ struct UI {
  float draft_scale=1.f;
  std::string settings_error;
  EngineOptions engine_options;
+ KeybindingEditor keybinding_editor;
+ bool saving_bindings=false, settings_open=false;
  bool settings_saving=false;
  ImDrawList *game_draw_list=nullptr;
  ImVec2 game_pos{},game_size{};
@@ -533,7 +546,10 @@ struct UI {
  }
  void begin_settings() {
   draft_audio_settings=audio_settings;
-  engine_options.reset(); settings_saving=false;
+  engine_options.reset(); settings_saving=false; saving_bindings=false;
+  keybinding_editor.reset(); c.bindings_result=nullptr; c.bindings_saved=nullptr; c.bindings_request.clear();
+  if(c.capabilities.value("keybindings",0)>0 && c.state.contains("player")) c.bindings_request=c.send("keybindings.get");
+  else { keybinding_editor.loaded=true; keybinding_editor.error="Keybindings are available after starting a character with a supported backend."; }
   c.options_result=nullptr; c.options_saved=nullptr; c.options_request.clear();
   if(c.capabilities.value("options",0)>0 && c.state.contains("player")) c.options_request=c.send("options.get");
   else { engine_options.loaded=true; engine_options.error="Angband options are available after starting a character with a supported backend."; }
@@ -576,9 +592,23 @@ struct UI {
   ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x+vp->WorkSize.x*.5f,vp->WorkPos.y+vp->WorkSize.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
   ImGui::SetNextWindowSize(ImVec2(std::min(vp->WorkSize.x-24.f,ImGui::GetFontSize()*28),
    std::min(vp->WorkSize.y-24.f,ImGui::GetFontSize()*34)),ImGuiCond_Appearing);
-  if(ImGui::BeginPopupModal("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings)) {
+  settings_open=ImGui::BeginPopupModal("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings);
+  if(settings_open) {
    if(!engine_options.loaded && !c.options_result.is_null()) engine_options.load(c.options_result);
-   if(settings_saving && (!c.options_saved.is_null() || !c.connected)) {
+   if(!keybinding_editor.loaded && !c.bindings_result.is_null()) keybinding_editor.load(c.bindings_result);
+   if(saving_bindings && (!c.bindings_saved.is_null() || !c.connected)) {
+    saving_bindings=false; settings_saving=false;
+    if(!c.connected) settings_error="Backend disconnected. Keybindings could not be confirmed.";
+    else if(c.bindings_saved.contains("error")) settings_error=c.bindings_saved.value("error","");
+    else {
+     keybinding_editor.load(c.bindings_saved);
+     if(!engine_options.changes().empty()) {
+      c.options_saved=nullptr; c.send("options.set",{{"context",engine_options.context},{"values",engine_options.changes()}}); c.busy=true; settings_saving=true;
+     } else if(apply_settings(window)) ImGui::CloseCurrentPopup();
+     else settings_error="Bindings saved, but Deluxe settings could not be saved. Please retry Save and Close.";
+    }
+   }
+   if(settings_saving && !saving_bindings && (!c.options_saved.is_null() || !c.connected)) {
     settings_saving=false;
     if(!c.connected) settings_error="Backend disconnected. Angband options could not be confirmed.";
     else if(c.options_saved.contains("error")) settings_error=c.options_saved.value("error","");
@@ -591,6 +621,7 @@ struct UI {
    ImGui::BeginDisabled(settings_saving);
    const float footer=ImGui::GetFrameHeightWithSpacing()+ImGui::GetStyle().ItemSpacing.y;
    ImGui::BeginChild("Settings contents",ImVec2(0,-footer));
+   bool editing_bindings=false;
    if(ImGui::BeginTabBar("Settings tabs")) {
     if(ImGui::BeginTabItem("Graphics")) {
      ImGui::Spacing(); ImGui::Checkbox("Fullscreen",&draft_fullscreen);
@@ -620,6 +651,7 @@ struct UI {
      engine_options.draw();
      ImGui::EndTabItem();
     }
+    if(ImGui::BeginTabItem("Keybindings")) { editing_bindings=true; keybinding_editor.draw(); ImGui::EndTabItem(); }
     if(ImGui::BeginTabItem("Audio")) {
      ImGui::Checkbox("Sound enabled",&draft_audio_settings.enabled);
      ImGui::BeginDisabled(!draft_audio_settings.enabled);
@@ -686,14 +718,23 @@ struct UI {
     }
     ImGui::EndTabBar();
    }
+   if(!editing_bindings && keybinding_editor.listening) { keybinding_editor.listening=false; keybinding_editor.command=-1; }
    if(!settings_error.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",settings_error.c_str()); }
    ImGui::EndChild();
-   if(ImGui::Button("Cancel")||(!settings_saving && ImGui::IsKeyPressed(ImGuiKey_Escape))) ImGui::CloseCurrentPopup();
+   if(ImGui::Button("Cancel")||(!keybinding_editor.listening && !settings_saving && ImGui::IsKeyPressed(ImGuiKey_Escape))) ImGui::CloseCurrentPopup();
    ImGui::SameLine();
    const float button_width=ImGui::CalcTextSize("Save and Close").x+2*ImGui::GetStyle().FramePadding.x;
    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowWidth()-ImGui::GetStyle().WindowPadding.x-button_width));
    if(ImGui::Button("Save and Close")) {
-    if(!engine_options.changes().empty()) {
+    if(keybinding_editor.command>=0) settings_error="Finish or cancel the pending key capture first.";
+    else if(keybinding_editor.changed()) {
+     if(!c.ready() || c.state.value("phase","")!="playing") settings_error="Return to normal play before changing keybindings.";
+     else {
+      c.bindings_saved=nullptr; c.options_saved=nullptr; settings_error.clear();
+      c.send("keybindings.set",{{"revision",keybinding_editor.revision},{"bindings",keybinding_editor.bindings}});
+      c.busy=true; settings_saving=saving_bindings=true;
+     }
+    } else if(!engine_options.changes().empty()) {
      if(!c.ready() || c.state.value("phase","")!="playing") settings_error="Return to normal play before changing Angband options.";
      else {
       c.options_saved=nullptr; settings_error.clear();
@@ -1735,6 +1776,10 @@ int main(int argc,char **argv) {
      auto p=curve.map(ImVec2(e.motion.x,e.motion.y),true); e.motion.x=p.x; e.motion.y=p.y;
     }
    }
+   if(ui.settings_open && ui.keybinding_editor.event(e)) {
+    if(e.type==SDL_EVENT_KEY_UP) ImGui_ImplSDL3_ProcessEvent(&e);
+    continue;
+   }
    // Forward releases so the death acknowledgement cannot leave input held.
    if(connection.run_report.is_null() && ui.quickbar_event(e)) continue;
    ImGui_ImplSDL3_ProcessEvent(&e);
@@ -1753,7 +1798,8 @@ int main(int argc,char **argv) {
      case SDLK_DOWN: ui.keys.push_back("down"); break;
      case SDLK_LEFT: ui.keys.push_back("left"); break;
      case SDLK_RIGHT: ui.keys.push_back("right"); break;
-     default: if((e.key.mod&SDL_KMOD_CTRL) && e.key.key>='a' && e.key.key<='z') ui.keys.push_back(int(e.key.key-'a'+1));
+     default: if(KeybindingEditor::function_key(e.key.key) && !(e.key.mod&(SDL_KMOD_CTRL|SDL_KMOD_SHIFT|SDL_KMOD_ALT|SDL_KMOD_GUI))) ui.keys.push_back(KeybindingEditor::function_key(e.key.key));
+      else if((e.key.mod&SDL_KMOD_CTRL) && e.key.key>='a' && e.key.key<='z') ui.keys.push_back(int(e.key.key-'a'+1));
     }
    }
    if(e.type==SDL_EVENT_TEXT_INPUT && ui.owns_keyboard() && !(SDL_GetModState()&SDL_KMOD_CTRL)) {
