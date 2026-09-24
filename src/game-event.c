@@ -208,7 +208,7 @@ void event_signal_blast(game_event_type type,
 						bool drawing,
 						bool *player_sees_grid,
 						struct loc *blast_grid,
-						struct loc centre)
+						struct loc centre, bool arc)
 {
 	game_event_data data;
 	data.explosion.proj_type = proj_type;
@@ -218,6 +218,7 @@ void event_signal_blast(game_event_type type,
 	data.explosion.player_sees_grid = player_sees_grid;
 	data.explosion.blast_grid = blast_grid;
 	data.explosion.centre = centre;
+	data.explosion.arc = arc;
 
 	game_event_dispatch(type, &data);
 }

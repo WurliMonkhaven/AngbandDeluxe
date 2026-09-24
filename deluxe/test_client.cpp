@@ -931,6 +931,24 @@ int main(int argc,char **argv) {
    check(fx.tiles.empty(),"Effects cannot leak to another level");
   }
   {
+   ProjectileFeedback fx;
+   json state={{"phase","playing"},{"dungeon",{{"level_id","breath"}}}};
+   json batch={{"received",20.0},{"level_id","breath"},{"effects",json::array({
+    {{"element","FIRE"},{"blast",true},{"arc",true},{"tiles",json::array({{2,3,1},{4,3,3},{7,3,6}})}}})}};
+   std::deque<json> events{batch}; fx.update(events,state,true,20.05);
+   check(fx.tiles.size()==3 && fx.tiles[0].arc,"Breaths retain native affected tiles");
+   check(fx.tiles[0].delay<fx.tiles[1].delay && fx.tiles[1].delay<fx.tiles[2].delay,"Breath wave rolls away from its source");
+   check(fx.tiles[0].glyph=='^',"Fire breath has its own wisp treatment");
+   ImGui::NewFrame(); ImGui::Begin("Breath test");
+   fx.draw(ImGui::GetWindowDrawList(),{0,0},{400,300},18,24,0,0,20.2);
+   ImGui::End(); ImGui::Render();
+   fx.update(events,state,true,20.5); check(!fx.tiles.empty(),"Breath tail lasts longer than a bolt");
+   fx.update(events,state,true,20.65); check(fx.tiles.empty(),"Breath clears without input or engine waits");
+   events.push_back(batch); fx.update(events,state,true,21); check(fx.tiles.empty(),"Stale breath does not replay");
+   batch["received"]=21.; events.push_back(batch); fx.update(events,state,false,21); check(fx.tiles.empty(),"Animation setting disables breath too");
+   events.push_back(batch); state["dungeon"]["level_id"]="other"; fx.update(events,state,true,21); check(fx.tiles.empty(),"Breath cannot follow the player to another level");
+  }
+  {
    json state={{"context","aim-2"},{"blast_radius",2}};
    json preview={{"context","aim-2"},{"x",4},{"y",5},{"tiles",json::array({{4,5},{5,5},{4,6}})}};
    check(BlastPreview::matches(preview,state,4,5),"Current blast footprint matches its target");

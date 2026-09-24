@@ -1399,6 +1399,44 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(e.process.wait(timeout=10), 0)
         self.assertTrue(dead_save.exists())
 
+    def test_breath_feedback_and_free_test_spell(self):
+        e=self.engine; e.hello()
+        self.assertIn('error',e.call('debug.breath',{'element':'FIRE'}))
+        e.birth()
+        for value in ('BOGUS','',4,None):
+            self.assertEqual(e.call('debug.breath',{'element':value})['error']['code'],'invalid_argument')
+        for element in ('FIRE','COLD','ELEC','ACID','POIS'):
+            before=e.state; old=before['revision']
+            self.assertIn('result',e.call('debug.breath',{'element':element})); e.next_state(old)
+            self.assertTrue(e.state['aiming'])
+            self.assertEqual(e.state.get('blast_radius',0),0,'Breath must not advertise a ball preview')
+            e.projectile_events.clear(); e.key(ord('6'))
+            for _ in range(20):
+                e.state=e.call('state.get')['result']
+                if e.state['readiness']=='ready': break
+                e.key('enter')
+            self.assertEqual(e.state['turn'],before['turn'])
+            self.assertEqual(e.state['player']['sp'],before['player']['sp'])
+            cones=[fx for batch in e.projectile_events for fx in batch['effects'] if fx.get('arc')]
+            self.assertTrue(cones,'Native breath must emit cone metadata')
+            x,y=before['player']['x'],before['player']['y']
+            for fx in cones:
+                self.assertEqual(fx['element'],element)
+                self.assertTrue(fx['blast'])
+                self.assertTrue(fx['tiles'])
+                for tx,ty,distance in fx['tiles']:
+                    self.assertGreaterEqual(tx,x,'Eastward breath cannot expand behind the caster')
+                    self.assertLessEqual(abs(ty-y),(tx-x)*.7+1)
+                    self.assertLessEqual(distance,12)
+            count=len(e.projectile_events); e.call('state.get')
+            self.assertEqual(len(e.projectile_events),count)
+        old=e.state['revision']; e.call('debug.breath',{'element':'FIRE'}); e.next_state(old)
+        e.projectile_events.clear(); e.key('escape')
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.key('escape')
+        self.assertFalse(e.projectile_events,'Cancelling breath must not project')
+
     def test_blast_preview_and_free_test_spell(self):
         e=self.engine
         e.hello(); e.birth()
@@ -1428,6 +1466,7 @@ class BackendTests(unittest.TestCase):
             self.assertNotIn('blast_radius',e.state)
             blasts=[fx for batch in e.projectile_events for fx in batch['effects'] if fx['blast']]
             self.assertTrue(blasts)
+            self.assertFalse(any(fx.get('arc') for fx in blasts),'Balls stay explosions')
             actual={(p[0],p[1]) for fx in blasts for p in fx['tiles']}
             expected={tuple(p) for p in preview['tiles']}
             self.assertEqual(actual,expected,'Preview must match the visible native explosion')

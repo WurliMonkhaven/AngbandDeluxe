@@ -45,13 +45,13 @@ static void deluxe_blast_preview(const char *id, const cJSON *p)
  response(id, out);
 }
 
-static void deluxe_debug_blast(int radius)
+static void deluxe_debug_projection(int index, int element, int radius, int width)
 {
  struct effect effect = { 0 };
  const struct effect *previous = aim_effect;
  bool ident = false, old_target = OPT(player, use_old_target), aimed;
  int dir = DIR_UNKNOWN;
- effect.index = EF_BALL; effect.subtype = PROJ_FIRE; effect.radius = radius;
+ effect.index = index; effect.subtype = element; effect.radius = radius; effect.other = width;
  effect.dice = dice_new(); dice_parse_string(effect.dice, "25");
  /* A testing cast must always open aiming, even with Use old target enabled. */
  OPT(player, use_old_target) = false;

@@ -79,6 +79,7 @@ static unsigned long revision, sequence, context_id;
 static char revision_text[32], context_text[32];
 static const char *phase = "launcher";
 static bool debug_blink;
+static int debug_breath_element = -1;
 static int debug_damage, debug_experience, debug_blast_radius;
 static int debug_status=-1,debug_status_amount;
 static int native_target_mode;
@@ -705,7 +706,7 @@ static void pump(void)
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
   negotiated = true;
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -1074,6 +1075,21 @@ static void pump(void)
    debug_experience=amount->valueint; ready=false;
    response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0);
   }
+ } else if (streq(method, "debug.breath")) {
+  const char *element=str(p,"element");
+  int type=-1;
+  if(streq(element,"FIRE")) type=PROJ_FIRE;
+  else if(streq(element,"COLD")) type=PROJ_COLD;
+  else if(streq(element,"ELEC")) type=PROJ_ELEC;
+  else if(streq(element,"ACID")) type=PROJ_ACID;
+  else if(streq(element,"POIS")) type=PROJ_POIS;
+  if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing"))
+   error(id,"busy","Return to normal play before breathing.");
+  else if(type<0) error(id,"invalid_argument","Choose Fire, Frost, Lightning, Acid or Poison.");
+  else {
+   debug_breath_element=type; ready=false;
+   response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0);
+  }
  } else if (streq(method, "debug.blink")) {
   if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing"))
    error(id,"busy","Return to normal play before casting Blink.");
@@ -1198,13 +1214,17 @@ static errr get_command(cmd_context context)
    int amount=debug_experience; debug_experience=0; ready=false;
    player_exp_gain(player,amount);
   }
+  if (debug_breath_element >= 0) {
+   int element=debug_breath_element; debug_breath_element=-1; ready=false;
+   deluxe_debug_projection(EF_BREATH, element, 12, 60);
+  }
   if (debug_blink) {
    debug_blink=false; ready=false;
    effect_simple(EF_TELEPORT,source_player(),"10",0,0,0,0,0,NULL);
   }
   if (debug_blast_radius) {
    int radius=debug_blast_radius; debug_blast_radius=0; ready=false;
-   deluxe_debug_blast(radius);
+   deluxe_debug_projection(EF_BALL, PROJ_FIRE, radius, 0);
   }
   if (debug_damage) {
    int damage = debug_damage; debug_damage = 0; ready = false;

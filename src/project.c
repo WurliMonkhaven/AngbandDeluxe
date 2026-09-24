@@ -944,7 +944,7 @@ bool project(struct source origin, int rad, struct loc finish,
 
 	/* Tell the UI to display the blast */
 	event_signal_blast(EVENT_EXPLOSION, typ, num_grids, distance_to_grid,
-					   drawing, player_sees_grid, blast_grid, centre);
+					   drawing, player_sees_grid, blast_grid, centre, (flg & PROJECT_ARC) != 0);
 
 	/* Affect objects on every relevant grid */
 	if (flg & (PROJECT_ITEM)) {

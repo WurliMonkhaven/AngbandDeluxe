@@ -955,3 +955,19 @@ Events are bounded, level-scoped, observational, and do not consume RNG.
 Dev tools offers Cast Blink: native short-range teleport with no mana or turn
 cost, usable during normal play to audition the departure ripple. Native
 teleport restrictions still apply.
+
+
+### Breath weapon visuals
+
+Native arc projections (including monster and player breaths) publish their
+visible affected tiles and source-relative distances with explicit arc metadata.
+The Projectiles and spells animation setting now includes an elemental breath
+wave: a bright leading edge, translucent cone wash, and fading ASCII wisps.
+Walls and visibility come from the actual projection; no inferred cone or hidden
+source coordinates are sent. Normal bolts and explosions retain their timing.
+The bounded presentation finishes within 640 ms and never delays engine input.
+
+Dev tools > Fire breath weapon offers Fire, Frost, Lightning, Acid and Poison.
+The test uses native breath targeting and geometry (60 degrees, range 12, damage
+25), costs no mana or turns, and can be cancelled before firing. Normal elemental
+effects on monsters, items and terrain apply.

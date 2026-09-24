@@ -146,6 +146,7 @@ typedef union
 	{
 		int proj_type;
 		int num_grids;
+		bool arc; /* Cone geometry, not an explosion centered at the target. */
 		int *distance_to_grid;
 		bool drawing;
 		bool *player_sees_grid;
@@ -237,7 +238,7 @@ void event_signal_blast(game_event_type type,
 						bool seen,
 						bool *player_sees_grid,
 						struct loc *blast_grid,
-						struct loc centre);
+						struct loc centre, bool arc);
 void event_signal_bolt(game_event_type type,
 					   int proj_type,
 					   bool drawing,

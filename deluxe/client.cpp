@@ -516,7 +516,7 @@ struct UI {
  bool fear_animation=true, draft_fear_animation=true;
  bool level_animation=true, draft_level_animation=true;
  bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
- int damage_amount=1, xp_amount=100, blast_radius=2;
+ int damage_amount=1, xp_amount=100, blast_radius=2, breath_element=0;
  DevStatusDialog dev_status_dialog;
  int crt=0, draft_crt=0;
  int crt_strength=1, draft_crt_strength=1;
@@ -1553,8 +1553,9 @@ struct UI {
   ImGui::PushStyleColor(ImGuiCol_ButtonActive,ImVec4(.85f,.24f,.26f,1));
   if(ImGui::Button("Dev tools")) ImGui::OpenPopup("Developer tools");
   ImGui::PopStyleColor(3);
-  bool open_damage=false,open_status=false,open_xp=false,open_blast=false;
+  bool open_damage=false,open_status=false,open_xp=false,open_blast=false,open_breath=false;
   if(ImGui::BeginPopup("Developer tools")) {
+   if(ImGui::MenuItem("Fire breath weapon",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.breath",0)>0)) open_breath=true;
    if(ImGui::MenuItem("Cast Blink",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.blink",0)>0)) {
     keys.clear(); c.send("debug.blink"); c.busy=true;
    }
@@ -1577,6 +1578,22 @@ struct UI {
    ImGui::BeginDisabled(!c.ready() || xp_amount<1 || xp_amount>99999999);
    if(ImGui::Button("Give XP")) {
     c.send("debug.experience",{{"amount",xp_amount}}); c.busy=true;
+    ImGui::CloseCurrentPopup(); focus_game();
+   }
+   ImGui::EndDisabled(); ImGui::SameLine();
+   if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+   ImGui::EndPopup();
+  }
+  if(open_breath) { keys.clear(); ImGui::OpenPopup("Fire breath weapon"); }
+  if(ImGui::BeginPopupModal("Fire breath weapon",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+   static const char *elements[]={"FIRE","COLD","ELEC","ACID","POIS"};
+   ImGui::TextUnformatted("Element");
+   ImGui::Combo("##Breath element",&breath_element,"Fire\0Frost\0Lightning\0Acid\0Poison\0");
+   ImGui::TextDisabled("60-degree cone, up to 12 tiles. 25 damage.");
+   ImGui::TextDisabled("No mana or turn cost. Can damage monsters and items.");
+   ImGui::BeginDisabled(!c.ready());
+   if(ImGui::Button("Aim breath")) {
+    c.send("debug.breath",{{"element",elements[breath_element]}}); c.busy=true;
     ImGui::CloseCurrentPopup(); focus_game();
    }
    ImGui::EndDisabled(); ImGui::SameLine();

@@ -19,7 +19,7 @@ static void deluxe_projectiles_publish(void)
  deluxe_projectile_kind = NULL;
 }
 
-static cJSON *deluxe_projectile_begin(const char *kind, bool blast)
+static cJSON *deluxe_projectile_begin(const char *kind, bool blast, bool arc)
 {
  cJSON *v;
  if (deluxe_projectile_groups >= 64) return NULL;
@@ -28,7 +28,7 @@ static cJSON *deluxe_projectile_begin(const char *kind, bool blast)
   deluxe_projectile_level = deluxe_level;
  }
  v = cJSON_CreateObject();
- string(v, "element", kind); json_bool(v, "blast", blast);
+ string(v, "element", kind); json_bool(v, "blast", blast); json_bool(v,"arc",arc);
  deluxe_projectile_points = cJSON_AddArrayToObject(v, "tiles");
  cJSON_AddItemToArray(deluxe_projectiles, v);
  deluxe_projectile_kind = kind;
@@ -61,7 +61,7 @@ static void deluxe_projectile(game_event_type type, game_event_data *data, void 
   if (radius || data->explosion.num_grids == 1) {
    for (i = 0; i < data->explosion.num_grids; ++i) {
     if (!data->explosion.player_sees_grid[i]) continue;
-    if (!points) points = deluxe_projectile_begin(proj_idx_to_name(data->explosion.proj_type), true);
+    if (!points) points = deluxe_projectile_begin(proj_idx_to_name(data->explosion.proj_type), true, data->explosion.arc);
     deluxe_projectile_tile(points, data->explosion.blast_grid[i].x,
      data->explosion.blast_grid[i].y, data->explosion.distance_to_grid[i]);
    }
@@ -80,7 +80,7 @@ static void deluxe_projectile(game_event_type type, game_event_data *data, void 
  if (!deluxe_projectile_points || !streq(kind, deluxe_projectile_kind) ||
      ABS(x-deluxe_projectile_x)>1 || ABS(y-deluxe_projectile_y)>1 ||
      (x==deluxe_projectile_x && y==deluxe_projectile_y))
-  deluxe_projectile_points = deluxe_projectile_begin(kind, false);
+  deluxe_projectile_points = deluxe_projectile_begin(kind, false, false);
  deluxe_projectile_tile(deluxe_projectile_points, x, y, 0);
  deluxe_projectile_x = x; deluxe_projectile_y = y;
 }
