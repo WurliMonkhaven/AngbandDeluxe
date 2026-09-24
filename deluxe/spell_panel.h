@@ -35,8 +35,9 @@ struct SpellPanel {
     if(ImGui::Selectable(label.c_str(),selection==id,ImGuiSelectableFlags_SpanAllColumns|ImGuiSelectableFlags_AllowDoubleClick)) {
      selection=id; if(ImGui::IsMouseDoubleClicked(0)) activated=id;
     }
+    if(bar && book && Quickbar::carried(*book)) bar->drag_source(Quickbar::spell_binding(*book,s));
     if(bar && book && ImGui::BeginPopupContextItem("Spell actions")) { bar->assign_menu(Quickbar::spell_binding(*book,s)); ImGui::EndPopup(); }
-    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",s.value("label","").c_str());
+    if(ImGui::IsItemHovered() && !ImGui::GetDragDropPayload()) ImGui::SetTooltip("%s",s.value("label","").c_str());
     ImGui::TableNextColumn(); ImGui::Text("%d",s.value("mana",0));
     ImGui::TableNextColumn(); ImGui::Text("%d%%",s.value("failure",0));
     ImGui::TableNextColumn(); ImGui::TextUnformatted(cast?"Castable":study?"Learnable":s.value("status","").c_str());

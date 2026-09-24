@@ -806,3 +806,14 @@ Missing items/books and engine-provided casting blockers have explicit reasons.
 Descriptions wrap and long equipment descriptions are abbreviated with a pointer
 to Inventory. Hovering is local and read-only; slot size and activation rules are
 unchanged. Device metadata uses charges/charging; spells add cast_reason.
+
+### Quickbar drag and drop
+
+With the quickbar enabled, carried inventory rows and spells in carried books
+can be dragged onto slots. Items default to their usual action (Quaff, Read,
+Eat, Use, Fire, Wield, Browse, Take off, Throw); the drag preview names that
+action, and right-click assignment still offers alternatives. A new item/spell
+replaces the destination assignment. Slot drags move into empty slots or swap
+occupied slots, preserving customized appearance. Dropping outside or back onto
+the source leaves assignments unchanged. Drops never activate gameplay actions;
+bindings remain per-character and save through the existing settings path.

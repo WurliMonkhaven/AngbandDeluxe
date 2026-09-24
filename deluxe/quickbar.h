@@ -136,6 +136,46 @@ struct Quickbar {
  static json command_binding(const json &command) {
   return {{"type","command"},{"command",command.value("id","")},{"label",command.value("label","")},{"category","command"},{"color",14}};
  }
+ static json default_item_binding(const json &item) {
+  if(!item_choices(item)) return nullptr;
+  // Prefer the item's everyday action. Alternatives remain in the context menu.
+  for(const char *command:{"core.quaff","core.read","core.eat","core.use","core.fire","core.wield","core.browse","core.takeoff","core.throw","core.drop","core.inscribe"})
+   for(const auto &action:item["actions"]) if(action==command) return item_binding(item,command);
+  return nullptr;
+ }
+ void drag_source(const json &binding,int source=-1) {
+  if(binding.is_null() || !ImGui::BeginDragDropSource()) return;
+  const auto wire=json{{"profile",profile},{"source",source},{"binding",binding}}.dump();
+  ImGui::SetDragDropPayload("DELUXE_QUICKBAR",wire.data(),wire.size(),ImGuiCond_Once);
+  ImGui::TextUnformatted(binding.value("label","").c_str());
+  ImGui::TextDisabled(source>=0?"Drop on a slot to move or swap":"Drop on a quickbar slot to assign");
+  ImGui::EndDragDropSource();
+ }
+ bool accept_drop(const json &payload,int destination) {
+  if(destination<0 || destination>=10 || !payload.is_object() || payload.value("profile","")!=profile ||
+     !payload.contains("source") || !payload["source"].is_number_integer() || !payload.contains("binding")) return false;
+  const auto &binding=payload["binding"];
+  if(!binding.is_object() || !binding.contains("type") || !binding["type"].is_string() ||
+     !binding.contains("command") || !binding["command"].is_string() || !binding.contains("label") || !binding["label"].is_string()) return false;
+  const int source=payload["source"];
+  auto &s=slots();
+  if(source>=0) {
+   if(source>=10 || source==destination || s[source]!=binding) return false;
+   std::swap(s[source],s[destination]);
+  } else {
+   if(source!=-1) return false;
+   s[destination]=binding;
+  }
+  dirty=true; return true;
+ }
+ void drop_target(int slot) {
+  if(!ImGui::BeginDragDropTarget()) return;
+  if(const auto *payload=ImGui::AcceptDragDropPayload("DELUXE_QUICKBAR")) {
+   const auto value=json::parse(static_cast<const char*>(payload->Data),static_cast<const char*>(payload->Data)+payload->DataSize,nullptr,false);
+   if(!value.is_discarded()) accept_drop(value,slot);
+  }
+  ImGui::EndDragDropTarget();
+ }
  static bool normal_play(const Connection &c) {
   return c.state.value("phase","")=="playing" && c.state.value("readiness","")=="ready" &&
    c.prompt.empty() && c.pending_prompt.empty() && !c.state.value("message_pending",false) &&
@@ -379,7 +419,8 @@ struct Quickbar {
    if(i) ImGui::SameLine(0,gap);
    ImGui::PushID(i); const auto a=ImGui::GetCursorScreenPos();
    const auto action=resolve(s[i],c); const bool usable=action.reason.empty();
-   if(ImGui::InvisibleButton("Slot",ImVec2(width,h)) && usable) activated=i;
+   const bool dragging=ImGui::GetDragDropPayload()!=nullptr;
+   if(ImGui::InvisibleButton("Slot",ImVec2(width,h)) && usable && !dragging) activated=i;
    const bool hovered=ImGui::IsItemHovered();
    auto *draw=ImGui::GetWindowDrawList();
    draw->AddRectFilled(a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(hovered?ImVec4(.20f,.28f,.38f,1):ImVec4(.08f,.12f,.17f,1)),3);
@@ -394,7 +435,9 @@ struct Quickbar {
     }
    }
    const auto number=std::to_string((i+1)%10); draw->AddText(ImVec2(a.x+3,a.y+2),ImGui::GetColorU32(ImGuiCol_TextDisabled),number.c_str());
-   if(hovered) tooltip(s[i],c,action,i);
+   drag_source(s[i],i);
+   drop_target(i);
+   if(hovered && !ImGui::GetDragDropPayload()) tooltip(s[i],c,action,i);
    if(ImGui::BeginPopupContextItem("Slot menu")) {
     choose_binding(c,i);
     if(!s[i].is_null()) { ImGui::Separator(); if(ImGui::MenuItem("Customize")) { begin_customize(i); open_customize=true; } if(ImGui::MenuItem("Clear slot")) { s[i]=nullptr; dirty=true; } }

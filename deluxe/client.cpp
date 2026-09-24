@@ -1062,6 +1062,7 @@ struct UI {
     ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
     if(ImGui::Selectable(label.c_str(),selected==id,ImGuiSelectableFlags_SpanAllColumns)) selected=id;
     ImGui::PopStyleColor();
+    if(quickbar_enabled) quickbar.drag_source(Quickbar::default_item_binding(o));
     if(ImGui::BeginPopupContextItem("Item actions")) {
      selected=id;
      ImGui::TextDisabled("%s",label.c_str()); ImGui::Separator();
@@ -1076,7 +1077,7 @@ struct UI {
      ImGui::EndPopup();
     }
 
-    if(ImGui::IsItemHovered()) {
+    if(ImGui::IsItemHovered() && !ImGui::GetDragDropPayload()) {
      ImGui::BeginTooltip(); ImGui::TextUnformatted(label.c_str());
      const auto inscription=o.value("inscription","");
      if(!inscription.empty()) ImGui::Text("Inscription: %s",inscription.c_str());
