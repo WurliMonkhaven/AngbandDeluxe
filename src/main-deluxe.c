@@ -332,6 +332,7 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  {
   char binding[256]; int used;
   used=strnfmt(binding,sizeof(binding),"angband-kind-%d-ego-%d-art-%d",o->kind->kidx,o->ego?o->ego->eidx:0,o->artifact?o->artifact->aidx:0);
+  string(j,"kind_key",binding);
   if(tval_is_wearable(o)) {
    used+=strnfmt(binding+used,sizeof(binding)-used,"-%d-%d-%d",o->to_h,o->to_d,o->to_a);
    for(i=0;i<OBJ_MOD_MAX && used<(int)sizeof(binding)-16;++i)
@@ -507,6 +508,7 @@ static cJSON *capture(void)
    number(j, "hp", m->hp); number(j, "max_hp", m->maxhp);
    number(j, "glyph", m->race->d_char); number(j, "color", m->race->d_attr);
    json_bool(j, "visible", monster_is_visible(m)); json_bool(j, "asleep", m->m_timed[MON_TMD_SLEEP] > 0);
+   json_bool(j,"afraid",m->m_timed[MON_TMD_FEAR]>0); number(j,"index",i);
    { char description[160]=""; look_mon_desc(description,sizeof(description),i); string(j,"condition",description); }
    cJSON_AddItemToArray(monsters, j);
   }

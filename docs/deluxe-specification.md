@@ -865,3 +865,26 @@ no textures, animation loops, extra GPU passes or backend requests are required.
 The optional deluxe-ui-preview build target renders captured protocol fixtures
 to offscreen BMPs for visual review without opening or controlling a desktop
 window. Its fixture contains state, catalog and commands, plus optional scale.
+
+Frightened monsters emit warm amber exclamation marks rising straight upwards.
+They use the engine afraid flag (MON_TMD_FEAR), stop when fear ends, and share
+the sleep markers' visibility, hallucination and clipping rules. A separate
+Frightened monsters switch in Animations defaults on and follows staged settings.
+Monster records expose afraid and a level-local index; animation phase uses the
+index so movement does not reset its rhythm. Fear takes visual precedence if
+a monster is simultaneously asleep and afraid.
+
+### Inventory acquisition highlights
+
+Newly acquired carried items have a quiet green row wash and NEW badge; increases
+to an existing owned stack show +N. Markers remain while browsing other tabs or
+using a search filter, and clear on selection, right-click inspection or deliberate
+hover. Names keep their Angband colours and quantities keep their own column.
+
+The first inventory snapshot is a silent baseline on every session. Updates are
+processed per received snapshot using owned totals across pack/equipment/quiver,
+not transient object handles, slot order or display names. Ground/shop/home stock
+is excluded. Stack rearrangement, identification and inscription stay quiet.
+A kind_key groups the underlying kind/ego/artifact without mutable equipment
+bonuses, so enchanting does not count as a new acquisition. Highlight records
+are bounded by current carried item identities and do not persist across loads.

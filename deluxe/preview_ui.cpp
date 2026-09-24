@@ -23,6 +23,7 @@ int main(int argc,char **argv) {
   auto *download=SDL_CreateGPUTransferBuffer(gpu,&buf);
   if(!target || !download) throw std::runtime_error(SDL_GetError());
   Connection c; c.connected=c.negotiated=true; c.catalog=fixture.value("catalog",json::object()); c.commands=fixture.value("commands",json::array());
+  if(fixture.contains("previous_state")) c.inventory_changes.update(fixture["previous_state"]);
   c.receive({{"kind","event"},{"event","state.changed"},{"data",fixture.at("state")}});
   UI ui{c}; ui.base_style=ImGui::GetStyle();
   ui.scale=std::clamp(fixture.value("scale",1.f),.75f,1.5f);
