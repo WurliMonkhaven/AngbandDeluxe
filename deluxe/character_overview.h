@@ -42,7 +42,7 @@ struct CharacterOverview {
   ImGui::SeparatorText(label);
   ImGui::Dummy(ImVec2(0,ImGui::GetFontSize()*.1f));
  }
- static bool draw(const json &p,bool can_open) {
+ static bool draw(const json &p,bool can_open,bool *open_spells=nullptr) {
   bool open=false;
   std::string identity=p.value("name","");
   if(!identity.empty()) identity+=" · ";
@@ -85,7 +85,7 @@ struct CharacterOverview {
    }
    ImGui::EndTable();
   }
-  StatusEffects::draw(p);
+  StatusEffects::draw(p,open_spells);
   static const char *names[]={"STR","INT","WIS","DEX","CON"};
   if(p.contains("stats") && !p["stats"].empty() && ImGui::BeginTable("Attributes",int(p["stats"].size()),ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_BordersInnerV)) {
    ImGui::TableNextRow();
@@ -109,7 +109,6 @@ struct CharacterOverview {
    ImGui::TableNextColumn(); const int speed=p.value("speed",0); metric("Speed",(speed>=0?"+":"")+std::to_string(speed));
    ImGui::EndTable();
   }
-  if(p.value("study",0)) ImGui::Text("Spells to learn: %d",p.value("study",0));
   if(p.value("extra_moves",0)) ImGui::Text("Extra moves: %+d",p.value("extra_moves",0));
   section("Dungeon");
   const char *dungeon_labels[]={"Depth","Light","Feel",""};

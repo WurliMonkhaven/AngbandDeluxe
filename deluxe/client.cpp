@@ -464,7 +464,7 @@ struct UI {
  bool proceed_with_click=false, draft_proceed_with_click=false;
  bool click_exits_look=false, draft_click_exits_look=false;
  bool quick_targeting=false, draft_quick_targeting=false;
- bool select_creatures_tab=false;
+ bool select_creatures_tab=false, select_spells_tab=false;
  DungeonTooltip dungeon_tooltip;
  int grid_menu_x=0,grid_menu_y=0;
  std::string grid_menu_context;
@@ -968,7 +968,7 @@ struct UI {
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
  void character() {
-  if(c.state.contains("player") && CharacterOverview::draw(c.state["player"],c.ready())) execute("core.character");
+  if(c.state.contains("player") && CharacterOverview::draw(c.state["player"],c.ready(),c.capabilities.value("spells",0)>0 && c.state["player"].value("spellcasting",false)?&select_spells_tab:nullptr)) execute("core.character");
  }
  void tile_details(int x,int y,bool full) {
   ImGui::Text("Tile %d, %d",x,y);
@@ -1453,7 +1453,8 @@ struct UI {
      ImGui::BeginChild("Target content"); targeting_panel(); ImGui::EndChild(); ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("Inventory")) { ImGui::BeginChild("Item content"); items(); ImGui::EndChild(); ImGui::EndTabItem(); }
-    if(c.capabilities.value("spells",0)>0 && c.state.contains("player") && c.state["player"].value("spellcasting",false) && ImGui::BeginTabItem("Spells")) {
+    if(c.capabilities.value("spells",0)>0 && c.state.contains("player") && c.state["player"].value("spellcasting",false) && ImGui::BeginTabItem("Spells",nullptr,select_spells_tab?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)) {
+     select_spells_tab=false;
      ImGui::BeginChild("Spell content"); if(spell_panel.draw(c,quickbar_enabled?&quickbar:nullptr)) focus_game(); ImGui::EndChild(); ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("Creatures",nullptr,select_creatures_tab?ImGuiTabItemFlags_SetSelected:ImGuiTabItemFlags_None)) { select_creatures_tab=false; ImGui::BeginChild("Creature content"); creatures(); ImGui::EndChild(); ImGui::EndTabItem(); }
