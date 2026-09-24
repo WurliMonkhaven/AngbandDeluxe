@@ -291,3 +291,11 @@ void event_signal_combat(struct loc grid, const char *kind, int amount, bool pla
  data.combat.player=player; data.combat.visible=visible;
  game_event_dispatch(EVENT_COMBAT_FEEDBACK,&data);
 }
+
+void event_signal_motion(struct loc from, struct loc to, int index, bool blink, bool visible)
+{
+ game_event_data data;
+ data.motion.from=from; data.motion.to=to; data.motion.index=index;
+ data.motion.blink=blink; data.motion.visible=visible;
+ game_event_dispatch(EVENT_ACTOR_MOTION,&data);
+}

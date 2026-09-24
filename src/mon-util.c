@@ -1725,3 +1725,20 @@ bool monster_revert_shape(struct monster *mon)
 
 	return false;
 }
+
+/* Presentation signals are emitted only by explicit movement causes. */
+void monster_walk(struct loc from, struct loc to)
+{
+ struct monster *mon=square_monster(cave,from);
+ bool seen=mon && monster_is_visible(mon) && !monster_is_camouflaged(mon);
+ int index=mon ? mon->midx : 0;
+ monster_swap(from,to);
+ event_signal_motion(from,to,index,false,seen && monster_is_visible(mon) && !player->timed[TMD_IMAGE]);
+}
+void monster_blink(struct loc from, struct loc to)
+{
+ struct monster *mon=square_monster(cave,from);
+ bool seen=mon ? monster_is_visible(mon) && !monster_is_camouflaged(mon) : loc_eq(player->grid,from);
+ event_signal_motion(from,from,mon ? mon->midx : 0,true,seen && !player->timed[TMD_IMAGE]);
+ monster_swap(from,to);
+}

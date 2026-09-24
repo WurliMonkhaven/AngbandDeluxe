@@ -936,3 +936,22 @@ The live character sheet has an Equipment page with an ASCII humanoid silhouette
 More > Run journal opens a read-only milestone timeline with search, category filters and a newest-first toggle. Entries show level, dungeon depth and native player turn. It uses Angband's saved history for the beginning of the quest, first attainment of each character level, unique kills and known artifact discoveries. Reattaining drained levels is not duplicated. Unidentified and never-discovered artifacts are omitted. The first recorded visit to each dungeon depth is now added to the native history on level transitions; loading and revisiting do not duplicate it. Existing saves recover their existing milestones, but no historical depth timestamps are invented.
 
 journal.get returns the history projection on demand, with no turn, RNG or state mutation and no additional per-movement payload. The final run record embeds an immutable journal and adds an ending entry. Journal tabs on the end-of-game screen and graveyard display that same timeline; older archived reports without a journal remain readable. Ordinary saves persist the engine history, so save renaming, reloads and replay follow native history semantics. The appended history flag fits the existing history bitfield size and does not change the save block format.
+
+
+### Monster walking and teleport presentation
+
+Explicit native walking events drive a short (100 ms) optional monster slide.
+Position differences never classify movement: Phase Door and teleport, including
+adjacent landings, cannot slide. Only currently visible, surviving actors at the
+reported destination animate. Newer moves replace older ones; presentation never
+queues input or delays engine turns.
+
+Successful same-level teleports create an optional 340 ms pale-blue tile ripple
+at the visible departure point, limited to tiles seen when the event occurred
+and still seen when rendered. No destination or hidden terrain is revealed.
+Animations settings expose Monster walking and Teleport ripples independently.
+Events are bounded, level-scoped, observational, and do not consume RNG.
+
+Dev tools offers Cast Blink: native short-range teleport with no mana or turn
+cost, usable during normal play to audition the departure ripple. Native
+teleport restrictions still apply.

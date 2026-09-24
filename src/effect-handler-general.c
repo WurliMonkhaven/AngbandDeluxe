@@ -2680,7 +2680,7 @@ bool effect_handler_TELEPORT(effect_handler_context_t *context)
 	sound(is_player ? MSG_TELEPORT : MSG_TPOTHER);
 
 	/* Move player or monster */
-	monster_swap(start, spots->grid);
+	monster_blink(start, spots->grid);
 	if (is_player) {
 		player_handle_post_move(player, true,
 			context->origin.what == SRC_MONSTER);
@@ -2822,7 +2822,7 @@ bool effect_handler_TELEPORT_TO(effect_handler_context_t *context)
 	sound(MSG_TELEPORT);
 
 	/* Move player or monster */
-	monster_swap(start, land);
+	monster_blink(start, land);
 	if (player_moves) {
 		player_handle_post_move(player, true,
 			context->origin.what == SRC_MONSTER);

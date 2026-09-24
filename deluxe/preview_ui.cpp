@@ -33,6 +33,10 @@ int main(int argc,char **argv) {
   ImGui::GetStyle().ScaleAllSizes(ui.scale); ImGui::GetStyle().FontScaleMain=ui.scale;
   for(const auto &item:c.state.value("items",json::array())) if(item.value("location","")=="Pack") { ui.selected=item.value("id",""); break; }
   for(int i=0;i<3;++i) {
+   if(fixture.contains("motion")) {
+    auto batch=fixture["motion"]; batch["received"]=double(SDL_GetTicksNS())/1e9-fixture.value("motion_elapsed",.14);
+    ui.motion_feedback.ripples.clear(); c.motion_events.push_back(batch);
+   }
    if(fixture.contains("projectiles")) {
     auto batch=fixture["projectiles"]; batch["received"]=double(SDL_GetTicksNS())/1e9-fixture.value("projectile_elapsed",.15);
     ui.projectile_feedback.tiles.clear(); c.projectile_events.push_back(batch);

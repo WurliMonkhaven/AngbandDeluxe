@@ -33,6 +33,7 @@ class Engine:
         self.activity_events = []
         self.combat_events = []
         self.projectile_events = []
+        self.motion_events = []
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._errors, daemon=True).start()
 
@@ -69,6 +70,8 @@ class Engine:
                 self.travel = j["data"]
             elif j["event"] == "activity.changed":
                 self.activity_events.append(j["data"])
+            elif j["event"] == "motion.feedback":
+                self.motion_events.append(j["data"])
             elif j["event"] == "projectile.feedback":
                 self.projectile_events.append(j["data"])
             elif j["event"] == "combat.feedback":
@@ -1508,6 +1511,33 @@ class BackendTests(unittest.TestCase):
             if e.state['readiness']=='ready': break
             e.key('enter')
         self.assertEqual(e.call('journal.get')['result'],journal,'Native saves preserve the journal without duplicate load milestones')
+
+    def test_blink_feedback(self):
+        e=self.engine; e.hello(); e.birth()
+        start=e.state['player'].copy(); turn=e.state['turn']
+        view=e.state['dungeon']
+        visible={(x+view['x'],y+view['y']) for y,row in enumerate(view['cells']) for x,cell in enumerate(row) if cell[10]}
+        old=e.state['revision']; self.assertIn('result',e.call('debug.blink')); e.next_state(old)
+        for _ in range(30):
+            e.state=e.call('state.get')['result']
+            if e.prompt:
+                p=e.prompt; e.prompt=None; old=e.state['revision']
+                self.assertEqual(p['type'],'confirmation')
+                e.call('prompt.reply',{'prompt_id':p['prompt_id'],'value':True}); e.next_state(old)
+            elif e.state['readiness']!='ready': e.key('enter')
+            else: break
+        blinks=[fx for batch in e.motion_events for fx in batch['effects'] if fx['blink']]
+        self.assertEqual(len(blinks),1)
+        self.assertEqual(e.state['player']['sp'],start['sp'])
+        self.assertEqual(e.state['turn'],turn,'Test Blink costs no turn')
+        blink=blinks[0]
+        self.assertEqual((blink['x'],blink['y']),(start['x'],start['y']))
+        self.assertEqual((blink['tx'],blink['ty']),(start['x'],start['y']),'No teleport destination is disclosed')
+        self.assertTrue(blink['tiles'])
+        self.assertTrue(all(tuple(tile) in visible for tile in blink['tiles']))
+        self.assertTrue(all((x-start['x'])**2+(y-start['y'])**2<=9 for x,y in blink['tiles']))
+        count=len(e.motion_events); e.call('state.get'); e.call('state.get')
+        self.assertEqual(len(e.motion_events),count,'Queries do not replay animations')
 
     def test_debug_experience(self):
         e=self.engine

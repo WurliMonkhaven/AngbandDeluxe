@@ -26,6 +26,25 @@ static BackendReader::Batch read_test_frames(const std::string &wire) {
 int main(int argc,char **argv) {
  try {
   check(argc==2,"Pass an unused settings-file path");
+  {
+   MotionFeedback motion; std::deque<json> events;
+   json state={{"phase","playing"},{"revision","1"},{"dungeon",{{"level_id","one"}}},{"monsters",json::array({{{"index",7},{"visible",true},{"x",11},{"y",10}}})}};
+   json walk={{"index",7},{"x",10},{"y",10},{"tx",11},{"ty",10},{"blink",false},{"tiles",json::array()}};
+   auto batch=[&](json e,double born) { return json{{"level_id","one"},{"received",born},{"effects",json::array({e})}}; };
+   events.push_back(batch(walk,1)); motion.update(events,state,true,true,1);
+   check(motion.offset(11,10,1).x==-1,"Walking begins at the previous tile");
+   check(motion.offset(11,10,1.05).x<0 && motion.offset(11,10,1.05).x>-.5,"Walking eases into the actual position");
+   auto blink=walk; blink["blink"]=true; blink["tiles"]=json::array({json::array({10,10})});
+   events.push_back(batch(blink,1.02)); motion.update(events,state,true,true,1.02);
+   check(motion.walks.empty() && motion.ripples.size()==1,"Even an adjacent blink cancels walking and creates a ripple");
+   motion.update(events,state,true,true,2); check(motion.ripples.empty(),"Ripples expire without blocking input");
+   events.push_back(batch(walk,2)); state["monsters"][0]["visible"]=false; state["revision"]="2";
+   motion.update(events,state,true,true,2); check(motion.walks.empty(),"Hidden actors never animate");
+   state["monsters"][0]["visible"]=true; events.push_back(batch(walk,3)); motion.update(events,state,false,false,3);
+   check(motion.walks.empty() && motion.ripples.empty(),"Animation switches suppress presentation");
+   events.push_back(batch(walk,3)); state["dungeon"]["level_id"]="two"; motion.update(events,state,true,true,3);
+   check(motion.walks.empty(),"Old-level events are discarded");
+  }
   auto messages=read_test_frames("{\"seq\":1}\n{\"seq\":2}\n");
   check(messages.error.empty() && messages.frames.size()==2 && messages.frames[0]["seq"]==1 && messages.frames[1]["seq"]==2,"Reader must preserve final message order at EOF");
   check(!read_test_frames("{bad}\n").error.empty(),"Malformed frame must be reported");
