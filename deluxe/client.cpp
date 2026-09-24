@@ -443,7 +443,6 @@ static void properties(const json &value) {
  }
 }
 #include "character_overview.h"
-#include "character_sheet.h"
 #include "knowledge_browser.h"
 #include "map_overview.h"
 #include "dev_status_dialog.h"
@@ -463,8 +462,10 @@ static void properties(const json &value) {
 #include "item_comparison.h"
 #include "item_rules.h"
 #include "store_panel.h"
-#include "run_history.h"
 #include "character_select.h"
+#include "equipment_portrait.h"
+#include "character_sheet.h"
+#include "run_history.h"
 struct UI {
  Connection &c;
  RunHistory run_history;
@@ -1706,7 +1707,7 @@ struct UI {
   if(item_rules_panel.draw(c)) focus_game();
   if(knowledge_browser.draw(c)) focus_game();
   if(c.state.contains("player")) {
-   if(CharacterSheet::draw(c.state["player"],open_character_sheet)) focus_game();
+   if(CharacterSheet::draw(c.state["player"],open_character_sheet,c.state["items"],c.state["slots"],c.character_save)) focus_game();
   }
   open_character_sheet=false;
   if(quit_dialog) { ImGui::OpenPopup("Close game"); quit_dialog=false; }

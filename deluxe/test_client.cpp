@@ -928,6 +928,17 @@ int main(int argc,char **argv) {
    connection.receive({{"kind","response"},{"id",id},{"result",preview}});
    check(connection.busy && connection.blast_request.empty(),"Preview replies do not unlock a pending game command");
   }
+  {
+   const json gear=json::array({{{"location","right hand"},{"label","A ring of strength"}},{{"location","left hand"},{"label","A ring of speed"}},{{"location","Pack"},{"label","Spare ring"}}});
+   check(EquipmentPortrait::item_at(gear,"right hand")->value("label","")=="A ring of strength","Portrait keeps the two ring slots distinct");
+   check(EquipmentPortrait::item_at(gear,"head")==nullptr,"Empty slots do not invent equipped items");
+   const json slots=json::array({{{"label","right hand"},{"occupied",true}},{{"label","left hand"},{"occupied",true}},{{"label","head"},{"occupied",false}},{{"label","unusual slot"},{"occupied",false}}});
+   for(float width:{980.f,440.f}) {
+    ImGui::NewFrame(); ImGui::SetNextWindowSize({width,650}); ImGui::Begin("Equipment test");
+    EquipmentPortrait::draw(gear,slots,"Test save"); ImGui::End(); ImGui::Render();
+    check(ImGui::GetDrawData()->TotalVtxCount>0,"Portrait renders both diagram and compact layouts");
+   }
+  }
   KeybindingEditor binding_editor;
   const json binding_data={{"mode",0},{"revision",2},{"bindings",json::array()},
    {"commands",json::array({{{"id",82},{"label","Rest for a while"},{"group","Action commands"},{"original","R"},{"rogue","R"}}})},

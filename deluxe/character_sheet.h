@@ -31,11 +31,15 @@ struct CharacterSheet {
    ImGui::EndTable();
   }
  }
- static void contents(const json &sheet) {
+ static void contents(const json &sheet,const json &items=json::array(),const json &slots=json::array(),const std::string &name="") {
   if(ImGui::BeginTabBar("Character pages")) {
    if(ImGui::BeginTabItem("Overview")) {
     ImGui::BeginChild("Overview scroll");
     rows(sheet,"Identity"); attributes(sheet); rows(sheet,"Progression");
+    ImGui::EndChild(); ImGui::EndTabItem();
+   }
+   if(!slots.empty() && ImGui::BeginTabItem("Equipment")) {
+    ImGui::BeginChild("Equipment scroll"); EquipmentPortrait::draw(items,slots,name);
     ImGui::EndChild(); ImGui::EndTabItem();
    }
    if(ImGui::BeginTabItem("Combat & skills")) {
@@ -70,7 +74,7 @@ struct CharacterSheet {
    ImGui::EndTabBar();
   }
  }
- static bool draw(const json &player,bool request) {
+ static bool draw(const json &player,bool request,const json &items=json::array(),const json &slots=json::array(),const std::string &save="") {
   if(request) ImGui::OpenPopup("Character details");
   const auto display=ImGui::GetIO().DisplaySize;
   ImGui::SetNextWindowSize(ImVec2(std::min(display.x*.92f,ImGui::GetFontSize()*54),display.y*.85f),ImGuiCond_Appearing);
@@ -78,7 +82,7 @@ struct CharacterSheet {
   bool closed=false,show=true;
   if(ImGui::BeginPopupModal("Character details",&show,ImGuiWindowFlags_NoSavedSettings)) {
    ImGui::BeginChild("Sheet body",ImVec2(0,-ImGui::GetFrameHeightWithSpacing()));
-   if(player.contains("character_sheet")) contents(player["character_sheet"]);
+   if(player.contains("character_sheet")) contents(player["character_sheet"],items,slots,save.empty()?player.value("name",""):save);
    else ImGui::TextDisabled("Character details unavailable.");
    ImGui::EndChild();
    if(ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape) || !show) { ImGui::CloseCurrentPopup(); closed=true; }

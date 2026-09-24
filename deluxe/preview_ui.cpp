@@ -38,6 +38,14 @@ int main(int argc,char **argv) {
     ui.projectile_feedback.tiles.clear(); c.projectile_events.push_back(batch);
    }
    ImGui_ImplSDLGPU3_NewFrame(); ImGui::NewFrame(); ui.draw(nullptr);
+   if(fixture.value("equipment_portrait",false)) {
+    ImGui::SetNextWindowSize({std::min(float(w)-40,ImGui::GetFontSize()*53),float(h)-80});
+    ImGui::SetNextWindowPos({20,40});
+    ImGui::SetNextWindowFocus();
+    ImGui::Begin("Equipment - offscreen review",nullptr,ImGuiWindowFlags_NoSavedSettings);
+    EquipmentPortrait::draw(c.state["items"],c.state["slots"],c.state["player"].value("name",""));
+    ImGui::End();
+   }
    if(fixture.contains("keybindings")) {
     if(i==0) ui.keybinding_editor.load(fixture["keybindings"]);
     ImGui::SetNextWindowSize(ImVec2(504*ui.scale,612*ui.scale));

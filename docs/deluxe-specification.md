@@ -924,3 +924,8 @@ Known ball spells and known device effects expose their blast radius while aimin
 Dev tools > Cast test blast opens a radius selector (1-20 tiles, limited by engine range), then the normal aiming controls. The guaranteed fire ball deals 25 damage with no mana or turn cost; it can affect monsters and items. Escape cancels without firing. This works for every class and always requests a target, including when Use old target is enabled.
 
 Protocol: targeting.blast accepts context, x and y while a known ball effect is being aimed and returns radius and remembered affected tiles. debug.blast accepts radius at normal gameplay input and begins the test cast. Both are capability-advertised. A scoped borrowed effect chain supplies aiming metadata for native casts and known devices without changing their targeting, cost or failure rules.
+
+
+### Character-sheet equipment portrait
+
+The live character sheet has an Equipment page with an ASCII humanoid silhouette, occupied/empty slot cards and a single body-slot connector for the hovered or selected slot. The figure uses a shared character grid for aligned boots and limbs; ring cards sit on their matching sides. It uses the save roster accent colour. Hover reveals full item names and inscriptions; selecting a slot shows the existing structured item descriptions underneath. Equipment and empty slots come from the current engine snapshot, with left/right rings kept distinct. Narrow windows fall back to stacked cards. The portrait is read-only and does not send commands or consume turns.
