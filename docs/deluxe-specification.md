@@ -971,3 +971,8 @@ Dev tools > Fire breath weapon offers Fire, Frost, Lightning, Acid and Poison.
 The test uses native breath targeting and geometry (60 degrees, range 12, damage
 25), costs no mana or turns, and can be cancelled before firing. Normal elemental
 effects on monsters, items and terrain apply.
+
+Spell presentation uses saturated elemental halos, bright hot cores and larger
+outlined ASCII wisps. Short brightness holds make breaths, explosions and trails
+more emphatic without extending their lifetimes or changing affected tiles.
+The treatment is visible with CRT disabled and uses bounded draw geometry.
