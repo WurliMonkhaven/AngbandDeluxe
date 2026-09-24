@@ -52,6 +52,7 @@ typedef enum game_event_type
 	EVENT_EXPLOSION,
 	EVENT_BOLT,
 	EVENT_MISSILE,
+	EVENT_COMBAT_FEEDBACK,
 
 	EVENT_INVENTORY,
 	EVENT_EQUIPMENT,
@@ -109,6 +110,7 @@ typedef enum game_event_type
 
 typedef union
 {
+ struct { struct loc grid; const char *kind; int amount; bool player, visible; } combat;
 	struct loc point;
 
 	const char *string;
@@ -219,6 +221,7 @@ void event_remove_handler_set(game_event_type *type, size_t n_types, game_event_
 void event_signal_birthpoints(const int *points, const int *inc_points,
 	int remaining);
 
+void event_signal_combat(struct loc grid, const char *kind, int amount, bool player, bool visible);
 void event_signal_point(game_event_type, int x, int y);
 void event_signal_string(game_event_type, const char *s);
 void event_signal_message(game_event_type type, int t, const char *s);

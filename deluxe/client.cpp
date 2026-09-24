@@ -93,6 +93,7 @@ struct Connection {
  std::unique_ptr<SDL_Process,decltype(&SDL_DestroyProcess)> process{nullptr,SDL_DestroyProcess};
  std::string outgoing, diagnostic, menu_error, character_save, replay_save;
  std::deque<json> messages;
+ std::deque<json> combat_events;
  json previous_messages = json::array();
  json capabilities = json::object();
  json comparisons = json::object();
@@ -190,6 +191,10 @@ struct Connection {
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
+   if(name=="combat.feedback") {
+    auto feedback=std::move(j.at("data")); feedback["received"]=double(SDL_GetTicksNS())/1e9;
+    if(combat_events.size()>=64) combat_events.pop_front(); combat_events.push_back(std::move(feedback)); return;
+   }
    if(name=="activity.changed") { resting=j.at("data").value("resting",false); return; }
    if(name=="sound.play") {
     auto cue=AudioPlayer::engine_cue(j.at("data").value("name",""));
@@ -202,7 +207,7 @@ struct Connection {
      if(j["data"].value("phase","")=="dead") send("run.finish");
     }
     postgame_finished=j["data"].value("phase","")=="finished";
-    busy=false; return; // Keep the last gameplay image for the shutdown transition.
+    busy=false; return;
    }
    if (name == "state.changed") { replay_save.clear(); state = std::move(j.at("data")); resting=false; comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
    if(name=="knowledge.changed" && creature_race>=0 && j["data"].value("category","")=="creatures" && j["data"].value("id",-1)==creature_race) creature_detail=j["data"];
@@ -405,6 +410,7 @@ static void properties(const json &value) {
 #include "map_overview.h"
 #include "dev_status_dialog.h"
 #include "dungeon_feedback.h"
+#include "combat_feedback.h"
 #include "dungeon_tooltip.h"
 #include "rest_dialog.h"
 #include "message_history.h"
@@ -422,8 +428,7 @@ struct UI {
  RunHistory run_history;
  CharacterSelect character_select;
  std::string pending_replay;
- DeathTransition shutdown;
- float shutdown_frame=-1;
+ bool run_report_started=false;
  bool showing_postgame=false;
  json replay_profile=json::object();
  bool replay_prompt=false,run_ui_reset=false,quit_after_run=false;
@@ -442,6 +447,8 @@ struct UI {
  bool was_store=false;
  float scale = 1.0f, game_fraction = .72f;
  bool fullscreen=false, draft_fullscreen=false;
+ CombatFeedback combat_feedback;
+ bool combat_animation=true, draft_combat_animation=true;
  bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
  int damage_amount=1;
  DevStatusDialog dev_status_dialog;
@@ -490,6 +497,7 @@ struct UI {
    quickbar_enabled=j.value("quickbar_enabled",false);
    quickbar.load(j.value("quickbar_profiles",json::object()));
    audio_settings.load(j.value("audio",json::object()));
+   combat_animation=j.value("combat_animation",true);
    low_animation=j.value("low_health_animation",true); death_animation=j.value("death_animation",true);
    crt=std::clamp(j.value("crt",0),0,2);
    crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
@@ -499,10 +507,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -519,6 +527,7 @@ struct UI {
   draft_click_exits_look=click_exits_look;
   draft_quick_targeting=quick_targeting;
   draft_quickbar_enabled=quickbar_enabled;
+  draft_combat_animation=combat_animation;
   draft_low_animation=low_animation; draft_death_animation=death_animation;
   draft_scale=scale; draft_fullscreen=fullscreen; draft_crt=crt; settings_error.clear();
   draft_crt_strength=crt_strength; draft_crt_settings=crt_settings;
@@ -527,11 +536,12 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
   audio_settings=draft_audio_settings; audio.configure(audio_settings,window_active);
+  combat_animation=draft_combat_animation;
   low_animation=draft_low_animation; death_animation=draft_death_animation;
   proceed_with_click=draft_proceed_with_click;
   click_exits_look=draft_click_exits_look;
@@ -607,7 +617,7 @@ struct UI {
     }
     if(ImGui::BeginTabItem("Animations")) {
      ImGui::Spacing(); ImGui::Checkbox("Low Health Animation",&draft_low_animation);
-     ImGui::Checkbox("Death Animation",&draft_death_animation);
+     ImGui::Checkbox("Combat feedback",&draft_combat_animation);
      ImGui::EndTabItem();
     }
     if(ImGui::BeginTabItem("CRT effects")) {
@@ -870,6 +880,7 @@ struct UI {
    const bool routing=hovered && c.ready() && !c.state.contains("targeting") && !c.state.value("aiming",false) && !c.state.value("direction_prompt",false) && !c.state.value("message_pending",false) && !io.KeyShift && !io.KeyCtrl && !io.KeyAlt;
    if(routing) c.preview_route(x,y);
    DungeonFeedback::route(c,draw,origin,size,cw,ch,ox,oy,routing,x,y);
+   combat_feedback.draw(draw,origin,size,cw,ch,ox,oy,double(SDL_GetTicksNS())/1e9);
    if(mouse_target) {
     target_box(x,y);
    } else if(c.state.contains("targeting")) {
@@ -1278,13 +1289,13 @@ struct UI {
   }
  }
  void draw(SDL_Window *window) {
+  combat_feedback.update(c.combat_events,c.state,combat_animation,double(SDL_GetTicksNS())/1e9);
   quickbar.sync_saves(c.save_changes);
   quickbar.profile=c.character_save;
-  game_draw_list=nullptr; shutdown_frame=-1; showing_postgame=false;
+  game_draw_list=nullptr; showing_postgame=false;
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(vp->WorkPos); ImGui::SetNextWindowSize(vp->WorkSize);
   ImGui::Begin("Angband Deluxe",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
-  const double now=double(SDL_GetTicksNS())/1e9;
   const bool ending=!c.run_report.is_null();
   if(ending && !run_ui_reset) {
    ImGui::ClosePopupsOverWindow(nullptr,false);
@@ -1293,8 +1304,7 @@ struct UI {
    quit_dialog=false; run_ui_reset=true;
   }
   if(!ending) run_ui_reset=false;
-  if(ending && !shutdown.finished(now)) shutdown_frame=shutdown.progress(now);
-  if((ending && shutdown.finished(now)) || run_history.browsing) {
+  if(ending || run_history.browsing) {
    showing_postgame=ending;
    grid_focus=false; keys.clear();
    if(ending && !c.connected && !c.postgame_finished)
@@ -1308,7 +1318,7 @@ struct UI {
     if(run_history.archived && action==1) { run_history.current=nullptr; run_history.archived=false; }
     else {
      run_history.current=nullptr; run_history.browsing=false;
-     if(ending) { c.run_report=nullptr; c.restart_ready=true; shutdown=DeathTransition{}; }
+     if(ending) { c.run_report=nullptr; c.restart_ready=true; run_report_started=false; }
     }
    }
    if(ending) prompts();
@@ -1583,11 +1593,10 @@ int main(int argc,char **argv) {
   ui.audio.configure(ui.audio_settings,ui.window_active);
   for(const auto &cue:connection.sound_cues) ui.audio.play(cue);
   connection.sound_cues.clear();
-  if(!connection.run_report.is_null() && ui.shutdown.started<0) {
+  if(!connection.run_report.is_null() && !ui.run_report_started) {
    ui.run_history.directory=fs::path(ui.settings_path).parent_path()/"run-history";
    ui.run_history.begin(connection.run_report);
-   ui.shutdown.start(double(SDL_GetTicksNS())/1e9,ui.crt!=0 && ui.death_animation && crt_renderer.ready());
-   if(ui.shutdown.enabled) ui.audio.play("crt");
+   ui.run_report_started=true;
    ui.keys.clear(); ui.grid_focus=false;
   }
   if(phase!=connection.state.value("phase","") || readiness!=connection.state.value("readiness","") || !connection.prompt.empty())
@@ -1628,9 +1637,7 @@ int main(int argc,char **argv) {
      auto p=curve.map(ImVec2(e.motion.x,e.motion.y),true); e.motion.x=p.x; e.motion.y=p.y;
     }
    }
-   // Always forward releases/focus updates to ImGui, including during shutdown.
-   // The disabled transition UI and owns_keyboard() block actions, while input
-   // state stays balanced after a click or key acknowledges the fatal message.
+   // Forward releases so the death acknowledgement cannot leave input held.
    if(connection.run_report.is_null() && ui.quickbar_event(e)) continue;
    ImGui_ImplSDL3_ProcessEvent(&e);
    if(e.type==SDL_EVENT_QUIT) {
@@ -1686,7 +1693,6 @@ int main(int argc,char **argv) {
    frame.game=ui.game_draw_list; frame.game_pos=ui.game_pos; frame.game_size=ui.game_size;
    frame.seconds=double(SDL_GetTicksNS())/1e9; frame.ui_scale=ui.scale*ui.display_scale; frame.session=connection.state.value("phase","");
    frame.health_glitch=health_glitch.update(connection.state,frame.seconds,ui.low_animation,false);
-   frame.shutdown=ui.shutdown_frame;
    if(ui.showing_postgame) frame.session="postgame";
    crt_renderer.render(cmd,surface,surface_width,surface_height,render_data,frame);
    if(renderer_error!=crt_renderer.error()) {

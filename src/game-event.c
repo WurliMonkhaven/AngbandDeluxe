@@ -282,3 +282,12 @@ void event_signal_tunnel(game_event_type type, int nstep, int npierce, int ndug,
 	data.tunnel.early = early;
 	game_event_dispatch(type, &data);
 }
+
+/* Observational only: callers supply the resolved outcome; no RNG or rules. */
+void event_signal_combat(struct loc grid, const char *kind, int amount, bool player, bool visible)
+{
+ game_event_data data;
+ data.combat.grid=grid; data.combat.kind=kind; data.combat.amount=amount;
+ data.combat.player=player; data.combat.visible=visible;
+ game_event_dispatch(EVENT_COMBAT_FEEDBACK,&data);
+}

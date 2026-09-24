@@ -13,7 +13,7 @@ cbuffer Crt : register(b0, space3) {
     float4 viewport;    // pixel size.xy, time, history retention
     float4 effects;     // scanlines, glow, bloom, chromatic aberration
     float4 shape;       // vignette, barrel coefficient, hum, health glitch
-    float4 surface;     // phosphor dots, signal interference, mask layout, shutdown progress (-1: inactive)
+    float4 surface;     // phosphor dots, signal interference, mask layout, reserved
     float4 optics;      // beam width, edge defocus, glass diffusion, raster unit in output pixels
 };
 float3 sample_tube(float2 uv) {
@@ -35,16 +35,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
     // Sample an inverse barrel map. All effects below use these source
     // coordinates, so scanlines and the hum front curve WITH the image.
     float2 destination = (uv - region.xy) / region.zw * 2 - 1;
-    float2 screen_position=destination;
-    float off=saturate(surface.w);
-    // Vertical deflection collapses first, then horizontal deflection. The
-    // whole tube image (including its raster) is compressed with the beam.
-    float2 deflection=float2(1,1);
-    if(surface.w>=0) {
-        deflection.y=max(0.001, pow(1-smoothstep(0.0,0.38,off),3));
-        deflection.x=max(0.001, 1-smoothstep(0.23,0.58,off));
-        destination/=deflection;
-    }
+
     float2 p = clamp(destination,-2,2);
     [unroll] for (int i = 0; i < 6; ++i) {
         p.x = clamp(destination.x,-2,2) / (1 - shape.y * p.y * p.y);
@@ -186,23 +177,5 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
     c = lerp(c, 1, trail * shape.z * (50.0 / 255.0));
     c = saturate(c) * coverage;
     if (viewport.w > 0) c = lerp(c, history.SampleLevel(history_sampler, uv, 0).rgb, viewport.w);
-    if(surface.w>=0) {
-        // A little stored beam energy makes a luminous horizontal trace and
-        // warm central phosphor spot, not an indiscriminate white flash.
-        float2 pixels=screen_position*region.zw*viewport.xy*0.5;
-        float line_width=max(0.55,region.w*viewport.y*0.003*(1-off));
-        float beam_trace=exp(-pixels.y*pixels.y/(2*line_width*line_width));
-        float length=region.z*viewport.x*0.47*deflection.x;
-        beam_trace*=1-smoothstep(length,length+3,abs(pixels.x));
-        float energy=smoothstep(0.12,0.30,off)*(1-smoothstep(0.46,0.64,off));
-        float radius=0.7+2*(1-smoothstep(0.55,0.92,off));
-        float spot=exp(-dot(pixels,pixels)/(2*radius*radius));
-        float spot_energy=smoothstep(0.42,0.58,off)*(1-smoothstep(0.60,0.95,off));
-        c*=1-smoothstep(0.36,0.54,off);
-        c*=step(abs(screen_position.x),deflection.x)*step(abs(screen_position.y),deflection.y);
-        c+=float3(0.78,0.9,1)*beam_trace*energy;
-        c+=float3(1,0.88,0.70)*spot*spot_energy;
-        c=saturate(c)*(1-smoothstep(0.94,0.99,off));
-    }
     return float4(c, 1);
 }

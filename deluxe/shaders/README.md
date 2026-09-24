@@ -39,10 +39,9 @@ glyphs, builds scanline geometry, or subdivides/warps triangles on the CPU.
    the scene, history and final output remain in the window's normal format.
    A client-supplied health intensity adds intermittent horizontal line slips
    and colour separation in the same scope. The engine supplies its warning
-   threshold and death status; the client ramps a fatal burst down and disables
-   it at the tombstone. This adds no render pass or texture allocation.
-   Independent Low Health Animation and Death Animation preferences gate the
-   intensity; both preserve the selected CRT scope and staged settings behavior.
+   threshold; Low Health Animation gates the intensity and preserves the selected
+   CRT scope and staged settings behavior. Fatal glitching is disabled.
+   This adds no render pass or texture allocation.
    Phosphor Dots reconstructs staggered triangular RGB groups at a fixed
    four-pixel pitch in tube coordinates. All emitters in a group share an
    area-filtered linear-light image sample, instead of masking unrelated glyph
@@ -154,6 +153,8 @@ binding layout were checked, but a Mac build/runtime test is still required.
 The Gaussian shader effects can differ slightly from the old per-glyph halos;
 the preference names, saved values and scope semantics are preserved.
 
-## CRT shutdown transition
+## Death screen
 
-CrtFrame.shutdown is -1 for normal rendering or a normalized one-shot power-off timeline. The composite shader compresses tube coordinates before barrel/raster evaluation, then adds a horizontal beam and fading phosphor spot. It uses the existing scope, scene and pipeline; no readback, CPU geometry effect or extra render target is introduced. Temporal persistence is disabled throughout shutdown so old bright images cannot linger over the black frame. The client starts the timeline only once a post-death summary arrives, holds the last gameplay state while rendering, and waits for completion before drawing the native post-mortem. Offscreen tests cover beam/spot/black phases, CRT Off, scope boundaries and unaffected overlay layers.
+Acknowledged death opens the native post-mortem immediately. There is no CRT
+power-off shader, timed transition or shutdown sound. The normal session change
+resets temporal history so gameplay cannot bleed into the summary.

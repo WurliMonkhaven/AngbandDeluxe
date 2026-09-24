@@ -111,7 +111,7 @@ void CrtRenderer::render(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *destination,U
   history_valid_=false; draw_ui(cmd,destination,data,true); return;
  }
  const auto &settings=frame.settings;
- const bool persist=settings.level(Ghost)>0 && frame.shutdown<0;
+ const bool persist=settings.level(Ghost)>0;
  // Shutdown disables persistence without changing the saved effect settings.
  // Invalidate before releasing either history texture: even an unused shader
  // sampler must be bound to a live texture on every GPU backend.
@@ -141,7 +141,7 @@ void CrtRenderer::render(SDL_GPUCommandBuffer *cmd,SDL_GPUTexture *destination,U
  u.effects[0]=settings.level(Scanlines); u.effects[1]=settings.level(Glow); u.effects[2]=settings.level(Bloom); u.effects[3]=settings.level(Fringe);
  u.shape[0]=settings.level(Edges); u.shape[1]=.018f*settings.level(Barrel); u.shape[2]=settings.level(Hum);
  u.shape[3]=std::clamp(frame.health_glitch,0.f,1.f);
- u.surface[0]=settings.level(Dots); u.surface[1]=settings.level(Interference); u.surface[2]=float(settings.mask); u.surface[3]=frame.shutdown;
+ u.surface[0]=settings.level(Dots); u.surface[1]=settings.level(Interference); u.surface[2]=float(settings.mask); u.surface[3]=0;
  u.optics[0]=settings.level(Beam); u.optics[1]=settings.level(Focus); u.optics[2]=settings.level(Glass);
  u.optics[3]=settings.raster_lines>0?std::max(.05f,u.region[3]*height/(3.f*settings.raster_lines)):1.f;
  auto blur=[&](int first,float radius,float threshold) {

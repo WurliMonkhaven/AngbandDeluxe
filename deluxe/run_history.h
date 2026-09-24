@@ -1,12 +1,4 @@
 // Local, read-only post-mortems. Separate files survive save deletion/renaming.
-struct DeathTransition {
- static constexpr double duration=.12; // Snap shut; only a few frames of phosphor decay.
- double started=-1;
- bool enabled=false;
- void start(double now,bool animate) { started=now; enabled=animate; }
- float progress(double now) const { return started<0 || !enabled ? -1.f : float(std::clamp((now-started)/duration,0.,1.)); }
- bool finished(double now) const { return started>=0 && (!enabled || now-started>=duration); }
-};
 struct RunHistory {
  fs::path directory;
  json records=json::array(), current=nullptr;

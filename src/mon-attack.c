@@ -720,6 +720,7 @@ bool make_attack_normal(struct monster *mon, struct player *p)
 				/* Disturbing */
 				disturb(p);
 				msg("%s misses you.", m_name);
+				event_signal_combat(p->grid,"miss",0,true,true);
 			}
 		}
 

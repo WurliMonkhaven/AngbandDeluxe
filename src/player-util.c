@@ -208,6 +208,7 @@ void take_hit(struct player *p, int dam, const char *kb_str)
 
 	/* Hurt the player */
 	p->chp -= dam;
+	event_signal_combat(p->grid,"damage",dam,true,true);
 
 	/* Reward COMBAT_REGEN characters with mana for their lost hitpoints
 	 * Unenviable task of separating what should and should not cause rage

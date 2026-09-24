@@ -1214,6 +1214,7 @@ bool mon_take_nonplayer_hit(int dam, struct monster *t_mon,
 
 	/* Hurt the monster */
 	t_mon->hp -= dam;
+	event_signal_combat(t_mon->grid,"damage",dam,false,monster_is_visible(t_mon));
 
 	/* Dead or damaged monster */
 	if (t_mon->hp < 0) {
@@ -1289,6 +1290,7 @@ bool mon_take_hit(struct monster *mon, struct player *p, int dam, bool *fear,
 
 	/* Hurt it */
 	mon->hp -= dam;
+	event_signal_combat(mon->grid,"damage",dam,false,monster_is_visible(mon));
 	if (mon->hp < 0) {
 		/* Deal with arena monsters */
 		if (p->upkeep->arena_level) {

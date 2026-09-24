@@ -64,8 +64,8 @@ implementation decisions below; these supersede conflicting original requirement
   Cancel discards changes; Save and Close commits them. Fullscreen and UI scale
   live under Graphics. CRT has scope, tube/strength presets, raster/mask choices
   and independent component switches/sliders. CRT is already implemented and
-  accepted, not deferred work. Low Health Animation and Death Animation are
-  independent; death glitches end at the tombstone. Shader strength is invisible
+  accepted, not deferred work. Low Health Animation and Combat feedback are
+  independent. Death proceeds directly to the summary. Shader strength is invisible
   at zero and intentionally strong at maximum, with moderate presets.
 - The red Dev tools menu contains an explicit damage dialog. Debug mutations are
   separate from normal gameplay commands, validated at legal engine boundaries,
@@ -743,7 +743,7 @@ The optional `options: 1` capability exposes `options.get` (interface option IDs
 
 After the fatal message is acknowledged, Deluxe captures an immutable engine-authored run summary after death identification and score entry. The native post-mortem presents cause of death, character identity and level, deepest depth, turns, calculated score, gold, final messages, identified belongings and the native character sheet. The engine retains ownership of score eligibility and its normal dead-character save/cleanup path. Retirement and victory have distinct headings. The main-menu Graveyard reads one versioned, atomically written JSON file per run under the user directory/run-history; records survive save deletion and renaming, and unreadable records do not hide intact runs. Archive failures keep the in-memory summary and offer Retry archiving. Play Again on the current completed run reopens its dead-character save through Angband's original new-game/quickstart flow, using session.replay. It bypasses character selection and the new-save-name prompt. The original quickstart controls offer reuse, changes to identity, or a fresh birth. Archived runs retain a separate New character like this action, which creates a new named save with the previous race/class.
 
-With Death Animation and CRT effects enabled, acknowledgement triggers a 0.12-second GPU shutdown: the original tube image and raster collapse vertically into a bright horizontal beam, which contracts to a warm phosphor dot and fades to black before the post-mortem appears. Scope follows Game Window Only or Full; surrounding UI is preserved in game-only mode. No turn input is accepted during the transition, temporal ghosting is disabled for the shutdown, and CRT Off/Death Animation Off skip it. Low-health glitching remains unchanged; the former fatal glitch burst is replaced by this transition. Backend completion cannot dismiss the post-mortem automatically.
+Acknowledging death opens the native post-mortem immediately, without a CRT shutdown animation or shutdown sound. Backend completion cannot dismiss the post-mortem automatically.
 
 Capability `run.summary: 1` adds an immutable `run` record to death/finished states. `run.finish` is accepted only at the death menu and exits that menu through the normal engine path. Optional `race` and `class` names on native session.new requests preselect valid birth choices; unavailable names fall back to engine defaults.
 
@@ -755,16 +755,16 @@ The launcher uses a searchable character-card roster and a selected-character pr
 
 ### Original sound pack and event-driven playback
 
-Deluxe ships original procedurally synthesized cues for interface activation, confirmed targeting, potion use, successful melee impacts, successful spell casts and the CRT shutdown. Gameplay variants rotate; unknown sound events remain silent. The original audition page remains available separately. No legacy Angband sound assets are used.
+Deluxe ships original procedurally synthesized cues for interface activation, confirmed targeting, potion use, successful melee impacts, successful spell casts. Gameplay variants rotate; unknown sound events remain silent. The original audition page remains available separately. No legacy Angband sound assets are used.
 
 The audio.events capability publishes transient sound.play events with a semantic name. An optional sound observer reports engine sound calls independently of the legacy use_sound preference; an optional target observer reports successful explicit target selection, not tracking movement or cancellation. Neither observer changes game rules, random state or actions. State queries, message history and saved games do not replay audio events. Other frontends retain existing sound behaviour.
 
-Settings / Audio provides an enabled switch plus master, gameplay and interface volumes, persisted only by Save and Close. Cancel discards drafts. Deluxe hides the redundant legacy sound checkbox; the underlying engine preference is preserved. Audio mutes and clears queued sounds on focus loss and session restart. The CRT shutdown cue interrupts lingering effects. Missing devices or assets leave the game playable and report an audio availability error.
+Settings / Audio provides an enabled switch plus master, gameplay and interface volumes, persisted only by Save and Close. Cancel discards drafts. Deluxe hides the redundant legacy sound checkbox; the underlying engine preference is preserved. Audio mutes and clears queued sounds on focus loss and session restart. Missing devices or assets leave the game playable and report an audio availability error.
 
-48 kHz mono PCM samples and pack.json are staged beside the executable in audio/. Samples are preloaded. Four reusable SDL audio streams provide overlap with headroom, a 100 ms per-cue cooldown and bounded event intake; excess sounds are dropped rather than delayed. No synthesis, disk loading, sleeps or audio callbacks run on the gameplay path. The CRT cue fires only when the shutdown animation actually starts.
+48 kHz mono PCM samples and pack.json are staged beside the executable in audio/. Samples are preloaded. Four reusable SDL audio streams provide overlap with headroom, a 100 ms per-cue cooldown and bounded event intake; excess sounds are dropped rather than delayed. No synthesis, disk loading, sleeps or audio callbacks run on the gameplay path. The old CRT shutdown sample remains in the sound pack but is not played.
 
 
-The active audio palette is Soft Circuit (sound studies 04): understated contact clicks and muted grainy buzzes, with softer attacks and reduced bass and peak levels. UI, target and shutdown use treatment A; potion, melee and spell cues rotate A/B. Build staging replaces the previous samples with these approved files while preserving event mappings and saved volume preferences.
+The active audio palette is Soft Circuit (sound studies 04): understated contact clicks and muted grainy buzzes, with softer attacks and reduced bass and peak levels. UI and target use treatment A; potion, melee and spell cues rotate A/B. Build staging replaces the previous samples with these approved files while preserving event mappings and saved volume preferences.
 
 
 ### Delayed dungeon hover cards
@@ -817,3 +817,18 @@ replaces the destination assignment. Slot drags move into empty slots or swap
 occupied slots, preserving customized appearance. Dropping outside or back onto
 the source leaves assignments unchanged. Drops never activate gameplay actions;
 bindings remain per-character and save through the existing settings path.
+
+### Dungeon combat feedback
+
+Animations includes Combat feedback, enabled by default and applied only on Save
+and Close. Brief floating damage/healing numbers and muted melee/projectile miss
+labels appear at affected tiles, with larger floating labels, a 280 ms hit flash (60 ms hold then fade), a coloured tile outline and 720 ms total lifetime.
+Rapid matching hits merge; active marks and incoming events are bounded. Effects
+are clipped to the semantic dungeon, follow viewport coordinates and never take
+input. Floor changes, leaving play and disabling the setting clear them.
+An observational engine event carries resolved damage, explicit healing and
+attack misses before death removes a target. The adapter forwards combat.feedback
+with kind, amount, coordinates, player flag and level identity. Unseen monsters
+and hallucinated monster identities are excluded from visual feedback; routine
+regeneration is quiet. These events do not roll RNG, spend turns, delay gameplay
+or replay on snapshot queries. Existing CRT scope naturally includes the visuals.

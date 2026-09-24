@@ -113,25 +113,6 @@ int main(int argc,char **argv) {
   check(pixel(original,48,40)>250 && pixel(original,210,104,1)<3,"Offscreen source pattern");
   frame.scope=2; auto plain=render(true);
   check(pixel(plain,48,40)>250 && pixel(plain,48,88)<3 && pixel(plain,210,104)>250,"Shader orientation/pass-through");
-  // Shutdown turns temporal persistence off without changing CRT settings.
-  // Build live history first so the transition exercises resource release.
-  frame.settings.parts[Ghost]={true,75}; frame.seconds=1; render(true);
-  frame.seconds+=1./60; render(true);
-  frame.seconds+=1./60;
-  frame.shutdown=.48f; auto collapse=render(true);
-  check(pixel(collapse,128,64)>100 && pixel(collapse,128,20)<3,"Shutdown must collapse into a bright horizontal beam");
-  frame.shutdown=.80f; auto spot=render(true);
-  check(pixel(spot,128,64)>20 && pixel(spot,40,64)<3,"Shutdown beam must contract into a central phosphor spot");
-  frame.shutdown=1; auto off=render(true);
-  check(pixel(off,128,64)<3 && pixel(off,48,40)<3,"Shutdown must reach black");
-  frame.scope=0; check(render(true)==original,"CRT Off must not run the shutdown effect");
-  frame.scope=1; frame.game_pos=ImVec2(32,32); frame.game_size=ImVec2(160,64);
-  auto scoped_off=render(true,true);
-  check(pixel(scoped_off,100,60)<3 && pixel(scoped_off,210,104)>250 && pixel(scoped_off,48,40,1)>250,"Game-only shutdown must preserve outside UI and overlay layers");
-  frame.scope=2; frame.shutdown=-1; frame.seconds+=1./60;
-  auto resumed=render(true);
-  check(pixel(resumed,48,40)>250,"Rendering must recover after releasing shutdown history");
-  frame.settings.parts[Ghost].enabled=false;
   frame.settings.parts[Glass]={true,100}; auto glass=render(true);
   check(pixel(glass,75,40)>pixel(plain,75,40)+2,"Glass diffusion has no broad light spill");
   frame.settings.parts[Glass].enabled=false;

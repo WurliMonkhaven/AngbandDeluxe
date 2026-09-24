@@ -44,12 +44,6 @@ int main(int argc,char **argv) {
   AudioSettings audio_roundtrip; audio_roundtrip.enabled=false; audio_roundtrip.master=.31f;
   AudioSettings audio_loaded; audio_loaded.load(audio_roundtrip.serialize());
   check(!audio_loaded.enabled && audio_loaded.master==.31f,"Audio settings must roundtrip");
-  DeathTransition shutdown_test;
-  shutdown_test.start(10,true);
-  check(shutdown_test.progress(10)==0 && !shutdown_test.finished(10.05),"Shutdown must run after acknowledgement");
-  check(shutdown_test.finished(10.15) && shutdown_test.progress(12)==1,"Shutdown must finish even after a slow frame");
-  shutdown_test.start(20,false);
-  check(shutdown_test.finished(20) && shutdown_test.progress(20)==-1,"Disabled CRT/death animation must skip shutdown");
   json run={{"player",{{"name","Test"},{"race","Elf"},{"class","Mage"},{"level",3}}},{"items",json::array()},{"messages",json::array({{{"text","You die."},{"count",1}}})},{"cause","a test"},{"ended","2026-09-23"}};
   RunHistory history;
   history.directory=std::string(argv[1])+"-runs";
@@ -229,8 +223,8 @@ int main(int argc,char **argv) {
   check(!ui.click_exits_look,"Look click draft applied immediately");
   ui.draft_proceed_with_click=true;
   check(!ui.proceed_with_click,"Gameplay draft must not apply immediately");
-  ui.draft_low_animation=false; ui.draft_death_animation=false;
-  check(ui.low_animation && ui.death_animation,"Animation drafts applied immediately");
+  ui.draft_low_animation=false; ui.draft_death_animation=false; ui.draft_combat_animation=false;
+  check(ui.low_animation && ui.death_animation && ui.combat_animation,"Animation drafts applied immediately");
   ui.draft_crt_strength=3; ui.draft_crt_settings.parts[Hum].enabled=true;
   check(!ui.crt_settings.parts[Hum].enabled,"Hum bar draft applied immediately");
   check(ui.scale==1.25f && ui.crt==0 && !ui.fullscreen,"Draft changed live settings");
@@ -241,13 +235,13 @@ int main(int argc,char **argv) {
   check(!ui.draft_click_exits_look,"Cancelled look click draft retained");
   check(!ui.draft_quick_targeting,"Cancel retained quick targeting draft");
   check(!ui.draft_quickbar_enabled,"Cancel retained quickbar draft");
-  check(ui.draft_low_animation && ui.draft_death_animation,"Cancelled animation draft retained");
+  check(ui.draft_low_animation && ui.draft_death_animation && ui.draft_combat_animation,"Cancelled animation draft retained");
   check(ui.draft_scale==1.25f && ui.draft_crt==0 && !ui.draft_fullscreen,"Draft was retained");
   check(ui.draft_crt_strength==1 && ui.crt_strength==1,"Cancelled strength was applied");
   check(!ui.draft_crt_settings.parts[Hum].enabled && !ui.crt_settings.parts[Hum].enabled,"Cancelled hum bar was applied");
   ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_crt_settings.parts[Hum].enabled=true;
   ui.draft_crt_settings.raster_lines=720; ui.draft_crt_settings.mask=2; ui.draft_crt_settings.tube_preset=-1;
-  ui.draft_low_animation=false; ui.draft_death_animation=true;
+  ui.draft_low_animation=false; ui.draft_death_animation=true; ui.draft_combat_animation=false;
   ui.draft_click_exits_look=true;
   ui.draft_proceed_with_click=true;
   ui.draft_quick_targeting=true;
@@ -264,7 +258,7 @@ int main(int argc,char **argv) {
   check(loaded.quickbar_enabled && loaded.quickbar.slots()[0]["command"]=="core.hold","Quickbar settings and assignments did not persist");
   loaded.quickbar.profile="other-character"; check(loaded.quickbar.slots()[0].is_null(),"Characters must not share slots");
   check(loaded.crt_settings.raster_lines==720 && loaded.crt_settings.mask==2,"Staged raster/mask settings did not persist");
-  check(!loaded.low_animation && loaded.death_animation,"Independent animation switches did not persist");
+  check(!loaded.low_animation && loaded.death_animation && !loaded.combat_animation,"Independent animation switches did not persist");
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");
   check(loaded.crt_settings.parts[Hum].enabled,"Hum bar did not persist");
   loaded.begin_settings(); loaded.draft_crt=2; loaded.draft_crt_settings.parts[Hum].enabled=false;
@@ -313,20 +307,18 @@ int main(int argc,char **argv) {
   unsigned char *pixels; int atlas_w,atlas_h;
   io.Fonts->GetTexDataAsRGBA32(&pixels,&atlas_w,&atlas_h); io.Fonts->SetTexID(1);
   {
-   UI final_ui{postgame}; final_ui.shutdown.start(0,false); final_ui.run_history.current=archived;
+   UI final_ui{postgame}; final_ui.run_history.current=archived;
    ImGui::NewFrame(); ImGui::Begin("Old gameplay popup"); ImGui::OpenPopup("Stale menu"); ImGui::End();
    final_ui.draw(nullptr);
    check(!ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel),"Death screen must dismiss stale gameplay popups");
    ImGui::Render();
    auto draw_final=[&] { ImGui::NewFrame(); final_ui.draw(nullptr); ImGui::Render(); };
    final_ui.run_history.current["items"]=json::array({{{"label","a Dagger"},{"location","weapon"},{"quantity",1},{"description","A test weapon."}}});
-   // A click acknowledges death, then its release arrives during shutdown.
-   // Keep feeding input to ImGui even while the transition UI is disabled.
-   final_ui.shutdown.start(double(SDL_GetTicksNS())/1e9,true);
+   check(final_ui.showing_postgame,"Acknowledged death must show the summary immediately");
    io.AddMousePosEvent(500,300); io.AddMouseButtonEvent(0,true); draw_final();
    io.AddMouseButtonEvent(0,false); draw_final();
-   check(!io.MouseDown[0],"Shutdown must not retain the acknowledgement mouse press");
-   final_ui.shutdown.enabled=false; draw_final(); draw_final();
+   check(!io.MouseDown[0],"Death screen must not retain the acknowledgement mouse press");
+   draw_final(); draw_final();
    ImGuiID bar_id=0,tab_id=0; ImVec2 tab_pos;
    for(int i=0;i<GImGui->TabBars.GetMapSize();++i) if(auto *bar=GImGui->TabBars.TryGetMapData(i)) {
     if(bar->CurrFrameVisible!=GImGui->FrameCount) continue;
@@ -339,7 +331,7 @@ int main(int argc,char **argv) {
    io.AddMousePosEvent(tab_pos.x,tab_pos.y); draw_final();
    io.AddMouseButtonEvent(0,true); draw_final();
    io.AddMouseButtonEvent(0,false); draw_final();
-   check(GImGui->TabBars.GetByKey(bar_id)->SelectedTabId==tab_id,"The first post-shutdown click must switch tabs");
+   check(GImGui->TabBars.GetByKey(bar_id)->SelectedTabId==tab_id,"The first death-screen click must switch tabs");
   }
   for(float width:{600.f,1200.f}) {
    ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(width,750));
@@ -737,6 +729,22 @@ int main(int argc,char **argv) {
   }
   check(replay_sent && replay.character_save=="Hero" && replay.busy,"Handshake must resume the completed save through replay");
   DungeonTooltip hover;
+  CombatFeedback combat;
+  std::deque<json> combat_queue;
+  json combat_state={{"phase","playing"},{"dungeon",{{"level_id","one"}}}};
+  const json hit={{"level_id","one"},{"x",4},{"y",5},{"amount",3},{"kind","damage"},{"player",true},{"received",10.0}};
+  combat_queue={hit,hit}; combat.update(combat_queue,combat_state,true,10.01);
+  check(combat.marks.size()==1 && combat.marks[0].amount==6 && combat_queue.empty(),"Rapid hits combine without replaying events");
+  ImGui::NewFrame(); ImGui::Begin("Combat feedback host");
+  combat.draw(ImGui::GetWindowDrawList(),ImGui::GetCursorScreenPos(),ImVec2(400,300),12,20,0,0,10.1);
+  ImGui::End(); ImGui::Render();
+  combat.update(combat_queue,combat_state,true,10.8);
+  check(combat.marks.empty(),"Combat feedback expires independently of gameplay turns");
+  combat_queue={hit}; combat.update(combat_queue,combat_state,false,10.01);
+  check(combat.marks.empty() && combat_queue.empty(),"Disabled feedback discards pending effects");
+  combat_queue={hit}; combat_state["dungeon"]["level_id"]="two";
+  combat.update(combat_queue,combat_state,true,10.01);
+  check(combat.marks.empty(),"Old-level feedback must not appear on a new floor");
   const json history_combat={{"text","The orc hits you."},{"group","combat"},{"count",3}};
   const json history_loot={{"text","You collect gold."},{"group","loot"}};
   const json history_system={{"text","[SYSTEM] Game saved."},{"system",true}};

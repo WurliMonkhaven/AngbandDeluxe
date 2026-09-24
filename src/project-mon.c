@@ -919,6 +919,7 @@ static void project_monster_handler_MON_POLY(project_monster_handler_context_t *
 static void project_monster_handler_MON_HEAL(project_monster_handler_context_t *context)
 {
 	/* Heal */
+	event_signal_combat(context->mon->grid,"heal",MIN(context->dam,context->mon->maxhp-context->mon->hp),false,monster_is_visible(context->mon));
 	context->mon->hp += context->dam;
 
 	/* No overflow */
@@ -1055,6 +1056,7 @@ static bool project_m_monster_attack(project_monster_handler_context_t *context,
 
 	/* Hurt the monster */
 	mon->hp -= dam;
+	event_signal_combat(mon->grid,"damage",dam,false,monster_is_visible(mon));
 
 	/* Dead or damaged monster */
 	if (mon->hp < 0) {

@@ -1033,6 +1033,16 @@ done:
  cJSON_Delete(r);
 }
 
+static void combat_feedback(game_event_type type, game_event_data *data, void *user)
+{
+ cJSON *v;
+ if(!data || !data->combat.visible || (!data->combat.player && player->timed[TMD_IMAGE])) return;
+ if(!streq(data->combat.kind,"miss") && data->combat.amount<=0) return;
+ v=cJSON_CreateObject(); string(v,"kind",data->combat.kind); number(v,"amount",data->combat.amount);
+ number(v,"x",data->combat.grid.x); number(v,"y",data->combat.grid.y);
+ json_bool(v,"player",data->combat.player); counter(v,"level_id",deluxe_level);
+ event("combat.feedback",v);
+}
 static void rest_activity(game_event_type type, game_event_data *data, void *user)
 {
  static bool reported;
@@ -1145,6 +1155,7 @@ int main(int argc, char **argv)
  cmd_get_hook = get_command;
  sound_event_hook=deluxe_sound_event;
  target_selected_hook=deluxe_target_selected;
+ event_add_handler(EVENT_COMBAT_FEEDBACK, combat_feedback, NULL);
  event_add_handler(EVENT_CHECK_INTERRUPT, rest_activity, NULL);
  event_add_handler(EVENT_ENTER_BIRTH, lifecycle, NULL);
  event_add_handler(EVENT_ENTER_STORE, lifecycle, NULL);

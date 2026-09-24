@@ -765,6 +765,7 @@ bool py_attack_real(struct player *p, struct loc grid, bool *fear)
 	/* If a miss, skip this hit */
 	if (!success) {
 		msgt(MSG_MISS, "You miss %s.", m_name);
+		event_signal_combat(mon->grid,"miss",0,false,monster_is_visible(mon));
 
 		/* Small chance of bloodlust side-effects */
 		if (p->timed[TMD_BLOODLUST] && one_in_(50)) {
@@ -1195,6 +1196,7 @@ static void ranged_helper(struct player *p,	struct object *obj, int dir,
 					}
 				}
 			}
+			if (!result.success) event_signal_combat(mon->grid,"miss",0,false,monster_is_visible(mon));
 			/* Stop the missile, or reduce its piercing effect */
 			pierce--;
 			if (pierce) continue;

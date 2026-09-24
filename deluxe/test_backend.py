@@ -31,6 +31,7 @@ class Engine:
         self.travel = {}
         self.knowledge_events = []
         self.activity_events = []
+        self.combat_events = []
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._errors, daemon=True).start()
 
@@ -67,6 +68,8 @@ class Engine:
                 self.travel = j["data"]
             elif j["event"] == "activity.changed":
                 self.activity_events.append(j["data"])
+            elif j["event"] == "combat.feedback":
+                self.combat_events.append(j["data"])
             elif j["event"] == "prompt.requested":
                 self.prompt = j["data"]
         else:
@@ -697,6 +700,38 @@ class BackendTests(unittest.TestCase):
         self.assert_semantic_view(e.state)
         self.targeting('targeting.begin', mode='target')
         self.assertEqual(e.call('dungeon.click', {'context':e.state['context'],'x':x,'y':y,'exit_look':True})['error']['code'], 'busy')
+
+    def test_combat_feedback(self):
+        e=self.engine
+        e.hello(); e.birth()
+        before=e.state; old=before['revision']
+        e.call('debug.damage',{'amount':3}); e.next_state(old)
+        self.assertEqual(len(e.combat_events),1)
+        damage=e.combat_events[0]
+        self.assertEqual((damage['kind'],damage['amount'],damage['player']),('damage',3,True))
+        self.assertEqual((damage['x'],damage['y']),(before['player']['x'],before['player']['y']))
+        self.assertEqual(damage['level_id'],before['dungeon']['level_id'])
+        for _ in range(3): e.call('state.get')
+        self.assertEqual(len(e.combat_events),1,'Queries must not replay combat feedback')
+        # Restore more than the missing HP; report only the actual healing.
+        e.key(1); e.key(ord('E'))
+        for _ in range(30):
+            e.call('state.get')
+            if e.prompt:
+                p=e.prompt; e.prompt=None; old=e.state['revision']
+                text=p.get('text','').lower()
+                if p['type']=='confirmation': value=True
+                elif p['type']=='quantity': value=0
+                elif 'which effect' in text: value='HEAL_HP'
+                elif 'dice' in text: value='100'
+                elif 'subtype' in text: value='0'
+                else: self.fail(f'Unexpected effect prompt: {p}')
+                e.call('prompt.reply',{'prompt_id':p['prompt_id'],'value':value}); e.next_state(old)
+            elif e.state['readiness']!='ready': e.key('enter')
+            else: break
+        heals=[v for v in e.combat_events if v['kind']=='heal']
+        self.assertEqual(len(heals),1)
+        self.assertEqual(heals[0]['amount'],3)
 
     def test_native_rest(self):
         e = self.engine
