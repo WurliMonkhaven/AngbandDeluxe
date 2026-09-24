@@ -223,8 +223,8 @@ int main(int argc,char **argv) {
   check(!ui.click_exits_look,"Look click draft applied immediately");
   ui.draft_proceed_with_click=true;
   check(!ui.proceed_with_click,"Gameplay draft must not apply immediately");
-  ui.draft_low_animation=false; ui.draft_death_animation=false; ui.draft_combat_animation=false;
-  check(ui.low_animation && ui.death_animation && ui.combat_animation,"Animation drafts applied immediately");
+  ui.draft_low_animation=false; ui.draft_death_animation=false; ui.draft_combat_animation=false; ui.draft_sleep_animation=false;
+  check(ui.low_animation && ui.death_animation && ui.combat_animation && ui.sleep_animation,"Animation drafts applied immediately");
   ui.draft_crt_strength=3; ui.draft_crt_settings.parts[Hum].enabled=true;
   check(!ui.crt_settings.parts[Hum].enabled,"Hum bar draft applied immediately");
   check(ui.scale==1.25f && ui.crt==0 && !ui.fullscreen,"Draft changed live settings");
@@ -235,13 +235,13 @@ int main(int argc,char **argv) {
   check(!ui.draft_click_exits_look,"Cancelled look click draft retained");
   check(!ui.draft_quick_targeting,"Cancel retained quick targeting draft");
   check(!ui.draft_quickbar_enabled,"Cancel retained quickbar draft");
-  check(ui.draft_low_animation && ui.draft_death_animation && ui.draft_combat_animation,"Cancelled animation draft retained");
+  check(ui.draft_low_animation && ui.draft_death_animation && ui.draft_combat_animation && ui.draft_sleep_animation,"Cancelled animation draft retained");
   check(ui.draft_scale==1.25f && ui.draft_crt==0 && !ui.draft_fullscreen,"Draft was retained");
   check(ui.draft_crt_strength==1 && ui.crt_strength==1,"Cancelled strength was applied");
   check(!ui.draft_crt_settings.parts[Hum].enabled && !ui.crt_settings.parts[Hum].enabled,"Cancelled hum bar was applied");
   ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_crt_settings.parts[Hum].enabled=true;
   ui.draft_crt_settings.raster_lines=720; ui.draft_crt_settings.mask=2; ui.draft_crt_settings.tube_preset=-1;
-  ui.draft_low_animation=false; ui.draft_death_animation=true; ui.draft_combat_animation=false;
+  ui.draft_low_animation=false; ui.draft_death_animation=true; ui.draft_combat_animation=false; ui.draft_sleep_animation=false;
   ui.draft_click_exits_look=true;
   ui.draft_proceed_with_click=true;
   ui.draft_quick_targeting=true;
@@ -258,7 +258,7 @@ int main(int argc,char **argv) {
   check(loaded.quickbar_enabled && loaded.quickbar.slots()[0]["command"]=="core.hold","Quickbar settings and assignments did not persist");
   loaded.quickbar.profile="other-character"; check(loaded.quickbar.slots()[0].is_null(),"Characters must not share slots");
   check(loaded.crt_settings.raster_lines==720 && loaded.crt_settings.mask==2,"Staged raster/mask settings did not persist");
-  check(!loaded.low_animation && loaded.death_animation && !loaded.combat_animation,"Independent animation switches did not persist");
+  check(!loaded.low_animation && loaded.death_animation && !loaded.combat_animation && !loaded.sleep_animation,"Independent animation switches did not persist");
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");
   check(loaded.crt_settings.parts[Hum].enabled,"Hum bar did not persist");
   loaded.begin_settings(); loaded.draft_crt=2; loaded.draft_crt_settings.parts[Hum].enabled=false;
@@ -728,6 +728,21 @@ int main(int argc,char **argv) {
    if(request.second=="session.replay") replay_sent=true;
   }
   check(replay_sent && replay.character_save=="Hero" && replay.busy,"Handshake must resume the completed save through replay");
+  json sleep_view={{"x",3},{"y",4},{"width",1},{"height",1},{"cells",json::array({json::array({json::array({46,1,0,0,0,0,111,1,1,1,1,0,0})})})}};
+  json sleeper={{"x",3},{"y",4},{"visible",true},{"asleep",true}};
+  check(SleepFeedback::eligible(sleeper,sleep_view),"Visible sleeping monster should have sleep markers");
+  sleeper["asleep"]=false;
+  check(!SleepFeedback::eligible(sleeper,sleep_view),"Waking must immediately remove sleep markers");
+  sleeper["asleep"]=true; sleeper["visible"]=false;
+  check(!SleepFeedback::eligible(sleeper,sleep_view),"Unseen sleepers must not be revealed");
+  sleeper["visible"]=true; sleeper["x"]=5;
+  check(!SleepFeedback::eligible(sleeper,sleep_view),"Off-panel sleepers must be excluded");
+  sleeper["x"]=3; sleep_view["cells"][0][0][11]=1;
+  check(!SleepFeedback::eligible(sleeper,sleep_view),"Hallucinated actors must not reveal sleep state");
+  sleep_view["cells"][0][0][11]=0;
+  ImGui::NewFrame(); ImGui::Begin("Sleep feedback host");
+  SleepFeedback::draw(ImGui::GetWindowDrawList(),{{"dungeon",sleep_view},{"monsters",json::array({sleeper})}},ImGui::GetCursorScreenPos(),ImVec2(300,200),20,24,10);
+  ImGui::End(); ImGui::Render();
   DungeonTooltip hover;
   CombatFeedback combat;
   std::deque<json> combat_queue;

@@ -832,3 +832,15 @@ with kind, amount, coordinates, player flag and level identity. Unseen monsters
 and hallucinated monster identities are excluded from visual feedback; routine
 regeneration is quiet. These events do not roll RNG, spend turns, delay gameplay
 or replay on snapshot queries. Existing CRT scope naturally includes the visuals.
+
+### Sleeping monsters and startup continuation
+
+Visible sleeping monsters have two small, staggered blue z markers that drift
+upwards and fade. Markers use the engine asleep state, stop immediately on waking
+and exclude unseen, off-panel and hallucinated actors. They are clipped to the
+dungeon, accept no input, and require no backend queries. Settings / Animations /
+Sleeping monsters defaults on and follows staged Save and Close / Cancel.
+
+World entry establishes the playing phase before the first command prompt, so
+startup study reminders use the normal panels and continuation ribbon even when
+they pause character loading for acknowledgement.

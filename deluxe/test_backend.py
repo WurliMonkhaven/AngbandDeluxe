@@ -982,6 +982,27 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn('targeting',e.state)
         self.assert_semantic_view(e.state)
 
+    def test_loaded_spell_reminder_keeps_dungeon(self):
+        e = self.engine
+        e.hello(); e.birth(class_index=8)  # Blackguard, with an unlearned ritual.
+        self.assertGreater(e.state["player"]["new_spells"], 0)
+        self.assertIn("result", e.call("session.close"))
+        e.process.wait(timeout=10); e.stop()
+        self.engine = e = Engine(self.temp.name)
+        e.hello(); e.call("session.load", {"save": "ProtocolTest"}); e.next_state(None)
+        self.assertEqual(e.state["phase"], "playing")
+        self.assertIn("dungeon", e.state)
+        self.assertNotIn("birth", e.state)
+        self.assertIn("ritual", e.screen())
+        # A short reminder can remain on the message line; additional startup
+        # messages may flush it into a continuation prompt. Both use game UI.
+        if e.state.get("message_pending"):
+            self.assertEqual(e.state["readiness"], "awaiting_prompt")
+            e.key("enter")
+        else:
+            self.assertEqual(e.state["readiness"], "ready")
+        self.assert_semantic_view(e.state)
+
     def test_message_acknowledgement_keeps_dungeon(self):
         e = self.engine
         e.hello(); e.birth()

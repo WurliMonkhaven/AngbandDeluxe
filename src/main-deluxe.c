@@ -1116,6 +1116,9 @@ static errr get_command(cmd_context context)
 static void lifecycle(game_event_type type, game_event_data *data, void *user)
 {
  if (type == EVENT_ENTER_BIRTH) phase = "birth";
+ /* Loading may pause on a study reminder before the first game command.
+  * World entry, not command readiness, establishes the gameplay layout. */
+ else if (type == EVENT_ENTER_WORLD) phase = "playing";
  else if (type == EVENT_ENTER_STORE) phase = "store";
  else if (type == EVENT_LEAVE_STORE) phase = "playing";
  else if (type == EVENT_ENTER_DEATH) phase = "dead";
@@ -1158,6 +1161,7 @@ int main(int argc, char **argv)
  event_add_handler(EVENT_COMBAT_FEEDBACK, combat_feedback, NULL);
  event_add_handler(EVENT_CHECK_INTERRUPT, rest_activity, NULL);
  event_add_handler(EVENT_ENTER_BIRTH, lifecycle, NULL);
+ event_add_handler(EVENT_ENTER_WORLD, lifecycle, NULL);
  event_add_handler(EVENT_ENTER_STORE, lifecycle, NULL);
  event_add_handler(EVENT_LEAVE_STORE, lifecycle, NULL);
  event_add_handler(EVENT_ENTER_DEATH, lifecycle, NULL);
