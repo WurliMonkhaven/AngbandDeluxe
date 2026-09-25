@@ -328,6 +328,28 @@ struct WorkspaceLayout {
   }
   return {width*ImGui::GetFontSize(),height*ImGui::GetFontSize()+(editing?ImGui::GetFrameHeightWithSpacing():0)};
  }
+ // Ancestor geometry lets a divider push a compact panel through the stack
+ // without stretching it or changing unrelated siblings' heights.
+ struct SplitFrame { Node *node; int child; float usable,first,lower,upper; bool fitted; };
+ std::vector<SplitFrame> split_path;
+ std::function<void(int,ImVec2,ImVec2)> trace_panel; // Optional offscreen geometry checks.
+ int resize_ancestor(bool trailing) const {
+  for(int i=int(split_path.size())-1;i>=0;--i) {
+   const auto &frame=split_path[i];
+   if(frame.node->axis!=2) return -1;
+   if(frame.child==(trailing?0:1)) return frame.fitted?-1:i;
+  }
+  return -1;
+ }
+ void push_fixed_divider(int ancestor,bool trailing,float delta) {
+  auto &outer=split_path[ancestor];
+  outer.node->ratio=(outer.first+delta)/outer.usable;
+  const float growth=trailing?delta:-delta;
+  for(int i=ancestor+1;i<int(split_path.size());++i) {
+   auto &frame=split_path[i];
+   if(!frame.fitted) frame.node->ratio=(frame.first+(frame.child==0?growth:0))/(frame.usable+growth);
+  }
+ }
  void draw_node(Node &n,ImVec2 pos,ImVec2 size,const Enabled &enabled,const std::function<void(int)> &draw) {
   if(!visible(n,enabled)) return;
   if(n.axis) {
@@ -347,11 +369,31 @@ struct WorkspaceLayout {
    ImVec2 as=size,bs=size,bp=pos,handle=pos,hs=size;
    if(n.axis==1) { as.x=first; bs.x=usable-first; bp.x+=first+gap; handle.x+=first; hs.x=gap; }
    else { as.y=first; bs.y=usable-first; bp.y+=first+gap; handle.y+=first; hs.y=gap; }
-   draw_node(n.children[0],pos,as,enabled,draw); draw_node(n.children[1],bp,bs,enabled,draw);
+   split_path.push_back({&n,0,usable,first,lower,upper,fitted_split});
+   draw_node(n.children[0],pos,as,enabled,draw);
+   split_path.back().child=1;
+   draw_node(n.children[1],bp,bs,enabled,draw);
+   split_path.pop_back();
    ImGui::SetCursorScreenPos(handle); ImGui::PushID(n.id);
    ImGui::InvisibleButton("Split",hs);
-   const bool can_resize=!fitted_split && !space_limited && (editing || !dividers_locked);
-   if(can_resize && ImGui::IsItemActive()) { n.ratio=std::clamp(((n.axis==1?ImGui::GetIO().MousePos.x-pos.x:ImGui::GetIO().MousePos.y-pos.y))/usable,lower/usable,upper/usable); }
+   const bool trailing=fixed_b>0;
+   const int ancestor=fitted_split && !(fixed_a>0 && fixed_b>0)?resize_ancestor(trailing):-1;
+   float move_min=0,move_max=0;
+   if(ancestor>=0) {
+    const auto &outer=split_path[ancestor];
+    move_min=outer.lower-outer.first; move_max=outer.upper-outer.first;
+    // The flexible neighbour must also retain its minimum height.
+    if(trailing) move_min=std::max(move_min,min_a.y-as.y);
+    else move_max=std::min(move_max,bs.y-min_b.y);
+   }
+   const bool pushed_resize=ancestor>=0 && move_max-move_min>.5f;
+   const bool can_resize=(fitted_split?pushed_resize:!space_limited) && (editing || !dividers_locked);
+   if(can_resize && ImGui::IsItemActive()) {
+    if(fitted_split) {
+     const float delta=std::clamp(ImGui::GetIO().MouseDelta.y,move_min,move_max);
+     push_fixed_divider(ancestor,trailing,delta);
+    } else n.ratio=std::clamp(((n.axis==1?ImGui::GetIO().MousePos.x-pos.x:ImGui::GetIO().MousePos.y-pos.y))/usable,lower/usable,upper/usable);
+   }
    if(can_resize && ImGui::IsItemDeactivated()) dirty=true;
    if(can_resize && ImGui::IsItemHovered()) ImGui::SetMouseCursor(n.axis==1?ImGuiMouseCursor_ResizeEW:ImGuiMouseCursor_ResizeNS);
    if(editing || (can_resize && (ImGui::IsItemHovered() || ImGui::IsItemActive()))) ImGui::GetWindowDrawList()->AddRectFilled(handle,{handle.x+hs.x,handle.y+hs.y},ImGui::GetColorU32(ImGui::IsItemHovered()?ImGuiCol_SeparatorHovered:ImGuiCol_Separator));
@@ -362,14 +404,16 @@ struct WorkspaceLayout {
     d->AddRectFilled({c.x-12*scale,c.y-14*scale},{c.x+12*scale,c.y+11*scale},ImGui::GetColorU32(ImGuiCol_WindowBg),3*scale);
     d->AddRect({c.x-4.5f*scale,c.y-12*scale},{c.x+4.5f*scale,c.y},ink,3*scale,0,2*scale);
     d->AddRectFilled({c.x-9*scale,c.y-3*scale},{c.x+9*scale,c.y+9*scale},ink,2*scale);
-    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",fitted_split?
-     "This divider borders a fixed-height panel (Quickbar or Tracked creature). Its height follows its content; adjust its width instead.":space_limited?
+    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",!editing && dividers_locked?
+     "Dividers are locked. Unlock them in Layout or enter Customize layout.":fitted_split?
+     "This fixed-height panel cannot move farther here: there is no flexible space beyond it. Enlarge the area or move another panel.":space_limited?
      "These panels are at their minimum sizes. Enlarge this area, hide a panel, or move one elsewhere to free space.":
      "Dividers are locked. Unlock them in Layout or enter Customize layout.");
    }
    ImGui::PopID(); return;
   }
   if(float height=fitted_height(n,enabled); height>0) size.y=std::min(size.y,height);
+  if(trace_panel) for(int p:n.tabs) if(enabled(p)) trace_panel(p,pos,size);
   ImGui::SetCursorScreenPos(pos); ImGui::PushID(n.id);
   ImGui::BeginChild("Pane",size,ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
   std::vector<int> tabs; for(int p:n.tabs) if(enabled(p)) tabs.push_back(p);

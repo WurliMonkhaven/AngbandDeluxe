@@ -48,6 +48,10 @@ int main(int argc,char **argv) {
   ui.scale=std::clamp(fixture.value("scale",1.f),.75f,1.5f);
   ImGui::GetStyle().ScaleAllSizes(ui.scale); ImGui::GetStyle().FontScaleMain=ui.scale;
   for(const auto &item:c.state.value("items",json::array())) if(item.value("location","")=="Pack") { ui.selected=item.value("id",""); break; }
+  json panel_rects=json::object();
+  if(fixture.value("layout_trace",false)) ui.layout.trace_panel=[&](int p,ImVec2 pos,ImVec2 size) {
+   panel_rects[std::to_string(p)]={{"x",pos.x},{"y",pos.y},{"w",size.x},{"h",size.y}};
+  };
   for(int i=0;i<std::clamp(fixture.value("frames",3),3,120);++i) {
    for(const auto &event:fixture.value("input",json::array())) if(event.value("frame",-1)==i) {
     if(event.contains("mouse")) io.AddMousePosEvent(event["mouse"][0].get<float>(),event["mouse"][1].get<float>());
@@ -113,7 +117,7 @@ int main(int argc,char **argv) {
    SDL_DownloadFromGPUTexture(copy,&region,&dest); SDL_EndGPUCopyPass(copy);
    auto *fence=SDL_SubmitGPUCommandBufferAndAcquireFence(cmd); SDL_WaitForGPUFences(gpu,true,&fence,1); SDL_ReleaseGPUFence(gpu,fence);
   }
-  if(fixture.value("layout_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); out<<ui.layout.arrangement().dump(2); }
+  if(fixture.value("layout_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); auto trace=ui.layout.arrangement(); trace["panel_rects"]=panel_rects; out<<trace.dump(2); }
   if(fixture.value("inventory_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); out<<json{{"open",ui.inventory_window_open},{"selected",ui.inventory_selected},{"outgoing",c.outgoing}}.dump(2); }
   auto *bytes=SDL_MapGPUTransferBuffer(gpu,download,false);
   auto *surface=SDL_CreateSurfaceFrom(w,h,SDL_PIXELFORMAT_RGBA32,bytes,w*4);

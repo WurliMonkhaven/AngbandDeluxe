@@ -78,7 +78,28 @@ def main():
     fixed = run("float-locked", layout_edit=False, layout_float=True, layout_floating_locked=True,
                 input=drag([500, 204], [650, 280]))
     assert abs(fixed["floating"][0]["x"]-.15) < .001 and abs(fixed["floating"][0]["y"]-.15) < .001, "Locked floats must stay put"
-    print("Eleven offscreen layout interaction checks passed")
+    # Drag the boundary above a compact panel. Its height must stay fixed,
+    # while the flexible areas on either side exchange space.
+    def check_push(name, panel, above, below, source, delta):
+        rect = source["panel_rects"][str(panel)]
+        x, y = rect["x"] + rect["w"] / 2, rect["y"] - 3
+        result = run(name, layout={"version": 3, "current": source}, input=drag([x, y], [x, y + delta]))
+        before, after = source["panel_rects"], result["panel_rects"]
+        shift = after[str(panel)]["y"] - before[str(panel)]["y"]
+        assert shift * delta > 0, "Compact panel must follow the divider"
+        assert abs(after[str(panel)]["h"] - before[str(panel)]["h"]) < 1, "Compact panel must retain its height"
+        assert abs(after[str(above)]["h"] - before[str(above)]["h"] - shift) < 1, "Only the neighbouring flexible panel grows"
+        assert abs(after[str(below)]["h"] - before[str(below)]["h"] + shift) < 1, "Opposite flexible panel yields the same space"
+        return result
+
+    pushed = check_push("push-tracker-down", 12, 11, 3, original, 60)
+    assert abs(pushed["panel_rects"]["1"]["h"] - original["panel_rects"]["1"]["h"]) < 1, "Character height must not change"
+    check_push("push-tracker-up", 12, 11, 3, pushed, -40)
+    check_push("push-quickbar-down", 10, 0, 2, original, 40)
+    limit = check_push("push-tracker-limit", 12, 11, 3, original, 10000)
+    assert limit["panel_rects"]["3"]["h"] >= 8 * 18, "Inventory must retain its minimum height"
+    print("Fifteen offscreen layout interaction checks passed")
+
 
 
 if __name__ == "__main__":

@@ -1200,3 +1200,5 @@ Unavailable split handles show a muted lock marker during customization and
 a hover explanation distinguishing fixed heights, minimum sizes and locking.
 
 Panel headings can be toggled independently under Layout > Panel headings for Character, Messages, Dungeon details and Tracked creature. Existing global preferences migrate to all four panels. Divider lock markers are three times larger and scale with the interface font.
+
+Dragging a divider beside a compact fixed-height panel can now push that panel along its vertical stack. The nearest flexible area beyond it supplies or receives space, preserving the compact height and unrelated sibling heights. Normal divider locks and minimum sizes still apply.
