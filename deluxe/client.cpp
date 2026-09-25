@@ -1803,6 +1803,46 @@ struct UI {
   }
  }
  void messages_panel() {
+   // At strip height the newest message replaces all panel chrome. Ignore the
+   // search filter here: a collapsed log should never conceal a new message.
+   if(ImGui::GetWindowHeight()<ImGui::GetFrameHeightWithSpacing()+ImGui::GetTextLineHeightWithSpacing()) {
+    ImGui::SetScrollY(0);
+    ImGui::SetCursorPosY(ImGui::GetScrollY());
+    const bool waiting=c.state.value("message_pending",false);
+    std::string full=c.messages.empty()?"No messages yet.":c.messages.front().value("text","");
+    if(!c.messages.empty() && c.messages.front().value("count",1)>1) full+=" (x"+std::to_string(c.messages.front().value("count",1))+")";
+    std::string text=full;
+    std::replace(text.begin(),text.end(),'\n',' '); std::replace(text.begin(),text.end(),'\r',' ');
+    const auto pos=ImGui::GetCursorScreenPos();
+    const float width=std::max(1.f,ImGui::GetContentRegionAvail().x),height=ImGui::GetWindowHeight();
+    const float pad=ImGui::GetFontSize()*.65f;
+    ImGui::InvisibleButton("Latest message",{width,height});
+    if(ImGui::IsItemClicked()) { if(!waiting || !proceed_click()) { keys.clear(); message_history.open=true; } }
+    if(ImGui::BeginPopupContextItem("Compact messages")) {
+     if(ImGui::MenuItem("Message history")) { keys.clear(); message_history.open=true; }
+     ImGui::EndPopup();
+    }
+    if(ImGui::IsItemHovered()) {
+     ImGui::BeginTooltip(); ImGui::PushTextWrapPos(ImGui::GetFontSize()*36);
+     ImGui::TextUnformatted(full.c_str()); ImGui::TextDisabled("%s",waiting && proceed_with_click?"Click to continue. Right-click for history.":"Click for message history. Expand the panel for the full log.");
+     ImGui::PopTextWrapPos(); ImGui::EndTooltip();
+    }
+    const float available=std::max(1.f,width-pad*2);
+    if(ImGui::CalcTextSize(text.c_str()).x>available) {
+     // Remove complete UTF-8 characters when reserving room for the ellipsis.
+     while(!text.empty() && ImGui::CalcTextSize((text+"...").c_str()).x>available) {
+      size_t last=text.size()-1; while(last>0 && (static_cast<unsigned char>(text[last])&0xc0)==0x80) --last;
+      text.resize(last);
+     }
+     text+="...";
+    }
+    auto *draw=ImGui::GetWindowDrawList();
+    const auto ink=waiting?ImGui::GetColorU32(ImVec4(1,.73f,.3f,1)):ImGui::GetColorU32(ImGuiCol_Text);
+    draw->PushClipRect(pos,{pos.x+width,pos.y+height},true);
+    draw->AddLine({pos.x+1,pos.y+3},{pos.x+1,pos.y+height-3},waiting?ink:ImGui::GetColorU32(DeluxeTheme::green()),2);
+    draw->AddText({pos.x+pad,pos.y+std::max(0.f,(height-ImGui::GetTextLineHeight())*.5f)},ink,text.c_str());
+    draw->PopClipRect(); return;
+   }
    DeluxeTheme::panel();
    ImGui::Indent(ImGui::GetFontSize()*.65f);
    if(layout.heading(WorkspaceLayout::Messages)) { ImGui::AlignTextToFramePadding(); ImGui::TextColored(DeluxeTheme::green(),"Messages"); ImGui::SameLine(); }

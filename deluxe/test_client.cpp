@@ -720,6 +720,17 @@ int main(int argc,char **argv) {
   SDL_strlcpy(option_draft.search,"no matching setting",sizeof(option_draft.search));
    {
     ImGui::NewFrame(); ImGui::Begin("Layout measurements");
+  {
+   WorkspaceLayout compact;
+   auto enabled=[](int) { return true; };
+   auto messages=compact.leaf({WorkspaceLayout::Messages});
+   auto inventory=compact.leaf({WorkspaceLayout::Inventory});
+   check(compact.minimum(messages,enabled,600).y<compact.minimum(inventory,enabled,600).y,"Messages can shrink to a single-line strip");
+   compact.root=compact.split(2,.98f,compact.leaf({WorkspaceLayout::Dungeon}),messages);
+   WorkspaceLayout restored; restored.load(compact.serialize());
+   check(std::abs(restored.root.ratio-.98f)<.001f,"Saved compact strips retain their split ratio");
+  }
+
     WorkspaceLayout measured;
     auto enabled=[](int) { return true; };
     measured.compact_height=[](int p,float width) {

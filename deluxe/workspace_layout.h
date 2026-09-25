@@ -117,7 +117,7 @@ struct WorkspaceLayout {
     if(depth>20 || serial>64) throw std::runtime_error("Layout too deep");
     Node n; n.id=serial++; n.axis=v.at("axis").get<int>();
     if(n.axis<0 || n.axis>2) throw std::runtime_error("Invalid split");
-    n.ratio=v.value("ratio",.5f); if(!std::isfinite(n.ratio)) throw std::runtime_error("Invalid ratio"); n.ratio=std::clamp(n.ratio,.08f,.92f);
+    n.ratio=v.value("ratio",.5f); if(!std::isfinite(n.ratio)) throw std::runtime_error("Invalid ratio"); n.ratio=std::clamp(n.ratio,0.f,1.f); // Pixel minima constrain rendering, including single-line Messages.
     if(n.axis) {
      const auto &children=v.at("children"); if(children.size()!=2) throw std::runtime_error("Invalid children");
      n.children={parse(children[0],depth+1),parse(children[1],depth+1)};
@@ -475,10 +475,10 @@ struct WorkspaceLayout {
    return n.axis==1?ImVec2(a.x+b.x+6,std::max(a.y,b.y)):ImVec2(std::max(a.x,b.x),a.y+b.y+6);
   }
   if(float height=fitted_height(n,enabled,width); height>0) return {minimum_width(n,enabled),height};
-  float height=5*ImGui::GetFontSize();
+  float height=0;
   for(int p:n.tabs) if(enabled(p)) {
    const float content=panel_height(p,width);
-   height=std::max(height,content>0?content:(p==Dungeon?10.f:p==Character?12.f:p==Inventory||p==Spells?8.f:5.f)*ImGui::GetFontSize());
+   height=std::max(height,content>0?content:p==Messages?ImGui::GetFrameHeight():(p==Dungeon?10.f:p==Character?12.f:p==Inventory||p==Spells?8.f:5.f)*ImGui::GetFontSize());
   }
   return {minimum_width(n,enabled),std::ceil(height+chrome_height(n,enabled))+1.f};
  }
