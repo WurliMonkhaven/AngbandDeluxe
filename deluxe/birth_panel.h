@@ -99,16 +99,16 @@ struct BirthPanel {
   }
   if(!history_edited) SDL_strlcpy(history,b.value("history","").c_str(),sizeof(history));
   if(step==-1) {
-   DeluxeTheme::section("Another adventure");
+   DeluxeTheme::section("Play again");
    ImGui::BeginChild("Previous character",ImVec2(0,-ImGui::GetFrameHeightWithSpacing()*2));
    ImGui::TextWrapped("%s",name);
    ImGui::TextWrapped("%s %s",chosen(b,"races","race").value("name","").c_str(),chosen(b,"classes","class").value("name","").c_str());
    ImGui::Spacing();
-   ImGui::TextWrapped("Their story has ended. Begin a new adventure with the same starting character, or make someone new.");
+   ImGui::TextWrapped("Reuse this character's starting choices or create a new character.");
    ImGui::Spacing(); DeluxeTheme::section("Starting attributes");
    stats(c,b,false);
    ImGui::Spacing(); ImGui::TextWrapped("%s",history);
-   ImGui::Spacing(); DeluxeTheme::section("Your next adventure");
+   ImGui::Spacing(); DeluxeTheme::section("New character");
    ImGui::BeginDisabled(c.busy || !c.connected);
    if(ImGui::Button("Use previous character")) act(c,"accept",{{"name",name},{"history",history}});
    ImGui::TextWrapped("Begin at level 1 with the same race, class and starting attributes.");
@@ -173,7 +173,7 @@ struct BirthPanel {
    } else {
     ImGui::TextWrapped("%s - %s %s",name,chosen(b,"races","race").value("name","").c_str(),chosen(b,"classes","class").value("name","").c_str());
     ImGui::TextWrapped("%s",history);
-    ImGui::Spacing(); ImGui::TextWrapped("Ready to begin your adventure?");
+
    }
    ImGui::Spacing();
    if(step<2) {
@@ -202,14 +202,14 @@ struct BirthPanel {
   if(!c.menu_error.empty()) ImGui::TextWrapped("%s",c.menu_error.c_str());
   ImGui::Separator(); ImGui::BeginDisabled(c.busy || !c.connected);
   if(ImGui::Button("Return to main menu")) { c.return_to_menu=true; c.send("birth.cancel",{{"revision",c.state.value("revision","")}}); c.busy=true; }
-  const float nav_width=ImGui::CalcTextSize("Back").x+ImGui::CalcTextSize(step<4?"Next":"Begin adventure").x+4*ImGui::GetStyle().FramePadding.x+ImGui::GetStyle().ItemSpacing.x;
+  const float nav_width=ImGui::CalcTextSize("Back").x+ImGui::CalcTextSize(step<4?"Next":"Start game").x+4*ImGui::GetStyle().FramePadding.x+ImGui::GetStyle().ItemSpacing.x;
   ImGui::SameLine();
   const float right=ImGui::GetCursorPosX()+ImGui::GetContentRegionAvail().x;
   if(ImGui::GetContentRegionAvail().x<nav_width) ImGui::NewLine();
   ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),right-nav_width));
   ImGui::BeginDisabled(step==0); if(ImGui::Button("Back")) --step; ImGui::EndDisabled(); ImGui::SameLine();
   if(step<4) { if(ImGui::Button("Next")) ++step; }
-  else { ImGui::BeginDisabled(name[0]==0); if(ImGui::Button("Begin adventure")) act(c,"accept",{{"name",name},{"history",history}}); ImGui::EndDisabled(); }
+  else { ImGui::BeginDisabled(name[0]==0); if(ImGui::Button("Start game")) act(c,"accept",{{"name",name},{"history",history}}); ImGui::EndDisabled(); }
   ImGui::EndDisabled();
  }
 };

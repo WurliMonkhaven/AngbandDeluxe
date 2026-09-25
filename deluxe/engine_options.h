@@ -22,7 +22,7 @@ struct EngineOptions {
  struct Help { const char *id,*group,*text; };
  static Help help(const std::string &id) {
   static const Help notes[]={
-   {"rogue_like_commands","Input and targeting","Use letter keys for movement and the roguelike command bindings. Deluxe buttons still invoke the same actions."},
+   {"rogue_like_commands","Input and targeting","Use letter keys for movement and the roguelike command bindings. AnybandUI buttons still invoke the same actions."},
    {"autoexplore_commands","Input and targeting","Stair commands can travel to a known staircase; p explores toward the nearest unexplored location."},
    {"use_old_target","Input and targeting","Aimed actions reuse the current target instead of asking. This includes a previously targeted empty location."},
    {"mouse_movement","Input and targeting","Allow left-click movement in the game view."},
@@ -31,7 +31,7 @@ struct EngineOptions {
    {"pickup_inven","Items","Automatically pick up copies of items already carried."},
    {"show_flavors","Items","Keep colors and varieties in identified item names. Store names are unaffected."},
    {"show_damage","Messages","Include damage dealt by your attacks in the message log."},
-   {"auto_more","Messages","Continue past message pauses automatically. This also removes Deluxe's waiting-for-input ribbon for those pauses."},
+   {"auto_more","Messages","Continue past message pauses automatically. This also removes AnybandUI's waiting-for-input ribbon for those pauses."},
    {"notify_recharge","Messages","Report when rods and activatable equipment finish recharging."},
    {"show_target","Display","Ask the engine to highlight the current target with its cursor."},
    {"highlight_player","Display","Ask the engine to highlight the player between turns."},
@@ -58,7 +58,7 @@ struct EngineOptions {
    bool heading=false;
    for(auto &row:entries) {
     const auto id=row.at("id").get<std::string>(),label=row.at("label").get<std::string>();
-    if(id=="use_sound") continue; // Deluxe sound is controlled in the Audio tab.
+    if(id=="use_sound") continue; // AnybandUI sound is controlled in the Audio tab.
     const auto note=help(id);
     if(std::string(note.group)!=group || !matches(label+" "+id+" "+note.text+" "+group,search)) continue;
     if(!heading) { ImGui::Spacing(); DeluxeTheme::section(group); heading=true; }
@@ -77,8 +77,8 @@ struct EngineOptions {
   }
   struct Numeric { const char *id,*label,*help; int maximum,multiplier; const char *format; };
   const Numeric numbers[]={
-   {"hitpoint_warn","Low hitpoint warning","Warn below this percentage of maximum HP, in 10% steps. Also sets the threshold for Deluxe's low-health animation.",9,10,"%d%%"},
-   {"delay_factor","Animation delay","Stored engine animation delay in milliseconds. Deluxe currently presents completed engine frames, so this does not control Deluxe or CRT animation timing.",255,1,"%d ms"},
+   {"hitpoint_warn","Low hitpoint warning","Warn below this percentage of maximum HP, in 10% steps. Also sets the threshold for AnybandUI's low-health animation.",9,10,"%d%%"},
+   {"delay_factor","Animation delay","Stored engine animation delay in milliseconds. AnybandUI currently presents completed engine frames, so this does not control AnybandUI or CRT animation timing.",255,1,"%d ms"},
    {"lazymove_delay","Movement key delay","Time in milliseconds, in 10 ms steps, to combine two direction keys into a diagonal. Zero avoids this intentional input delay.",255,10,"%d ms"}
   };
   bool heading=false;

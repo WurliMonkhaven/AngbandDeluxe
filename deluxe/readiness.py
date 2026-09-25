@@ -35,14 +35,14 @@ def main():
             raise RuntimeError(f"{name} failed; see {output / (name+'.log')}")
     python = [sys.executable,"-B"]
     if not args.skip_build:
-        run("build",python+[ROOT/"deluxe/build.py","--ninja","--target","OurExecutable","angband-deluxe",
+        run("build",python+[ROOT/"deluxe/build.py","--ninja","--target","OurExecutable","AnybandUI",
                             "deluxe-client-tests","deluxe-gpu-tests","deluxe-audio-tests","deluxe-transport-tests","deluxe-ui-preview","deluxe-window-tests"],timeout=600)
     run("client",[game/"deluxe-client-tests.exe",output/"settings.json"])
     run("backend",python+[ROOT/"deluxe/test_backend.py","--backend",game/"angband-backend.exe"])
     run("audio",[game/"deluxe-audio-tests.exe",game/"audio"])
     run("gpu",[game/"deluxe-gpu-tests.exe","direct3d12"])
     run("frame-pacing",[game/"deluxe-gpu-tests.exe","direct3d12","--bench"])
-    run("assets",[game/"angband-deluxe.exe","--check-assets"])
+    run("assets",[game/"AnybandUI.exe","--check-assets"])
     # Create a fresh first-floor fixture through actual game commands, never a
     # personal save. The fixture remains for diagnosis.
     import test_backend as engine_tests
@@ -97,7 +97,7 @@ def main():
         # Relocate to a path with spaces; cwd deliberately unrelated to the app.
         relocated=output/"Relocated build with spaces"
         shutil.copytree(stage,relocated)
-        run("packaged-assets",[relocated/"angband-deluxe.exe","--check-assets"],cwd=output)
+        run("packaged-assets",[relocated/"AnybandUI.exe","--check-assets"],cwd=output)
         asset_log=(output/"packaged-assets.log").read_text()
         resolved=[Path(line.split("=",1)[1]) for line in asset_log.splitlines() if "=" in line]
         if len(resolved)!=4 or not all(path.is_relative_to(relocated) for path in resolved):
@@ -111,7 +111,7 @@ def main():
         backup=font.with_suffix(".test-backup")
         font.rename(backup)
         try:
-            run("packaged-missing-font",[relocated/"angband-deluxe.exe","--check-assets"],cwd=output,expected=1)
+            run("packaged-missing-font",[relocated/"AnybandUI.exe","--check-assets"],cwd=output,expected=1)
         finally:
             backup.rename(font)
         run("packaged-journeys",python+[ROOT/"deluxe/test_backend.py","--backend",relocated/"angband-backend.exe",

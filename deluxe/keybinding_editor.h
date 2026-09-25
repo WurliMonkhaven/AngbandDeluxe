@@ -130,6 +130,6 @@ struct KeybindingEditor {
    bindings.erase(std::remove_if(bindings.begin(),bindings.end(),[&](const json &b){return b.value("mode",-1)==mode;}),bindings.end());
    command=-1; listening=false;
   }
-  ImGui::TextWrapped("Restore removes Deluxe overrides, preserving keymaps loaded from Angband preference files.");
+  ImGui::TextWrapped("Restore removes AnybandUI overrides, preserving keymaps loaded from Angband preference files.");
  }
 };

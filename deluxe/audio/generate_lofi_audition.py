@@ -117,7 +117,7 @@ def main():
     (OUT/"manifest.json").write_text(json.dumps(manifest, indent=2)+"\n", encoding="utf-8")
     page = '''<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deluxe / Quiet computing</title><style>
+<title>AnybandUI / Quiet computing</title><style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{max-width:920px;margin:40px auto;
 padding:0 24px;background:#141815;color:#e2e5db;font:16px/1.6 system-ui,sans-serif}
 header{padding-bottom:24px;border-bottom:1px solid #3b493d}h1{font-size:40px;margin:4px 0}
@@ -127,7 +127,7 @@ border:1px solid #354436;border-radius:8px}h2{font-size:19px;margin:0 0 14px}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:24px}strong{display:block;margin:0 0 10px;
 font-size:14px}audio{width:100%;height:38px}footer{font-size:13px;color:#aeb7aa;margin:30px 0}
 a{color:#b2cbaa}@media(max-width:620px){.pair{grid-template-columns:1fr}h1{font-size:30px}}
-</style><header><div class="eyebrow">ANGBAND DELUXE / SOUND STUDIES 02</div>
+</style><header><div class="eyebrow">AnybandUI / SOUND STUDIES 02</div>
 <h1>Quiet computing</h1><p>Understated, warm and a little imperfect. Simple gated tones,
 small-speaker colour and restrained early-DAC texture. No continuous tape hiss,
 long reverb or arcade fanfares.</p><p>A: soft terminal. B: modest home computer.

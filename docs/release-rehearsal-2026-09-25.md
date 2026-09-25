@@ -66,8 +66,8 @@ No game rules or frontend behaviour were changed for these test fixes.
 Final logs and per-check results:
 `build-deluxe/readiness-20260925-112317/`.
 
-Candidate archive:
-`build-deluxe/readiness-20260925-112317/packages/AngbandDeluxe-Windows-20260925-112421.zip`.
+The historical candidate archive is retained in
+`build-deluxe/readiness-20260925-112317/packages/` under its original filename.
 
 Visual previews: `build-deluxe/rehearsal-visual/`.
 Earlier diagnostic runs were retained, including failed runs; the final results

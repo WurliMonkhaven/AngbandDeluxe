@@ -1,4 +1,4 @@
-# Angband Deluxe semantic API: proposed protocol v1
+# AnybandUI semantic API: proposed protocol v1
 
 Status: implementation design, not an implemented or frozen public API. Examples
 are illustrative fixtures. Publish machine-readable schemas and a conformance
@@ -259,7 +259,7 @@ semantics. Preserve engine default choices and confirmation text. On completion,
 report `succeeded`, `failed`, `cancelled` or `interrupted` and the final
 revision; failure is not a promise of zero turn cost.
 
-Deluxe maps keyboard, palette, context menu, mouse and controller to these same
+AnybandUI maps keyboard, palette, context menu, mouse and controller to these same
 requests. While a prompt owns input, ordinary movement keys cannot queue gameplay
 behind it. No click or key is delivered to both the terminal fallback and the
 semantic command path. User macros remain ordered engine actions and stop for
@@ -312,7 +312,7 @@ save compatibility ID. The backend performs authoritative format validation;
 a matching manifest alone cannot make an incompatible save loadable. Preserve
 the engine's ordinary death/permadeath and save semantics.
 
-Deluxe sidecars contain UI preferences, thumbnails and recorded history, which
+AnybandUI sidecars contain UI preferences, thumbnails and recorded history, which
 may include actual events as well as their player-knowledge context.
 They have their own schema version and explicit association with a save/run.
 Missing, corrupt or stale sidecars fall back to the engine save and an incomplete

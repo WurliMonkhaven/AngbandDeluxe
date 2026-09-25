@@ -27,6 +27,20 @@ int main(int argc,char **argv) {
  try {
   check(argc==2,"Pass an unused settings-file path");
   {
+   const auto root=std::filesystem::absolute(std::string(argv[1])+".profiles");
+   check(!std::filesystem::exists(root),"Use an unused profile test path");
+   const auto preferred=root/"AnybandUI"/"AnybandUI";
+   const auto legacy=root/"AngbandDeluxe"/"AngbandDeluxe";
+   check(RuntimePaths::user_directory(preferred)==preferred,"Fresh installations use the new profile folder");
+   std::filesystem::create_directories(legacy);
+   std::ofstream(legacy/"settings.json")<<"{}";
+   std::filesystem::create_directories(preferred);
+   check(RuntimePaths::user_directory(preferred)==legacy,"Existing saves must remain discoverable after rebranding");
+   check(RuntimePaths::user_directory(preferred/"")==legacy,"SDL trailing separators must retain legacy lookup");
+   std::ofstream(preferred/"settings.json")<<"{}";
+   check(RuntimePaths::user_directory(preferred)==preferred,"Existing new profiles must take precedence");
+  }
+  {
    DungeonCameraSettings defaults; check(!defaults.enabled && defaults.follow,"Camera is opt-in with following enabled");
    defaults.enabled=true; defaults.follow=false; DungeonCameraSettings restored; restored.load(defaults.serialize());
    check(restored.enabled && !restored.follow,"Camera preferences round trip");
@@ -352,6 +366,30 @@ int main(int argc,char **argv) {
   Connection death; death.connected=true;
   auto state_event=[](const char *phase) { return json{{"kind","event"},{"event","state.changed"},
    {"data",{{"phase",phase},{"messages",json::array()},{"terminal",json::object()}}}}; };
+  {
+   Connection loading; loading.connected=true; loading.loading="Starting AnybandUI...";
+   auto request=loading.send("saves.list");
+   loading.receive({{"id",request},{"result",json::array()}});
+   check(loading.loading.empty(),"Startup progress ends when the character list arrives");
+   request=loading.send("session.load",{{"save","test"}});
+   check(!loading.loading.empty(),"Loading feedback begins with the request");
+   loading.receive({{"id",request},{"result",json::object()}});
+   check(!loading.loading.empty(),"Acknowledgement must not hide loading feedback early");
+   loading.receive(state_event("playing"));
+   check(loading.loading.empty(),"Gameplay state dismisses loading feedback");
+   request=loading.send("session.new");
+   auto birth=state_event("birth"); birth["data"]["birth"]=json::object(); loading.receive(birth);
+   check(loading.loading.empty(),"Character creation remains interactive");
+   loading.send("birth.action",{{"action","accept"}});
+   check(!loading.loading.empty(),"Starting the new game restores progress feedback");
+   loading.receive({{"kind","event"},{"event","prompt.requested"},{"data",{{"type","text"}}}});
+   check(loading.loading.empty(),"Input prompts must not be blocked by loading feedback");
+   request=loading.send("session.load");
+   loading.receive({{"id",request},{"error",{{"message","Load failed"}}}});
+   check(loading.loading.empty(),"Failed loads restore access to the UI");
+   loading.send("session.load"); loading.process_stopped(1);
+   check(loading.loading.empty(),"Backend failure dismisses loading feedback");
+  }
   death.receive(state_event("dead"));
   check(death.connected && !death.restart_ready,"Tombstone must remain interactive");
   death.receive(state_event("finished"));

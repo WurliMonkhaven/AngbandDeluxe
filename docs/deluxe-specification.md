@@ -1,4 +1,4 @@
-# Angband Deluxe: product and implementation specification
+# AnybandUI: product and implementation specification
 
 Status: target design. A first Windows development build now implements a subset;
 see [implementation status](../deluxe/README.md) and [development protocol 0.1](deluxe-protocol-0.1.md).
@@ -20,7 +20,7 @@ implementation decisions below; these supersede conflicting original requirement
   gameplay scrollbars. This does not imply displaying the entire dungeon level.
 - Normal play uses a semantic dungeon viewport with separate terrain, trap, item
   and actor layers. The engine supplies the camera bounds and perceived visuals;
-  Deluxe owns rendering and the surrounding character UI. The renderer does not
+  AnybandUI owns rendering and the surrounding character UI. The renderer does not
   crop the terminal or infer entities by parsing its text.
 - Capture existing presentation results during ordinary engine drawing. Do not
   call map helpers again from API queries: memory updates and hallucination RNG
@@ -32,7 +32,7 @@ implementation decisions below; these supersede conflicting original requirement
   the terminal sidebar from normal play must not remove its useful information:
   rank, progression, resources, stats, armour, speed, conditions, tracked health,
   light, terrain/traps underfoot, level feelings and pending activities belong in
-  Deluxe's information panel or existing inventory/equipment views.
+  AnybandUI's information panel or existing inventory/equipment views.
 - Native look/target interactions use the engine's existing cursor, candidate
   cycling, free movement, camera and projection path. Hover inspects a tile;
   normal left-click uses Angband mouse movement (including adjacent melee).
@@ -76,10 +76,10 @@ implementation decisions below; these supersede conflicting original requirement
 
 ## 1. Product intent
 
-Angband Deluxe is a Windows, macOS and Linux desktop front-end for Angband and,
+AnybandUI is a Windows, macOS and Linux desktop front-end for Angband and,
 eventually, other Angband variants that implement the same semantic API. Angband
 continues to own the rules, simulation, character progression, randomness,
-knowledge, command execution and save format. Deluxe makes existing information
+knowledge, command execution and save format. AnybandUI makes existing information
 and commands easier to use and understand.
 
 The fork exists to add an adapter and front-end integration points. Do not rewrite
@@ -88,14 +88,14 @@ must be a small, behaviour-preserving change with parity tests. Gameplay changes
 are outside this project, even when they appear convenient for the new interface.
 
 The intended compatibility promise is: install a compatible backend package for
-the current operating system, select it in Deluxe, and play without rebuilding or
-changing Deluxe. An arbitrary existing Angband executable does not automatically
+the current operating system, select it in AnybandUI, and play without rebuilding or
+changing AnybandUI. An arbitrary existing Angband executable does not automatically
 implement this contract. Saves remain specific to their engine and version.
 
 ## 2. Non-negotiable requirements
 
 1. The same engine build, starting state, RNG state and player actions produce
-   the same gameplay outcomes through the classic and Deluxe interfaces.
+   the same gameplay outcomes through the classic and AnybandUI interfaces.
 2. API queries, tooltips, sorting, resizing and rendering consume no game time,
    change no knowledge, use no gameplay RNG and never mutate the live simulation.
 3. The backend may expose actual engine state, including information hidden from
@@ -107,7 +107,7 @@ implement this contract. Saves remain specific to their engine and version.
    same semantic commands. Cosmetic animation never gates the next input.
 6. Engine-specific rules and calculations stay in the backend adapter. The client
    consumes data, descriptions, capabilities and action descriptors.
-7. The existing front-ends and native savefiles remain usable. Deluxe settings
+7. The existing front-ends and native savefiles remain usable. AnybandUI settings
    and supplementary history are stored separately from engine saves.
 
 Actual state, player-known state, remembered observations and current perception
@@ -121,7 +121,7 @@ Unavailable to the adapter and unknown to the player are also distinct states.
 flowchart LR
     E[Angband engine] --> A[Angband semantic adapter]
     A --> P[Versioned local protocol]
-    P --> M[Deluxe UI model]
+    P --> M[AnybandUI UI model]
     M --> U[Desktop interface and renderer]
     U --> C[Commands and prompt replies]
     C --> P
@@ -135,7 +135,7 @@ flowchart LR
 Use one child process per active game, communicating over standard input/output
 with a versioned, UTF-8 JSON Lines protocol. Standard error carries diagnostic
 output. No network listener or service is required. This avoids exposing native
-struct layouts, pointers, compiler ABIs or the engine's global state to Deluxe.
+struct layouts, pointers, compiler ABIs or the engine's global state to AnybandUI.
 It also lets a variant implement the contract in its own language and build.
 
 The first backend lives in this repository and links the existing C engine.
@@ -172,7 +172,7 @@ special spoiler/debug mode is required merely because a fact is hidden.
 
 Expose actual values alongside player-knowledge and perception metadata, with
 separate observed/remembered values where they differ. The front-end can then
-choose how to use them. Transporting information does not itself require Deluxe
+choose how to use them. Transporting information does not itself require AnybandUI
 to show it, and future uses need not be anticipated before allowing API access.
 
 | Domain | API may expose | Useful accompanying context |
@@ -186,7 +186,7 @@ to show it, and future uses need not be anticipated before allowing API access.
 | History | Actual events and identities, including previously hidden facts | What was known at the event and what was learned later |
 
 For example, the backend may expose that a floor item is cursed before the player
-has looked at or picked it up. Deluxe may use that value for a curse effect. The
+has looked at or picked it up. AnybandUI may use that value for a curse effect. The
 API need not establish that a free inspection would already reveal it. This does
 not mark the item as identified, execute look/pickup or change any item mechanics.
 
@@ -326,7 +326,7 @@ inventory/equipment, messages and known-monster inspection panels. Add basic
 palette search, context actions, scaling and keyboard configuration.
 
 Exit: create a character, enter town/dungeon, move, fight, use items, handle a
-prompt, save, close and reload through Deluxe on Windows. macOS/Linux validation
+prompt, save, close and reload through AnybandUI on Windows. macOS/Linux validation
 is deferred by the current brief. Demonstrate
 actual/known-state separation and parity for these flows. Label remaining fallback menus.
 
@@ -451,7 +451,7 @@ Cancel/Escape returns without performing the action. Original engine quantity
 and inscription confirmations follow normally. Item-first actions use the
 same commands and eligibility rules. Dungeon presentation remains visible.
 
-Dev tools includes Quit without saving. It closes the backend and Deluxe
+Dev tools includes Quit without saving. It closes the backend and AnybandUI
 without writing the current session, preserving the most recent existing save.
 Loading a regular save is read-only. Unsaved progress is intentionally discarded.
 
@@ -565,7 +565,7 @@ symbols; spells and other actions use monograms, with full names in tooltips.
 Item counts or spell mana costs appear on slots. Unavailable bindings remain
 visible, dimmed, with a tooltip explaining why.
 
-Assignments persist per save in Deluxe preferences and follow successful save
+Assignments persist per save in AnybandUI preferences and follow successful save
 renames; deleting a save removes its profile. Bindings store engine-provided
 opaque item binding_key values and action/spell identities, never revision-scoped
 item handles. Each activation resolves a fresh eligible carried item or equipped
@@ -737,14 +737,14 @@ engine terrain flags; map adds level_id for resetting the local camera.
 
 ### Native Angband options (implemented)
 
-Settings includes an Angband tab for the current character, with searchable grouped interface options, explanatory hover text, and native low-hitpoint warning, animation delay, and movement-key delay controls. Editing is draft-only; Cancel discards changes, while Save and Close validates and applies the complete changed batch at a normal gameplay input boundary without consuming a turn. Options persist through the existing character save format when the game is saved, not in Deluxe preferences or new-character defaults. Birth options remain in character creation; keymaps, visual configuration, and other advanced options retain their engine UI. Engine preferences without current Deluxe support are described explicitly.
+Settings includes an Angband tab for the current character, with searchable grouped interface options, explanatory hover text, and native low-hitpoint warning, animation delay, and movement-key delay controls. Editing is draft-only; Cancel discards changes, while Save and Close validates and applies the complete changed batch at a normal gameplay input boundary without consuming a turn. Options persist through the existing character save format when the game is saved, not in AnybandUI preferences or new-character defaults. Birth options remain in character creation; keymaps, visual configuration, and other advanced options retain their engine UI. Engine preferences without current AnybandUI support are described explicitly.
 
 The optional `options: 1` capability exposes `options.get` (interface option IDs, engine labels, boolean values, three numeric values, and input context) and `options.set` (`context`, `values` keyed by stable option ID). The adapter rejects stale contexts, busy states, non-interface options, wrong value types, duplicate keys, and out-of-range numeric values before applying any change. Native option setters and the standard engine redraw path retain ownership of behavior.
 
 
 ### Native post-mortem and graveyard (implemented)
 
-After the fatal message is acknowledged, Deluxe captures an immutable engine-authored run summary after death identification and score entry. The native post-mortem presents cause of death, character identity and level, deepest depth, turns, calculated score, gold, final messages, identified belongings and the native character sheet. The engine retains ownership of score eligibility and its normal dead-character save/cleanup path. Retirement and victory have distinct headings. The main-menu Graveyard reads one versioned, atomically written JSON file per run under the user directory/run-history; records survive save deletion and renaming, and unreadable records do not hide intact runs. Archive failures keep the in-memory summary and offer Retry archiving. Play Again on the current completed run reopens its dead-character save through Angband's original new-game/quickstart flow, using session.replay. It bypasses character selection and the new-save-name prompt. Native quickstart offers reuse of the original starting race, class and stats, changes to name/background, birth options, or a fresh character. Opening a dead save uses this same screen. Cancelling preserves the dead save unchanged; clients that do not request native birth retain the terminal flow. Archived runs retain a separate New character like this action, which creates a new named save with the previous race/class.
+After the fatal message is acknowledged, AnybandUI captures an immutable engine-authored run summary after death identification and score entry. The native post-mortem presents cause of death, character identity and level, deepest depth, turns, calculated score, gold, final messages, identified belongings and the native character sheet. The engine retains ownership of score eligibility and its normal dead-character save/cleanup path. Retirement and victory have distinct headings. The main-menu Graveyard reads one versioned, atomically written JSON file per run under the user directory/run-history; records survive save deletion and renaming, and unreadable records do not hide intact runs. Archive failures keep the in-memory summary and offer Retry archiving. Play Again on the current completed run reopens its dead-character save through Angband's original new-game/quickstart flow, using session.replay. It bypasses character selection and the new-save-name prompt. Native quickstart offers reuse of the original starting race, class and stats, changes to name/background, birth options, or a fresh character. Opening a dead save uses this same screen. Cancelling preserves the dead save unchanged; clients that do not request native birth retain the terminal flow. Archived runs retain a separate New character like this action, which creates a new named save with the previous race/class.
 
 Acknowledging death opens the native post-mortem immediately, without a CRT shutdown animation or shutdown sound. Backend completion cannot dismiss the post-mortem automatically.
 
@@ -758,11 +758,11 @@ The launcher uses a searchable character-card roster and a selected-character pr
 
 ### Original sound pack and event-driven playback
 
-Deluxe ships original procedurally synthesized cues for interface activation, confirmed targeting, potion use, successful melee impacts, successful spell casts. Gameplay variants rotate; unknown sound events remain silent. The original audition page remains available separately. No legacy Angband sound assets are used.
+AnybandUI ships original procedurally synthesized cues for interface activation, confirmed targeting, potion use, successful melee impacts, successful spell casts. Gameplay variants rotate; unknown sound events remain silent. The original audition page remains available separately. No legacy Angband sound assets are used.
 
 The audio.events capability publishes transient sound.play events with a semantic name. An optional sound observer reports engine sound calls independently of the legacy use_sound preference; an optional target observer reports successful explicit target selection, not tracking movement or cancellation. Neither observer changes game rules, random state or actions. State queries, message history and saved games do not replay audio events. Other frontends retain existing sound behaviour.
 
-Settings / Audio provides an enabled switch plus master, gameplay and interface volumes, persisted only by Save and Close. Cancel discards drafts. Deluxe hides the redundant legacy sound checkbox; the underlying engine preference is preserved. Audio mutes and clears queued sounds on focus loss and session restart. Missing devices or assets leave the game playable and report an audio availability error.
+Settings / Audio provides an enabled switch plus master, gameplay and interface volumes, persisted only by Save and Close. Cancel discards drafts. AnybandUI hides the redundant legacy sound checkbox; the underlying engine preference is preserved. Audio mutes and clears queued sounds on focus loss and session restart. Missing devices or assets leave the game playable and report an audio availability error.
 
 48 kHz mono PCM samples and pack.json are staged beside the executable in audio/. Samples are preloaded. Four reusable SDL audio streams provide overlap with headroom, a 100 ms per-cue cooldown and bounded event intake; excess sounds are dropped rather than delayed. No synthesis, disk loading, sleeps or audio callbacks run on the gameplay path. The old CRT shutdown sample remains in the sound pack but is not played.
 
@@ -907,7 +907,7 @@ Quantity prompts show the engine-selected item and its colour, an amount field a
 ### Native keybinding editor
 
 - Settings / Keybindings exposes the engine's command catalog with searchable groups, original defaults, key capture, explicit conflict replacement, and per-key/per-keyset restore. Original and Roguelike profiles are independent; editing a profile does not switch the active keyset.
-- Changes are drafts until Save and Close. Bindings persist across characters/restarts in a separate deluxe-keybindings.json in the backend user directory. Native preference-file keymaps are preserved as the underlying baseline, including multi-key sequences; restoring removes Deluxe overrides only.
+- Changes are drafts until Save and Close. Bindings persist across characters/restarts in a separate deluxe-keybindings.json in the backend user directory. Native preference-file keymaps are preserved as the underlying baseline, including multi-key sequences; restoring removes AnybandUI overrides only.
 - Supported triggers are letters/symbols (using text input for keyboard-layout accuracy), Ctrl+letters, and unmodified F1-F12. Digits, keypad, arrows, prompt controls, and native keymap escape prefixes are reserved; existing movement and quickbar behavior stays intact. Alt/GUI combinations and modified function keys are not captured.
 - keybindings.get returns command/default/conflict data and the overlay revision; keybindings.set validates the complete batch before persisting or installing it through Angband keymaps. Bindings retain command prerequisites, native prompts and confirmations; semantic sidebar actions continue to bypass user keymaps. Only normal living-character play can apply changes.
 
@@ -1069,7 +1069,7 @@ Look/target activation selects its existing tab, but respects an explicitly hidd
 panel; it never creates a floating overlay automatically. Stores, birth, character sheet, settings
 and end-of-game screens keep their dedicated presentation.
 
-Current and up to 32 named layouts persist in Deluxe settings, with bounded schema
+Current and up to 32 named layouts persist in AnybandUI settings, with bounded schema
 validation and recovery from invalid layouts. Floating positions are relative to
 the available workspace and constrained inside it on resize. Recursive minimum
 pane sizes protect controls where screen space permits. Game-only CRT follows
@@ -1121,7 +1121,7 @@ and inventory.open event implement the listing handoff without an outstanding it
 selection prompt. Other frontends and clients without the opt-in retain the text
 UI. Actual action selection prompts remain eligibility-filtered as before.
 
-Equipment command: Deluxe opts into `native_equipment`; the engine emits
+Equipment command: AnybandUI opts into `native_equipment`; the engine emits
 `equipment.open` instead of entering the terminal equipment list. The client
 opens a dedicated Equipment management window, sharing the Inventory browser
 with a Slot column, item actions, inspection and right-click quickbar assignment.

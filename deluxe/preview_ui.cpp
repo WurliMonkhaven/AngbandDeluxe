@@ -29,6 +29,7 @@ int main(int argc,char **argv) {
   if(fixture.contains("prompt")) c.prompt=fixture["prompt"];
   if(fixture.contains("blast")) c.blast=fixture["blast"];
   if(fixture.value("saving_preview",false)) { c.saving=true; c.close_requested=true; c.busy=true; }
+  c.loading=fixture.value("loading_preview",std::string());
   UI ui{c}; ui.font_library=&fonts; ui.font_settings.load(fixture.value("fonts",json::object())); ui.base_style=ImGui::GetStyle();
   ui.tiles.device=gpu; ui.tiles.directory=std::filesystem::path("lib")/"tiles"; ui.tileset=fixture.value("tileset",0);
   ui.camera_settings.load(fixture.value("camera",json::object()));
@@ -87,7 +88,7 @@ int main(int argc,char **argv) {
    ImGui_ImplSDLGPU3_NewFrame(); io.FontDefault=fonts.get(ui.font_settings.interface_font); ImGui::NewFrame();
    ui.draw(nullptr);
    if(fixture.value("font_picker",false) && i==0) {
-    ui.begin_settings(); if(fixture.contains("tuning")) { ui.game_tuning.load(fixture["tuning"]); ui.game_tuning.category=fixture.value("tuning_category",0); ui.game_tuning.advanced=fixture.value("tuning_advanced",false); } ImGui::Begin("Angband Deluxe"); ImGui::OpenPopup("Settings"); ImGui::End();
+    ui.begin_settings(); if(fixture.contains("tuning")) { ui.game_tuning.load(fixture["tuning"]); ui.game_tuning.category=fixture.value("tuning_category",0); ui.game_tuning.advanced=fixture.value("tuning_advanced",false); } ImGui::Begin("AnybandUI"); ImGui::OpenPopup("Settings"); ImGui::End();
    }
    if(fixture.contains("journal")) {
     ImGui::SetNextWindowSize({std::min(float(w)-40,ImGui::GetFontSize()*48),float(h)-80});

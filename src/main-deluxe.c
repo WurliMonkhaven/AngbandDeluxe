@@ -1,4 +1,4 @@
-/* Angband Deluxe local semantic adapter. GPLv2, as for the engine.
+/* AnybandUI local semantic adapter. GPLv2, as for the engine.
  * All engine access runs on its main thread at input boundaries. */
 #include "angband.h"
 #include "cJSON.h"
@@ -162,7 +162,7 @@ static void counter(cJSON *j, const char *key, unsigned long value)
 static void send_json(cJSON *j)
 {
  char *s = cJSON_PrintUnformatted(j);
- if (!s || strlen(s) >= frame_limit) { fprintf(stderr, "Deluxe frame exceeds limit\n"); exit(2); }
+ if (!s || strlen(s) >= frame_limit) { fprintf(stderr, "AnybandUI frame exceeds limit\n"); exit(2); }
  if (puts(s) < 0 || fflush(stdout)) exit(2);
  cJSON_free(s); cJSON_Delete(j);
 }
@@ -1403,7 +1403,7 @@ static errr get_command(cmd_context context)
   }
   if (debug_damage) {
    int damage = debug_damage; debug_damage = 0; ready = false;
-   take_hit(player, damage, "Deluxe developer tools");
+   take_hit(player, damage, "AnybandUI developer tools");
   }
   return result;
  }

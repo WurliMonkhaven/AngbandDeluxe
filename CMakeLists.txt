@@ -447,7 +447,7 @@ target_include_directories(OurExecutable PRIVATE
 target_link_libraries(OurExecutable PRIVATE ${ANGBAND_CORE_LINK_LIBRARIES})
 if(SUPPORT_DELUXE_FRONTEND)
     if(SUPPORT_WINDOWS_FRONTEND OR SUPPORT_SDL_FRONTEND OR SUPPORT_SDL2_FRONTEND OR SUPPORT_X11_FRONTEND OR SUPPORT_GCU_FRONTEND)
-        message(FATAL_ERROR "Configure the Deluxe backend separately from platform frontends.")
+        message(FATAL_ERROR "Configure the AnybandUI backend separately from platform frontends.")
     endif()
     target_link_libraries(OurExecutable PRIVATE deluxe_json)
     set_target_properties(OurExecutable PROPERTIES OUTPUT_NAME angband-backend)

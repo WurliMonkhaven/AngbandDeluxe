@@ -1,4 +1,4 @@
-# Angband Deluxe
+# AnybandUI
 
 A native Windows frontend for Angband. The C engine runs in a separate process;
 the C++ client uses SDL3, SDL_GPU and Dear ImGui. Python is development tooling
@@ -18,7 +18,7 @@ On Windows, install Visual Studio's C++ tools, CMake and Python, then:
 
 ```powershell
 python -B deluxe/build.py --ninja --configure
-.\build-deluxe-native\game\angband-deluxe.exe
+.\build-deluxe-native\game\AnybandUI.exe
 ```
 
 The build pins SDL3, Dear ImGui, cJSON and nlohmann/json revisions. First-time
@@ -103,7 +103,7 @@ Settings marked **New characters** control storage capacities or world dimension
 Each save retains these in a companion `tuning-<save name>.json` in that same user
 directory. Keep this companion when moving a tuned save between installations.
 Older saves without a companion use the installed stock capacities. Rename and
-delete through Deluxe also handle the companion. Replaced tuning files retain
+delete through AnybandUI also handle the companion. Replaced tuning files retain
 a `.bak` backup, and invalid values are rejected before saving.
 
 ## Dungeon presence effects

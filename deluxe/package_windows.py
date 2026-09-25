@@ -13,11 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 def package(build, output):
     build, output = build.resolve(), output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    name = "AngbandDeluxe-Windows-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    name = "AnybandUI-Windows-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     stage = output / name
     stage.mkdir()  # Never overwrite a previous package or someone else's files.
     game = build / "game"
-    for file in ("angband-deluxe.exe", "angband-backend.exe"):
+    for file in ("AnybandUI.exe", "angband-backend.exe"):
         shutil.copy2(game/file, stage/file)
     for folder in ("audio", "fonts"):
         shutil.copytree(game/folder, stage/folder)
@@ -51,7 +51,7 @@ def package(build, output):
         for file in sorted(set(tracked)):
             path = ROOT/file
             if file and path.is_file() and not path.is_relative_to(stage) and not file.endswith(".pyc") and not file.startswith("screenshots/"):
-                source.write(path, "AngbandDeluxe-source/"+file)
+                source.write(path, "AnybandUI-source/"+file)
     manifest = {}
     for path in sorted(stage.rglob("*")):
         if path.is_file():

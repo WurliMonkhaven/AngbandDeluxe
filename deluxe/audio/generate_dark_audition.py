@@ -115,7 +115,7 @@ def main(output=OUT, recipe_fn=recipe, process_fn=grit, labels=LABELS,
     (output/"manifest.json").write_text(json.dumps(manifest, indent=2)+"\n", encoding="utf-8")
     page = '''<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deluxe / @TITLE@</title><style>
+<title>AnybandUI / @TITLE@</title><style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{max-width:900px;margin:40px auto;
 padding:0 24px;background:#0b1011;color:#c8d1ca;font:15px/1.6 monospace}
 header{border-bottom:1px solid #34443e;padding-bottom:24px}h1{font-size:36px;margin:8px 0}
@@ -124,7 +124,7 @@ border:1px solid #293a33;background:#121b18}h2{font-size:17px;margin:0 0 14px}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:24px}strong{display:block;margin-bottom:9px}
 audio{width:100%;height:38px}footer{margin-top:30px;font-size:12px}
 @media(max-width:620px){.pair{grid-template-columns:1fr}}
-</style><header><div class="eyebrow">ANGBAND DELUXE / SOUND STUDIES @EDITION@</div>
+</style><header><div class="eyebrow">AnybandUI / SOUND STUDIES @EDITION@</div>
 <h1>@TITLE@</h1><p>@DESCRIPTION@</p><p>@VARIANTS@</p>
 <strong>Complete reel · A then B for each category below</strong>
 <audio controls preload="metadata" src="audition_reel.wav"></audio></header>'''

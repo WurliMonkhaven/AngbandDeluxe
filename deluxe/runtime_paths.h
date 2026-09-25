@@ -7,6 +7,15 @@
 // Explicit command-line paths win; packaged files win over build-time fallbacks.
 struct RuntimePaths {
  std::filesystem::path backend, data, font, audio;
+ static std::filesystem::path user_directory(const std::filesystem::path &preferred) {
+  // Compatibility identifier only: never rename or move an existing save store.
+  const auto folder=preferred.filename().empty()?preferred.parent_path():preferred;
+  const auto legacy=folder.parent_path().parent_path()/"AngbandDeluxe"/"AngbandDeluxe";
+  std::error_code error;
+  const bool populated=std::filesystem::exists(preferred,error) && !std::filesystem::is_empty(preferred,error);
+  if(!populated && std::filesystem::is_directory(legacy,error)) return legacy;
+  return preferred;
+ }
  static RuntimePaths discover(const std::filesystem::path &base,
                               const std::filesystem::path &source_data,
                               const std::filesystem::path &source_font) {

@@ -9,7 +9,7 @@ root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument("--configure", action="store_true")
 parser.add_argument("--config", default="RelWithDebInfo")
-parser.add_argument("--target", nargs="+", default=["OurExecutable", "angband-deluxe"])
+parser.add_argument("--target", nargs="+", default=["OurExecutable", "AnybandUI"])
 parser.add_argument("--ninja", action="store_true")
 args = parser.parse_args()
 cmake = shutil.which("cmake")

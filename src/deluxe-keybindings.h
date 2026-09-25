@@ -80,7 +80,7 @@ static void deluxe_bindings_init(void)
  file=file_open(path,MODE_READ,FTYPE_TEXT); if(!file) return;
  rows=file_getl(file,buffer,sizeof(buffer))?cJSON_Parse(buffer):NULL; file_close(file);
  if(deluxe_bindings_valid(rows)) deluxe_bindings_install(rows);
- else fprintf(stderr,"Deluxe keybindings could not be loaded; keeping native bindings.\n");
+ else fprintf(stderr,"AnybandUI keybindings could not be loaded; keeping native bindings.\n");
  cJSON_Delete(rows);
 }
 static cJSON *deluxe_bindings_get(void)

@@ -578,7 +578,7 @@ class BackendTests(unittest.TestCase):
     def test_audio_events(self):
         e = self.engine
         e.hello(); e.birth()
-        # The legacy sound option defaults off; semantic cues still reach Deluxe.
+        # The legacy sound option defaults off; semantic cues still reach AnybandUI.
         prefs = e.call("options.get")["result"]
         self.assertFalse(next(o["value"] for o in prefs["entries"] if o["id"] == "use_sound"))
         e.sound_events.clear()
@@ -1621,7 +1621,7 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(e.state["phase"], "dead")
         report = e.state["run"]
         self.assertEqual(report["player"]["name"], e.state["player"]["name"])
-        self.assertEqual(report["cause"], "Deluxe developer tools")
+        self.assertEqual(report["cause"], "AnybandUI developer tools")
         self.assertIn("character_sheet", report["player"])
         self.assertGreaterEqual(report["score"], 0)
         self.assertTrue(report["items"])
@@ -2695,10 +2695,10 @@ class BackendTests(unittest.TestCase):
         e.wait_prompt()
         self.assertEqual(e.prompt["type"], "text")
         old = e.state["revision"]
-        e.call("prompt.reply", {"prompt_id": e.prompt["prompt_id"], "value": "Deluxe test"})
+        e.call("prompt.reply", {"prompt_id": e.prompt["prompt_id"], "value": "AnybandUI test"})
         e.prompt = None
         e.next_state(old)
-        self.assertTrue(any(i["inscription"] == "Deluxe test" for i in e.state["items"]))
+        self.assertTrue(any(i["inscription"] == "AnybandUI test" for i in e.state["items"]))
         self.assertEqual(e.state["turn"], initial["turn"])
 
     def test_semantic_and_keyboard_action_parity(self):

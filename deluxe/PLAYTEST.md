@@ -1,6 +1,6 @@
-# Angband Deluxe — Windows playtest
+# AnybandUI — Windows playtest
 
-Extract the entire ZIP to a folder, then open **angband-deluxe.exe**.
+Extract the entire ZIP to a folder, then open **AnybandUI.exe**.
 Do not launch it from inside the ZIP. No Python, Visual Studio or installer is
 needed. This build targets 64-bit Windows with a GPU supported by SDL3.
 
@@ -15,13 +15,14 @@ lets you start again with the same starting build or create someone different.
 - **Settings** controls gameplay, keybindings, animations, audio and CRT effects.
 - Start with CRT Off if you want to compare responsiveness.
 
-Saves and settings live in `%APPDATA%/AngbandDeluxe/AngbandDeluxe`, independently
+Existing installations retain their original save/settings folder automatically.
+Fresh installations store saves and settings in `%APPDATA%/AnybandUI/AnybandUI`, independently
 of this extracted folder. Replacing or deleting the extracted build does not
 remove them. Back up that user folder before trying an experimental build.
 To keep a completely separate playtest profile, launch from PowerShell:
 
 ```powershell
-.\angband-deluxe.exe --user-dir "C:\AngbandPlaytest"
+.\AnybandUI.exe --user-dir "C:\AngbandPlaytest"
 ```
 
 ## What to try

@@ -45,7 +45,6 @@ struct RunHistory {
  int draw(bool can_leave=true) {
   if(current.is_null()) {
    DeluxeTheme::section("Graveyard");
-   ImGui::TextWrapped("The lives and last moments of your adventurers.");
    if(ImGui::Button("Back to characters")) { browsing=false; return 1; }
    ImGui::SameLine(); ImGui::SetNextItemWidth(ImGui::GetFontSize()*22);
    ImGui::InputTextWithHint("##Run search","Search characters",search,sizeof(search));
@@ -54,7 +53,7 @@ struct RunHistory {
    if(records.empty()) ImGui::TextDisabled("Your completed runs will appear here.");
    if(ImGui::BeginTable("Runs",4,ImGuiTableFlags_RowBg|ImGuiTableFlags_SizingStretchProp)) {
     ImGui::TableSetupColumn("Character",ImGuiTableColumnFlags_WidthStretch,2);
-    ImGui::TableSetupColumn("Fate",ImGuiTableColumnFlags_WidthStretch,2);
+    ImGui::TableSetupColumn("Outcome",ImGuiTableColumnFlags_WidthStretch,2);
     ImGui::TableSetupColumn("Depth",ImGuiTableColumnFlags_WidthStretch,.6f);
     ImGui::TableSetupColumn("Ended",ImGuiTableColumnFlags_WidthStretch,1.3f); ImGui::TableHeadersRow();
     for(const auto &r:records) {
@@ -72,7 +71,7 @@ struct RunHistory {
    ImGui::EndChild(); return 0;
   }
   const auto &p=current.at("player");
-  ImGui::TextColored(ImVec4(.9f,.68f,.35f,1),"%s",current.value("winner",false)?"A LEGEND REMEMBERED":current.value("retired",false)?"JOURNEY'S END":"HERE ENDS THE TALE");
+  ImGui::TextColored(ImVec4(.9f,.68f,.35f,1),"%s",current.value("winner",false)?"VICTORY":current.value("retired",false)?"RETIRED":"GAME OVER");
   ImGui::SetWindowFontScale(1.5f); ImGui::TextWrapped("%s",p.value("name","Unnamed").c_str()); ImGui::SetWindowFontScale(1);
   ImGui::TextWrapped("%s %s  |  Level %d  |  %s",p.value("race","").c_str(),p.value("class","").c_str(),p.value("level",0),current.value("ended","").c_str());
   ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();

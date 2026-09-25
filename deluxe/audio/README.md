@@ -1,4 +1,4 @@
-# Deluxe audio
+# AnybandUI audio
 
 Open `audition/index.html` in a browser to compare the twelve original sound
 sketches. The complete reel plays A then B for each section, in page order.

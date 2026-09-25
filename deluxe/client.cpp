@@ -1,4 +1,4 @@
-// Angband Deluxe desktop client. GPLv2. No engine headers or linked engine state.
+// AnybandUI desktop client. GPLv2. No engine headers or linked engine state.
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include "imgui.h"
@@ -150,6 +150,7 @@ struct Connection {
  unsigned long next = 0;
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
  bool pickup_travel=false, resting=false, saving=false;
+ std::string loading;
  int camera_sent=-1, tiles_sent=-1;
  bool return_to_menu = false, restart_ready = false, close_confirmed = false;
  json state = json::object(), prompt = json::object(), pending_prompt = json::object(), commands = json::array(), saves = json::array(), catalog = json::object();
@@ -199,6 +200,9 @@ struct Connection {
  std::string send(const std::string &method, json params = json::object()) {
   if(method=="session.new" || method=="session.load" || method=="session.replay") { inventory_changes.reset(); level_feedback.reset(); transitions.reset(); character_save=params.value("save",""); params["native_birth"]=capabilities.value("interaction.birth",0)>0; }
   if (!connected) return "";
+  if(method=="session.new") loading="Starting character creation...";
+  else if(method=="session.load" || method=="session.replay") loading="Loading character...";
+  else if(method=="birth.action" && params.value("action","")=="accept") loading="Starting game...";
   if(transitions.kind!=SceneTransitions::Kind::Death &&
      (method=="terminal.input" || method=="command.execute" || method=="dungeon.click" || method=="dungeon.pickup" || method=="dungeon.terrain" || method=="store.leave")) transitions.dismiss();
   auto id = "r" + std::to_string(++next);
@@ -220,7 +224,7 @@ struct Connection {
   if (!process) { menu_error=SDL_GetError(); notice(menu_error); return false; }
   auto errors=static_cast<SDL_IOStream*>(SDL_GetPointerProperty(SDL_GetProcessProperties(process.get()),SDL_PROP_PROCESS_STDERR_POINTER,nullptr));
   reader=std::make_unique<BackendReader>(SDL_GetProcessOutput(process.get()),errors);
-  connected = true;
+  connected = true; loading="Starting AnybandUI...";
   send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",4194304},{"native_inventory",true},{"native_equipment",true}});
   return true;
  }
@@ -249,6 +253,7 @@ struct Connection {
     return;
    }
    if(name=="state.changed" && j.at("data").contains("run")) {
+    loading.clear();
     if(run_report.is_null()) {
      run_report=j["data"]["run"];
      if(!run_report.value("winner",false) && !run_report.value("retired",false)) transitions.death(state,game_grid,double(SDL_GetTicksNS())/1e9);
@@ -258,14 +263,14 @@ struct Connection {
     postgame_finished=j["data"].value("phase","")=="finished";
     busy=false; return;
    }
-   if (name == "state.changed") { replay_save.clear(); transitions.observe(j.at("data"),game_grid,double(SDL_GetTicksNS())/1e9); state = std::move(j.at("data")); inventory_changes.update(state); level_feedback.update(state,double(SDL_GetTicksNS())/1e9); resting=false; comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
+   if (name == "state.changed") { if(j.at("data").value("phase","")=="playing" || j.at("data").contains("birth")) loading.clear(); replay_save.clear(); transitions.observe(j.at("data"),game_grid,double(SDL_GetTicksNS())/1e9); state = std::move(j.at("data")); inventory_changes.update(state); level_feedback.update(state,double(SDL_GetTicksNS())/1e9); resting=false; comparisons=json::object(); item_rules=nullptr; game_grid.update(state); update_messages(state.at("messages")); busy = false; pickup_travel=false; }
    if(name=="knowledge.changed" && creature_race>=0 && j["data"].value("category","")=="creatures" && j["data"].value("id",-1)==creature_race) creature_detail=j["data"];
    if(name=="travel.changed") {
     travel=j.at("data");
     const auto label=travel.value("label","");
     if(travel.value("interrupted",false) && !label.empty()) notice(label);
    }
-   if (name == "prompt.requested") { prompt = j.at("data"); busy = false; pickup_travel=false; }
+   if (name == "prompt.requested") { loading.clear(); prompt = j.at("data"); busy = false; pickup_travel=false; }
    return;
   }
   auto id = j.value("id",""); auto it = requests.find(id);
@@ -356,6 +361,7 @@ struct Connection {
    return;
   }
   if (j.contains("error")) {
+   if(method=="hello" || method=="saves.list" || method=="session.new" || method=="session.load" || method=="session.replay" || method=="birth.action") loading.clear();
    const auto error=j["error"].value("message","Request failed"); notice(error); busy = false; pickup_travel=false;
    if(method=="session.save" || method=="session.close") saving=false;
    if(!state.contains("terminal") || method=="birth.action" || method=="birth.cancel") menu_error=error;
@@ -374,6 +380,7 @@ struct Connection {
    send("commands.list");
   } else if (method == "saves.list") {
    saves = result;
+   if(loading=="Starting AnybandUI...") loading.clear();
    std::stable_sort(saves.begin(),saves.end(),[](const json &a,const json &b) { return a.value("modified",0.)>b.value("modified",0.); });
    busy=false;
   }
@@ -394,14 +401,14 @@ struct Connection {
  }
  void process_stopped(int exit_code) {
   if(saving && close_confirmed && !return_to_menu && exit_code==0) closed=true;
-  saving=false; connected=false; busy=false; pickup_travel=false; resting=false;
+  loading.clear(); saving=false; connected=false; busy=false; pickup_travel=false; resting=false;
   // Death/post-game screens remain interactive until the engine reports that
   // play_game completed. A crash must not masquerade as a normal game ending.
   const bool finished=postgame_finished || state.value("phase","")=="finished";
   if(exit_code==0 && !closed && ((close_confirmed && return_to_menu) || finished)) restart_ready=true;
   else if(!closed) {
    notice("Backend stopped (" + std::to_string(exit_code) + "). " + diagnostic);
-   if(!state.contains("terminal")) menu_error="Backend stopped. Restart Deluxe to try again.";
+   if(!state.contains("terminal")) menu_error="Backend stopped. Restart AnybandUI to try again.";
   }
  }
  void poll() {
@@ -413,7 +420,7 @@ struct Connection {
   if(diagnostic.size()>65536) diagnostic.erase(0,diagnostic.size()-65536);
   try { for(auto &frame:batch.frames) receive(std::move(frame)); }
   catch(const std::exception &e) { batch.error=e.what(); }
-  if(!batch.error.empty()) { notice("Invalid backend message: "+batch.error); connected=false; saving=false; return; }
+  if(!batch.error.empty()) { notice("Invalid backend message: "+batch.error); connected=false; saving=false; loading.clear(); return; }
   if(!exited) flush_input();
   // EOF must be drained by the reader before interpreting the final game state.
   else if(batch.finished) process_stopped(exit_code);
@@ -785,7 +792,7 @@ struct UI {
    const float footer=ImGui::GetFrameHeightWithSpacing()+ImGui::GetStyle().ItemSpacing.y+
     (settings_error.empty()?0:ImGui::CalcTextSize(settings_error.c_str(),nullptr,false,ImGui::GetContentRegionAvail().x).y+ImGui::GetStyle().ItemSpacing.y);
    const char *pages[]={"Interaction","Keyboard","Game rules","Display","Theme","Fonts","CRT effects","Animations","Audio","Game tuning"};
-   const char *descriptions[]={"Mouse controls and shortcuts for everyday adventuring.","Make the keyboard feel like home.","Angband preferences for the current character.","Window mode, interface size and dungeon camera.","Colour, contrast and the character of your interface.","Choose the lettering for your interface and dungeon.","Build your own tube: from a gentle glow to a full retro display.","Choose how the dungeon moves and reacts.","Clicks, buzzes and sounds from the dungeon.","Shape your game with custom constants. Stock files remain untouched."};
+   const char *descriptions[]={"Mouse controls and shortcuts.","Keybindings and command shortcuts.","Angband preferences for the current character.","Window mode, interface size and dungeon camera.","Interface colours, contrast and styling.","Interface and dungeon fonts.","CRT effects and intensity.","Movement, combat and environmental effects.","Sound effects and volume.","Game constants. Changes apply on the next launch."};
    ImGui::BeginChild("Settings body",ImVec2(0,-footer),ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar);
    const bool sidebar=ImGui::GetContentRegionAvail().x>ImGui::GetFontSize()*40;
    if(sidebar) {
@@ -898,7 +905,7 @@ struct UI {
      volume("Gameplay",draft_audio_settings.gameplay);
      volume("Interface",draft_audio_settings.interface_volume);
      ImGui::EndDisabled();
-     ImGui::Spacing(); ImGui::TextWrapped("Audio mutes when Deluxe and its detached windows are unfocused.");
+     ImGui::Spacing(); ImGui::TextWrapped("Audio mutes when AnybandUI and its detached windows are unfocused.");
      if(!audio.error.empty()) ImGui::TextWrapped("Audio unavailable: %s",audio.error.c_str());
 
     }
@@ -934,7 +941,7 @@ struct UI {
      int choice=draft_crt==2?3:draft_crt==3?2:draft_crt;
      if(ImGui::Combo("##CRT Effects",&choice,effects,4)) draft_crt=scope_ids[choice];
      ImGui::Spacing(); ImGui::TextUnformatted("Effect Strength"); ImGui::SetNextItemWidth(-1);
-     const char *strengths[]={"Subtle","Classic","Deluxe","Zero Cool"};
+     const char *strengths[]={"Subtle","Classic","Vivid","Zero Cool"};
      if(ImGui::BeginCombo("##CRT Effects Strength",draft_crt_strength<0?"Custom":strengths[draft_crt_strength])) {
       for(int i=0;i<4;++i) if(ImGui::Selectable(strengths[i],draft_crt_strength==i)) {
        const int lines=draft_crt_settings.raster_lines,mask=draft_crt_settings.mask;
@@ -1036,7 +1043,7 @@ struct UI {
   focus_game();
  }
  bool owns_keyboard() const {
-  return !c.saving && !layout.editing && c.run_report.is_null() && c.state.contains("terminal") && !c.state.contains("birth") && !c.state.contains("store") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
+  return !c.saving && c.loading.empty() && !layout.editing && c.run_report.is_null() && c.state.contains("terminal") && !c.state.contains("birth") && !c.state.contains("store") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
    && !quit_dialog && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId);
  }
  void prepare_frame(SDL_Window *window) {
@@ -1900,7 +1907,7 @@ struct UI {
   game_draw_list=nullptr; showing_postgame=false;
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(vp->WorkPos); ImGui::SetNextWindowSize(vp->WorkSize);
-  ImGui::Begin("Angband Deluxe",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
+  ImGui::Begin("AnybandUI",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
   const bool ending=!c.run_report.is_null();
   if(ending && !run_ui_reset) {
    c.transitions.restore_colour(scene_now);
@@ -1936,7 +1943,7 @@ struct UI {
   }
   // Freeze the death transition without dimming it, but restore normal
   // disabled styling immediately for controls nested inside this scope.
-  ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha,1.f); ImGui::BeginDisabled(ending || c.saving); ImGui::PopStyleVar();
+  ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha,1.f); ImGui::BeginDisabled(ending || c.saving || !c.loading.empty()); ImGui::PopStyleVar();
   const bool in_game=c.state.contains("terminal");
   if(in_game && !c.state.contains("birth")) {
    ImGui::BeginDisabled(!c.ready());
@@ -2149,7 +2156,7 @@ struct UI {
   open_character_sheet=false;
   if(quit_dialog) { ImGui::OpenPopup("Close game"); quit_dialog=false; }
   if(ImGui::BeginPopupModal("Close game",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-   ImGui::TextWrapped("%s",c.ready()?"Save this character and close Deluxe?":c.save_unavailable_reason());
+   ImGui::TextWrapped("%s",c.ready()?"Save this character and close AnybandUI?":c.save_unavailable_reason());
    ImGui::BeginDisabled(!c.ready());
    if(ImGui::Button("Save and quit")) { c.save(true); ImGui::CloseCurrentPopup(); }
    ImGui::EndDisabled(); ImGui::SameLine();
@@ -2159,16 +2166,17 @@ struct UI {
   }
   }
   ImGui::EndDisabled();
-  if(!ending && !c.saving) prompts();
+  if(!ending && !c.saving && c.loading.empty()) prompts();
   save_progress(); ImGui::End();
   dispatch_keys();
  }
  void save_progress() {
-  if(c.saving) { keys.clear(); grid_focus=false; ImGui::OpenPopup("Saving###Save progress"); }
+  const bool active=c.saving || !c.loading.empty();
+  if(active) { keys.clear(); ImGui::OpenPopup("Progress###Save progress"); }
   const auto *viewport=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(viewport->GetCenter(),ImGuiCond_Always,{.5f,.5f});
-  if(ImGui::BeginPopupModal("Saving###Save progress",nullptr,ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings)) {
-   if(!c.saving) ImGui::CloseCurrentPopup();
+  if(ImGui::BeginPopupModal("Progress###Save progress",nullptr,ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings)) {
+   if(!active) ImGui::CloseCurrentPopup();
    else {
     const float radius=ImGui::GetFontSize()*.65f,pad=ImGui::GetStyle().FramePadding.y;
     const auto pos=ImGui::GetCursorScreenPos();
@@ -2179,7 +2187,7 @@ struct UI {
     draw->PathStroke(ImGui::GetColorU32(DeluxeTheme::green()),0,2.5f);
     ImGui::Dummy({2*(radius+pad),2*(radius+pad)}); ImGui::SameLine();
     ImGui::BeginGroup();
-    ImGui::TextUnformatted(c.close_requested?(c.close_confirmed?"Closing game...":c.return_to_menu?"Saving and returning to menu...":"Saving and quitting..."):"Saving game...");
+    ImGui::TextUnformatted(!c.saving?c.loading.c_str():c.close_requested?(c.close_confirmed?"Closing game...":c.return_to_menu?"Saving and returning to menu...":"Saving and quitting..."):"Saving game...");
     ImGui::TextDisabled("Please wait"); ImGui::EndGroup();
    }
    ImGui::EndPopup();
@@ -2210,7 +2218,7 @@ int main(int argc,char **argv) {
   const std::string arg=argv[i];
   if(arg=="--check-assets") { check_assets=true; continue; }
   if((arg!="--backend" && arg!="--data-dir" && arg!="--user-dir") || i+1>=argc) {
-   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Angband Deluxe","Expected --backend PATH, --data-dir PATH, or --user-dir PATH.",nullptr); return 2;
+   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"AnybandUI","Expected --backend PATH, --data-dir PATH, or --user-dir PATH.",nullptr); return 2;
   }
   const std::string value=argv[++i];
   if(arg=="--backend") paths.backend=value;
@@ -2227,18 +2235,18 @@ int main(int argc,char **argv) {
  if(!fs::is_regular_file(paths.font) || !fs::is_regular_file(paths.backend) || !fs::is_regular_file(paths.data/"gamedata"/"constants.txt")) {
   std::string message="Some game files are missing. Extract the entire archive before launching.\n";
   for(const auto &path:missing) message+="\n"+path;
-  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Angband Deluxe",message.c_str(),nullptr); return 1;
+  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"AnybandUI",message.c_str(),nullptr); return 1;
  }
  if(!SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMEPAD)) return 1;
  const float dpi=SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
  SDL_Rect bounds{}; SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &bounds);
  const int width=std::min(int(1280*dpi),std::max(640,bounds.w-80));
  const int height=std::min(int(800*dpi),std::max(480,bounds.h-80));
- SDL_Window *window=SDL_CreateWindow("Angband Deluxe",width,height,SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY);
+ SDL_Window *window=SDL_CreateWindow("AnybandUI",width,height,SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY);
  if(window) SDL_SetWindowPosition(window,SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED);
  SDL_GPUDevice *gpu=SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV|SDL_GPU_SHADERFORMAT_DXIL|SDL_GPU_SHADERFORMAT_METALLIB|SDL_GPU_SHADERFORMAT_MSL,false,nullptr);
  if(!window || !gpu || !SDL_ClaimWindowForGPUDevice(gpu,window)) {
-  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Angband Deluxe",SDL_GetError(),window); return 1;
+  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"AnybandUI",SDL_GetError(),window); return 1;
  }
  SDL_SetGPUSwapchainParameters(gpu,window,SDL_GPU_SWAPCHAINCOMPOSITION_SDR,SDL_GPU_PRESENTMODE_VSYNC);
  SDL_SetGPUAllowedFramesInFlight(gpu,1); // Bound presentation latency; still paced by vsync.
@@ -2255,13 +2263,13 @@ int main(int argc,char **argv) {
  crt_renderer.initialize(gpu,info.ColorTargetFormat);
  std::string renderer_error;
  ui.base_style=ImGui::GetStyle();
- char *pref=SDL_GetPrefPath("AngbandDeluxe","AngbandDeluxe");
- std::string user=user_override.empty()?(pref?pref:"deluxe-user"):user_override; SDL_free(pref);
+ char *pref=SDL_GetPrefPath("AnybandUI","AnybandUI");
+ std::string user=user_override.empty()?RuntimePaths::user_directory(pref?fs::path(pref):fs::path("anybandui-user")).string():user_override; SDL_free(pref);
  const std::string backend=paths.backend.string(),data=paths.data.string();
  ui.tiles.device=gpu; ui.tiles.directory=paths.data/"tiles";
  try { fs::create_directories(user); }
  catch(const fs::filesystem_error &error) {
-  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Angband Deluxe",("Cannot open the save/settings folder: "+std::string(error.what())).c_str(),window); return 1;
+  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"AnybandUI",("Cannot open the save/settings folder: "+std::string(error.what())).c_str(),window); return 1;
  }
  ui.settings_path=(fs::path(user)/"settings.json").string(); ui.load_settings();
  DetachedPanels detached(gpu,window,paths.font.parent_path());

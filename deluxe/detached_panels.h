@@ -48,7 +48,7 @@ struct DetachedPanels {
  bool open(UI &ui,int p) {
   windows[p]=std::make_unique<Window>(); auto &w=*windows[p];
   const auto rect=recover(ui.layout.detached[p]);
-  const std::string title=std::string("Angband Deluxe - ")+WorkspaceLayout::names[p];
+  const std::string title=std::string("AnybandUI - ")+WorkspaceLayout::names[p];
   w.window=SDL_CreateWindow(title.c_str(),rect.w,rect.h,SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY|SDL_WINDOW_HIDDEN);
   if(!w.window) { close(p); return false; }
   SDL_SetWindowPosition(w.window,rect.x,rect.y); SDL_SetWindowMinimumSize(w.window,280,180);

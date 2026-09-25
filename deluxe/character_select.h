@@ -22,19 +22,45 @@ struct CharacterSelect {
  }
  static void emblem(float height,ImU32 ink) {
   const auto p=ImGui::GetCursorScreenPos(); const float width=ImGui::GetContentRegionAvail().x;
+  const float f=ImGui::GetFontSize(),pad=std::min(f,width*.06f);
   auto *draw=ImGui::GetWindowDrawList();
-  draw->AddRectFilled(p,ImVec2(p.x+width,p.y+height),ImGui::GetColorU32(ImGuiCol_FrameBg),ImGui::GetStyle().FrameRounding);
-  const ImVec2 c(p.x+width*.5f,p.y+height*.5f);
-  for(int i=0;i<4;++i) {
-   float r=height*(.25f+.065f*i);
-   draw->AddRect(ImVec2(c.x-r,c.y-r*.75f),ImVec2(c.x+r,c.y+r*.75f),ImGui::GetColorU32(ImGuiCol_Border),ImGui::GetStyle().FrameRounding);
+  const ImVec2 end(p.x+width,p.y+height);
+  draw->AddRectFilled(p,end,ImGui::GetColorU32(ImGuiCol_FrameBg),ImGui::GetStyle().FrameRounding);
+  draw->PushClipRect(p,end,true);
+  const bool wide=width>f*26;
+  const float mark_width=wide?height*.95f:0;
+  if(wide) {
+   const ImVec2 c(p.x+mark_width*.5f,p.y+height*.47f);
+   // Slow, staggered echoes of the outer frame; fade at both ends so the
+   // loop has no visible reset. Keep the movement inside the emblem area.
+   for(int i=0;i<3;++i) {
+    const float phase=float(std::fmod(ImGui::GetTime()/7.5+i/3.0,1.0));
+    const float r=height*(.295f+.13f*phase);
+    auto echo=ImGui::ColorConvertU32ToFloat4(ink);
+    echo.w*=.13f*std::sin(phase*3.14159265f);
+    draw->AddRect({c.x-r,c.y-r},{c.x+r,c.y+r},ImGui::GetColorU32(echo),0);
+   }
+   for(int i=0;i<4;++i) {
+    const float r=height*(.16f+.045f*i);
+    draw->AddRect({c.x-r,c.y-r},{c.x+r,c.y+r},ImGui::GetColorU32(ImGuiCol_Border),0);
+   }
+   const float size=height*.42f;
+   const auto text=ImGui::GetFont()->CalcTextSizeA(size,FLT_MAX,0,"@");
+   draw->AddText(ImGui::GetFont(),size,{c.x-text.x*.5f,c.y-text.y*.5f},ink,"@");
   }
-  draw->AddLine(ImVec2(p.x+12,c.y),ImVec2(c.x-height*.48f,c.y),ink);
-  draw->AddLine(ImVec2(c.x+height*.48f,c.y),ImVec2(p.x+width-12,c.y),ink);
-  const float size=height*.48f;
-  const auto text=ImGui::GetFont()->CalcTextSizeA(size,FLT_MAX,0,"@");
-  draw->AddText(ImGui::GetFont(),size,ImVec2(c.x-text.x*.5f,c.y-text.y*.5f),ink,"@");
-  ImGui::Dummy(ImVec2(width,height));
+  const float left=p.x+mark_width+pad,right=end.x-pad,space=std::max(1.f,right-left);
+  const float base=f*3.3f;
+  const float text_size=std::min(base,base*space/ImGui::GetFont()->CalcTextSizeA(base,FLT_MAX,0,"AnybandUI").x);
+  const auto word=ImGui::GetFont()->CalcTextSizeA(text_size,FLT_MAX,0,"Anyband");
+  const auto full=ImGui::GetFont()->CalcTextSizeA(text_size,FLT_MAX,0,"AnybandUI");
+  const ImVec2 title(left+(space-full.x)*.5f,p.y+height*.47f-text_size*.5f);
+  draw->AddText(ImGui::GetFont(),text_size,title,ImGui::GetColorU32(ImGuiCol_Text),"Anyband");
+  draw->AddText(ImGui::GetFont(),text_size,{title.x+word.x,title.y},ink,"UI");
+  const float rail=p.y+height-pad;
+  draw->AddLine({p.x+pad,rail},{end.x-pad,rail},ImGui::GetColorU32(ImGuiCol_Border));
+  draw->AddLine({p.x+pad,rail},{p.x+pad+std::min(width*.16f,f*5),rail},ink,2);
+  for(int i=0;i<3;++i) draw->AddLine({end.x-pad-i*6,rail-5},{end.x-pad-i*6,rail+1},ink);
+  draw->PopClipRect(); ImGui::Dummy({width,height});
  }
  static int roster_actions(bool enabled) {
   const float f=ImGui::GetFontSize(),gap=ImGui::GetStyle().ItemSpacing.x;
@@ -80,8 +106,7 @@ struct CharacterSelect {
   ImGui::BeginChild("Character selection",ImVec2(0,-ImGui::GetTextLineHeightWithSpacing()*2));
   if(saves.empty()) {
    emblem(font*11,ImGui::GetColorU32(DeluxeTheme::green())); ImGui::Spacing();
-   ImGui::TextUnformatted("A new name. A new descent.");
-   ImGui::TextDisabled("Your adventurers will be waiting here between journeys.");
+   ImGui::TextDisabled("No saved characters.");
    ImGui::Spacing(); action=roster_actions(enabled);
   } else {
    const bool wide=ImGui::GetContentRegionAvail().x>font*52;
@@ -109,7 +134,7 @@ struct CharacterSelect {
      const float x=p.x+font*3.2f;
      draw->AddText(ImGui::GetFont(),font*1.15f,ImVec2(x,p.y+font*.6f),ImGui::GetColorU32(ImGuiCol_Text),name.c_str());
      draw->AddText(ImVec2(x,p.y+font*2),ImGui::GetColorU32(ImGuiCol_TextDisabled),identity.c_str());
-     std::string status=s.value("dead",false)?"FALLEN":s.contains("depth")?(s.value("depth",0)==0?"IN TOWN":"DEPTH "+std::to_string(s.value("depth",0))):"SAVED JOURNEY";
+     std::string status=s.value("dead",false)?"DEAD":s.contains("depth")?(s.value("depth",0)==0?"IN TOWN":"DEPTH "+std::to_string(s.value("depth",0))):"SAVED";
      if(s.contains("level")) status+="    /    LEVEL "+std::to_string(s.value("level",0));
      draw->AddText(ImVec2(x,p.y+font*3.7f),ink,status.c_str());
      draw->PopClipRect(); ImGui::Spacing(); ImGui::PopID();
@@ -126,7 +151,7 @@ struct CharacterSelect {
      ImGui::PushFont(nullptr,font*1.8f); ImGui::TextWrapped("%s",name.c_str()); ImGui::PopFont();
      if(!identity.empty()) ImGui::TextWrapped("%s",identity.c_str());
      else ImGui::TextWrapped("%s",s.value("description","Character details unavailable.").c_str());
-     ImGui::Spacing(); ImGui::SeparatorText(dead?"A finished journey":"Your journey awaits");
+     ImGui::Spacing(); ImGui::SeparatorText(dead?"Final character":"Character summary");
      if(s.contains("level") && ImGui::BeginTable("Saved milestones",2,ImGuiTableFlags_SizingStretchSame)) {
       ImGui::TableNextColumn(); CharacterOverview::metric("Level",std::to_string(s.value("level",0)));
       ImGui::TableNextColumn(); CharacterOverview::metric("Depth",s.value("depth",0)==0?"Town":std::to_string(s.value("depth",0)));
@@ -135,7 +160,7 @@ struct CharacterSelect {
      ImGui::Spacing(); ImGui::TextDisabled("LAST SAVED"); ImGui::TextWrapped("%s",s.value("last_saved","Unknown").c_str());
      ImGui::Spacing(); ImGui::TextDisabled("SAVE FILE"); ImGui::TextWrapped("%s",id.c_str());
      ImGui::Spacing(); ImGui::Spacing(); ImGui::BeginDisabled(!enabled);
-     if(ImGui::Button(dead?"Play Again":"Continue journey",ImVec2(-1,ImGui::GetFrameHeight()*1.5f))) action=1;
+     if(ImGui::Button(dead?"Play Again":"Continue",ImVec2(-1,ImGui::GetFrameHeight()*1.5f))) action=1;
      ImGui::Spacing(); if(ImGui::Button("Rename")) action=2;
      ImGui::SameLine(); if(ImGui::Button("Delete")) action=3;
      ImGui::EndDisabled();

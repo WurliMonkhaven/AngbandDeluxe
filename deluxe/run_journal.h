@@ -56,7 +56,7 @@ struct RunJournal {
   ImGui::SetNextWindowSize({std::min(size.x-24,ImGui::GetFontSize()*48),std::min(size.y-24,ImGui::GetFontSize()*35)},ImGuiCond_Appearing);
   bool visible=true,closed=false;
   if(ImGui::BeginPopupModal("Run journal",&visible,ImGuiWindowFlags_NoSavedSettings)) {
-   DeluxeTheme::section("The story so far");
+   DeluxeTheme::section("Run summary");
    ImGui::BeginChild("Journal body",{0,-ImGui::GetFrameHeightWithSpacing()});
    if(c.journal_data.is_null()) ImGui::TextDisabled("Opening journal...");
    else if(c.journal_data.contains("error")) ImGui::TextWrapped("%s",c.journal_data.value("error","").c_str());
