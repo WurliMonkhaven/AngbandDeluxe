@@ -1201,7 +1201,7 @@ struct UI {
    }
   };
   if(tiled) for(int y=y0;y<y1;++y) for(int x=x0;x<x1;++x) tile_layer(x,y,0,{0,0});
-  if(grid.semantic) presence.draw(draw,c.state,c.catalog,origin,size,cw,ch,double(SDL_GetTicksNS())/1e9,presence_settings);
+  if(grid.semantic) presence.draw(draw,c.state,c.catalog,origin,size,cw,ch,double(SDL_GetTicksNS())/1e9,presence_settings,font_library?font_library->tengwar:nullptr);
   if(grid.semantic && item_glow) ItemGlow::draw(draw,c.state["dungeon"],origin,size,cw,ch,double(SDL_GetTicksNS())/1e9);
   if(tiled) {
    for(int layer=1;layer<4;++layer) for(int y=y0;y<y1;++y) for(int x=x0;x<x1;++x) {

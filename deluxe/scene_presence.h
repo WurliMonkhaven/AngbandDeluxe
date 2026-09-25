@@ -22,7 +22,7 @@ struct ScenePresence {
  static bool known_terrain(const json &cell) {
   return cell[8].get<int>()>0 && cell[0].get<int>()>32 && !cell[11].get<int>();
  }
- void draw(ImDrawList *d,const json &state,const json &catalog,ImVec2 origin,ImVec2 size,float cw,float ch,double now,const PresenceSettings &settings) {
+ void draw(ImDrawList *d,const json &state,const json &catalog,ImVec2 origin,ImVec2 size,float cw,float ch,double now,const PresenceSettings &settings,ImFont *rune_font=nullptr) {
   if(!state.contains("dungeon")) { actors.clear(); recall_peak=0; return; }
   const auto &v=state["dungeon"]; const auto current=v.value("level_id","");
   if(current!=level) { level=current; actors.clear(); recall_peak=0; }
@@ -67,7 +67,7 @@ struct ScenePresence {
      const auto base=d->_VtxCurrentIdx;
      for(int r=0;r<=rings;++r) {
       const float t=float(r)/rings;
-      const auto glow=color(ink,.72f*pulse*(1-t)*(1-t));
+      const auto glow=color(ink,.296274f*pulse*(1-t)*(1-t));
       for(int i=0;i<=segments;++i) {
        const float angle=i*6.2831853f/segments;
        d->PrimWriteVtx({at.x+std::cos(angle)*radius*t,at.y+std::sin(angle)*radius*t},d->_Data->TexUvWhitePixel,glow);
@@ -76,6 +76,15 @@ struct ScenePresence {
      for(int r=0;r<rings;++r) for(int i=0;i<segments;++i) {
       const unsigned a=base+r*(segments+1)+i,b=a+segments+1;
       for(unsigned vertex:{a,b,a+1,a+1,b,b+1}) d->PrimWriteIdx(ImDrawIdx(vertex));
+     }
+     // Sparse embers drift out in every direction, using the stair's own colour.
+     for(int i=0;i<7;++i) {
+      const float t=std::fmod(clock*.38f+seed+i/7.f,1.f);
+      const float angle=i*2.39996f+seed+std::floor(clock*.38f+seed+i/7.f)*.73f;
+      const float reach=u*(.25f+t*1.25f),alpha=std::sin(t*3.14159265f)*.65f;
+      const ImVec2 p(at.x+std::cos(angle)*reach,at.y+std::sin(angle)*reach);
+      d->AddCircleFilled(p,pixel*2.5f,color(ink,alpha*.15f),8);
+      d->AddRectFilled({p.x-pixel*.6f,p.y-pixel*.6f},{p.x+pixel*.6f,p.y+pixel*.6f},color(ink,alpha));
      }
     } else if(kind==3 && settings.terrain) {
      // A permanent hot bed keeps every known tile legible even between sparks.
@@ -103,18 +112,39 @@ struct ScenePresence {
    a.hp=hp; a.asleep=sleeping;
    if(!on_screen(at)) continue;
    const float arrival=std::max(0.f,1-float(now-a.arrival)/1.4f),flare=std::max(0.f,1-float(now-a.flare)/.7f);
-   const float pulse=.65f+.18f*std::sin(clock*2+id)+.3f*flare;
-   const ImVec4 ink=boss?ImVec4(1,.07f,.22f,1):ImVec4(.85f,.35f,1,1);
-   for(int i=4;i>0;--i) d->AddCircleFilled(at,u*(.25f+i*.19f),color(ink,(boss?.07f:.035f)*pulse),24);
-   ring(at,u*(boss?.9f:.65f),ink,pulse,clock*(boss?-.22f:.18f)+id,boss?10:7);
-   if(boss) ring(at,u*(1.1f+std::fmod(clock*.32f,1.f)),ink,.35f*(1-std::fmod(clock*.32f,1.f)),clock*.1f,14);
-   for(int i=0;i<(boss?7:4);++i) {
-    float angle=i*6.2831853f/(boss?7:4)+id+clock*.23f;
-    float reach=u*(.85f+.25f*std::sin(clock*3+i)+flare*.45f);
-    ImVec2 start(at.x+std::cos(angle)*u*.4f,at.y+std::sin(angle)*u*.4f),b(at.x+std::cos(angle+.12f)*reach,at.y+std::sin(angle+.12f)*reach);
-    line(start,b,boss?ImVec4(1,.82f,.85f,1):ink,(boss?.75f:.5f)*pulse);
+   const ImVec4 ink(1.f,.045f,.11f,1);
+   const float pulse=.8f+.12f*std::sin(clock*3+id)+.35f*flare;
+   for(int i=4;i>0;--i) d->AddCircleFilled(at,u*(.18f+i*.16f),color(ink,(boss?.03f:.015f)*pulse),24);
+   // Each fragment retains its text through a short life, then reforms elsewhere.
+   // Quantised jitter gives it a broken, cursed motion rather than a smooth orbit.
+   auto hash=[](unsigned n) { n^=n>>16; n*=0x7feb352du; n^=n>>15; n*=0x846ca68bu; return n^(n>>16); };
+   auto *font=rune_font?rune_font:ImGui::GetFont();
+   const int count=boss?8:4;
+   const float rate=boss?.48f:.33f;
+   for(int i=0;i<count;++i) {
+    const double age=now*rate+i/double(count);
+    const float t=float(age-std::floor(age));
+    const unsigned seed=hash(unsigned(id)*7919u+unsigned(i)*131u+unsigned(std::floor(age))*1031u);
+    const unsigned jitter=hash(seed+unsigned(std::floor(now*(boss?11:6))));
+    const float angle=(seed%65536)*6.2831853f/65536.f;
+    const float reach=u*((boss?.55f:.4f)+t*(boss?1.35f:.52f));
+    const float kick=u*(boss?.10f:.03f);
+    ImVec2 p(at.x+std::cos(angle)*reach+kick*(int(jitter%9)-4)/4.f,
+             at.y+std::sin(angle)*reach-u*t*(boss?.35f:.12f)+kick*(int((jitter>>8)%9)-4)/4.f);
+    char text[5]={}; const int length=1+int(seed%4);
+    constexpr char alphabet[]="qwertyuiopasdfghjklzxcvbnm";
+    for(int j=0;j<length;++j) text[j]=alphabet[hash(seed+unsigned(j)*97u)%26];
+    const float pixels=std::clamp(u*(boss?.61f:.51f),boss?11.f:10.5f,boss?25.f:21.f);
+    const auto extent=font->CalcTextSizeA(pixels,1000,0,text);
+    p.x-=extent.x*.5f; p.y-=extent.y*.5f;
+    const float flicker=(jitter%7==0)?.4f:1.f;
+    const float alpha=std::sin(t*3.14159265f)*flicker*std::min(1.f,(boss?.8f:.6f)+flare*.3f+arrival*.2f);
+    for(const ImVec2 offset:{ImVec2(-pixel*2,0),ImVec2(pixel*2,0),ImVec2(0,-pixel*2),ImVec2(0,pixel*2)})
+     d->AddText(font,pixels,{p.x+offset.x,p.y+offset.y},color(ink,alpha*.16f),text);
+    d->AddText(font,pixels,p,color(ink,alpha),text);
+    // Occasional pale-red misregistration keeps a restrained cursed edge.
+    if(jitter%3==0) d->AddText(font,pixels,{p.x+pixel*.55f,p.y},color(ImVec4(1,.32f,.35f,1),alpha*(boss?.4f:.2f)),text);
    }
-   if(arrival>0) ring(at,u*(.7f+(1-arrival)*(boss?3.f:1.8f)),ink,arrival*.85f,-clock*.3f,16);
   } else actors.clear();
   if(state.contains("player")) {
    const auto &p=state["player"]; const int remaining=p.value("recall",0);

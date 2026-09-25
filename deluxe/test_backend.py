@@ -14,9 +14,9 @@ ARGS = None
 
 
 class Engine:
-    def __init__(self, folder):
+    def __init__(self, folder, data=None):
         self.process = subprocess.Popen(
-            [str(ARGS.backend), "--data-dir", str(ARGS.data), "--user-dir", str(folder)],
+            [str(ARGS.backend), "--data-dir", str(data or ARGS.data), "--user-dir", str(folder)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", bufsize=1,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -1968,6 +1968,54 @@ class BackendTests(unittest.TestCase):
             self.assertIn('error',e.call('debug.glow_items',{'kind':kind,'x':x,'y':y}))
         for params in ({'kind':'bogus','x':1,'y':1},{'kind':'rune','x':-1,'y':0},{'kind':'artifact'},{'x':1,'y':1}):
             self.assertIn('error',e.call('debug.glow_items',params))
+
+    def test_fatal_psionic_messages_remain_native(self):
+        # Force the real multi-effect spell in isolated data, without relying on
+        # Morgoth randomly choosing it or a level-one player failing a save.
+        data = Path(self.temp.name) / "psionic-data"
+        shutil.copytree(ARGS.data, data, ignore=shutil.ignore_patterns("tiles", "sounds", "fonts"))
+        path = data / "gamedata" / "monster.txt"
+        text = path.read_text(encoding="utf-8")
+        start = text.index("name:Morgoth,")
+        end = text.find("\nname:", start + 1)
+        if end < 0: end = len(text)
+        lines = [line for line in text[start:end].splitlines() if not line.startswith("spells:")]
+        lines = ["spell-freq:1" if line.startswith("spell-freq:") else line for line in lines]
+        path.write_text(text[:start] + "\n".join(lines) + "\nspells:BRAIN_SMASH\n" + text[end:], encoding="utf-8")
+        path = data / "gamedata" / "monster_spell.txt"
+        text = path.read_text(encoding="utf-8")
+        start = text.index("name:BRAIN_SMASH")
+        end = text.find("\nname:", start + 1)
+        if end < 0: end = len(text)
+        spell = "\n".join(line for line in text[start:end].splitlines() if not line.startswith("message-save:"))
+        path.write_text(text[:start] + spell + "\n" + text[end:], encoding="utf-8")
+        self.engine.stop()
+        self.engine = e = Engine(self.temp.name, data)
+        e.hello(); e.birth()
+        catalog = e.call("catalog.get")["result"]
+        race = next(m["id"] for m in catalog["uniques"] if m["name"].startswith("Morgoth,"))
+        floors = {f["id"] for f in catalog["features"] if f["name"] == "open floor"}
+        view, player = e.state["dungeon"], e.state["player"]
+        distance = lambda xy: abs(xy[0]-player["x"]) + abs(xy[1]-player["y"])
+        choices = [(x+view["x"], y+view["y"]) for y,row in enumerate(view["cells"]) for x,c in enumerate(row)
+                   if c[8] in floors and c[10] and not c[6] and not c[12] and distance((x+view["x"],y+view["y"])) >= 3]
+        x,y = min(choices, key=distance)
+        before = e.state["revision"]
+        self.assertIn("result", e.call("debug.scene", {"kind":"unique", "race":race, "x":x, "y":y}))
+        e.next_state(before)
+        final_statuses = False
+        for _ in range(50):
+            state = e.state
+            if state["phase"] == "dead": break
+            if state["player"]["hp"] < 0:
+                self.assertTrue(state.get("message_pending"), "Fatal spell messages must retain native continuation")
+                self.assertIn("dungeon", state, "Keep the native workspace through the final message flush")
+                if state["messages"][0]["text"] != "You die.": final_statuses = True
+            # Space is precisely the input sent by clicking the native ribbon.
+            e.key(ord(',') if state["readiness"] == "ready" else 32)
+        self.assertTrue(final_statuses, "Exercise the status messages after fatal damage")
+        self.assertEqual(e.state["phase"], "dead")
+        self.assertIn("run", e.state)
 
     def test_debug_damage(self):
         e = self.engine

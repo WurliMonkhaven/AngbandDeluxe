@@ -38,6 +38,7 @@ struct FontSettings {
 struct FontLibrary {
  std::array<ImFont*,15> fonts{};
  std::array<float,15> widths{};
+ ImFont *tengwar=nullptr;
  void load(const std::filesystem::path &folder) {
   auto *atlas=ImGui::GetIO().Fonts;
   const auto fallback=folder/font_choices[0].file;
@@ -50,6 +51,8 @@ struct FontLibrary {
     atlas->AddFontFromFileTTF(fallback.string().c_str(),18,&merge);
    }
   }
+  const auto effect_font=folder/"tengwar-annatar"/"tngan.ttf";
+  if(std::filesystem::is_regular_file(effect_font)) tengwar=atlas->AddFontFromFileTTF(effect_font.string().c_str(),18);
  }
  ImFont *get(const std::string &id) const {
   auto *font=fonts[FontSettings::index(id)];

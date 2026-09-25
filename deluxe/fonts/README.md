@@ -16,3 +16,7 @@ The catalog and display labels live in `font_library.h`. Each non-default face
 merges Cousine as a missing-glyph fallback. Faces are loaded once; selections do
 not destroy the atlas while GPU draw data references it. Dungeon cells use the
 largest printable ASCII advance so decorative fonts retain a regular tile grid.
+
+Tengwar Annatar by Johan Winge is bundled unchanged in `tengwar-annatar/`,
+including all six original distribution files and its original licence. The
+regular face is used only for cursed unique-enemy effects, not the UI picker.

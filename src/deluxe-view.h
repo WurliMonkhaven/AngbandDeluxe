@@ -46,9 +46,14 @@ static void deluxe_capture_view(cJSON *state_record)
 {
  int x, y, width, height, ox, oy;
  cJSON *view, *rows, *observed_items;
+ /* Leaving the world adds one screen depth before flushing post-fatal spell
+  * messages. There is no overlay yet: retain the dungeon and native ribbon
+  * until these are acknowledged. Nested screens still own the terminal. */
+ const bool final_messages = player && player->is_dead &&
+  textui_message_pending && screen_save_depth == 1 && streq(phase,"playing");
  /* Native targeting/aiming share the dungeon; nested recall screens still own
   * the terminal. Presentation mode never depends on parsing terminal text. */
- if ((!ready && !native_prompt && !textui_message_pending && !target_ui_current && !textui_aiming && !textui_direction && !item_choice_objects && !spell_selection) || (active_prompt && !native_prompt) || screen_save_depth || !streq(phase,"playing") || !deluxe_cells) return;
+ if ((!ready && !native_prompt && !textui_message_pending && !target_ui_current && !textui_aiming && !textui_direction && !item_choice_objects && !spell_selection) || (active_prompt && !native_prompt) || (screen_save_depth && !final_messages) || !streq(phase,"playing") || !deluxe_cells) return;
  ox = deluxe_full_map ? 0 : terminal.offset_x;
  oy = deluxe_full_map ? 0 : terminal.offset_y;
  width = deluxe_full_map ? cave->width : MIN(SCREEN_WID, cave->width - ox);
