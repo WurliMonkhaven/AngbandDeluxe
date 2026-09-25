@@ -1,6 +1,6 @@
 *.app
-/build-deluxe*/
-/deluxe-user/
+/build-anybandui*/
+/anybandui-user/
 *.elf
 *.exe
 *.gcda
@@ -73,3 +73,7 @@ src/stats/db.dep
 src/tests/ran-already
 src/version.h
 build*/
+
+# Python build/test caches
+__pycache__/
+*.py[cod]

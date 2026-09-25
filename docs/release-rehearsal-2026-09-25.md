@@ -64,17 +64,17 @@ No game rules or frontend behaviour were changed for these test fixes.
 ## Evidence and reproduction
 
 Final logs and per-check results:
-`build-deluxe/readiness-20260925-112317/`.
+`build-anybandui/readiness-20260925-112317/`.
 
 The historical candidate archive is retained in
-`build-deluxe/readiness-20260925-112317/packages/` under its original filename.
+`build-anybandui/readiness-20260925-112317/packages/` under its original filename.
 
-Visual previews: `build-deluxe/rehearsal-visual/`.
+Visual previews: `build-anybandui/rehearsal-visual/`.
 Earlier diagnostic runs were retained, including failed runs; the final results
 directory above is the consolidated passing run.
 
 ```powershell
-python -B deluxe/readiness.py --package --ui-fixture build-deluxe/aesthetic-fixture.json
+python -B anybandui/readiness.py --package --ui-fixture build-anybandui/aesthetic-fixture.json
 ```
 
 The UI fixture is a development capture, not part of the source distribution.

@@ -6,10 +6,10 @@ string(TOLOWER ${PROJECT_NAME} OUR_EXECUTABLE_NAME)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/cmake/modules")
 
 option(SUPPORT_GCU_FRONTEND "Support for GCU front end." OFF)
-option(SUPPORT_DELUXE_FRONTEND "Build the semantic stdio backend instead of a platform frontend." OFF)
-option(BUILD_DELUXE_CLIENT "Build the SDL3 GPU desktop client." OFF)
-if(SUPPORT_DELUXE_FRONTEND)
-    include(deluxe/backend-dependencies.cmake)
+option(SUPPORT_ANYBANDUI_FRONTEND "Build the semantic stdio backend instead of a platform frontend." OFF)
+option(BUILD_ANYBANDUI_CLIENT "Build the SDL3 GPU desktop client." OFF)
+if(SUPPORT_ANYBANDUI_FRONTEND)
+    include(anybandui/backend-dependencies.cmake)
 endif()
 option(SUPPORT_NCURSES_FRONTEND "Synonym for SUPPORT_GCU_FRONTEND for backwards compatibility." OFF)
 option(SUPPORT_SDL_FRONTEND "Support for SDL front end." OFF)
@@ -76,7 +76,7 @@ if((SUPPORT_STATS_FRONTEND) AND (NOT SUPPORT_STATS_BACKEND))
 endif()
 # If none of the graphical front ends will be configured, configure the one for
 # Windows if that's the target plaform or the X11 one for anything else.
-if((NOT SUPPORT_DELUXE_FRONTEND) AND (NOT SUPPORT_GCU_FRONTEND) AND (NOT SUPPORT_SDL_FRONTEND) AND (NOT SUPPORT_SDL2_FRONTEND) AND (NOT SUPPORT_WINDOWS_FRONTEND) AND (NOT SUPPORT_X11_FRONTEND))
+if((NOT SUPPORT_ANYBANDUI_FRONTEND) AND (NOT SUPPORT_GCU_FRONTEND) AND (NOT SUPPORT_SDL_FRONTEND) AND (NOT SUPPORT_SDL2_FRONTEND) AND (NOT SUPPORT_WINDOWS_FRONTEND) AND (NOT SUPPORT_X11_FRONTEND))
     if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         set(SUPPORT_WINDOWS_FRONTEND ON)
     else()
@@ -414,7 +414,7 @@ else()
 endif()
 
 add_executable(OurExecutable
-        $<$<BOOL:${SUPPORT_DELUXE_FRONTEND}>:src/main-deluxe.c>
+        $<$<BOOL:${SUPPORT_ANYBANDUI_FRONTEND}>:anybandui/backend/main-anybandui.c>
         $<TARGET_OBJECTS:OurCoreLib>
         $<$<BOOL:${SOUND_SUPPORT_LIB}>:$<TARGET_OBJECTS:${SOUND_SUPPORT_LIB}>>
         $<$<BOOL:${SUPPORT_GCU_FRONTEND}>:src/main-gcu.c>
@@ -434,7 +434,7 @@ add_executable(OurExecutable
         $<$<BOOL:${SUPPORT_STATS_FRONTEND}>:src/main-stats.c>
         $<$<BOOL:${SUPPORT_STATS_FRONTEND}>:src/stats/db.c>
         $<$<BOOL:${SUPPORT_TEST_FRONTEND}>:src/main-test.c>
-        $<$<AND:$<NOT:$<BOOL:${SUPPORT_WINDOWS_FRONTEND}>>,$<NOT:$<BOOL:${SUPPORT_DELUXE_FRONTEND}>>>:src/main.c>
+        $<$<AND:$<NOT:$<BOOL:${SUPPORT_WINDOWS_FRONTEND}>>,$<NOT:$<BOOL:${SUPPORT_ANYBANDUI_FRONTEND}>>>:src/main.c>
 )
 
 set_target_properties(OurExecutable PROPERTIES
@@ -445,11 +445,11 @@ target_include_directories(OurExecutable PRIVATE
     ${ANGBAND_CORE_INCLUDE_DIRS}
 )
 target_link_libraries(OurExecutable PRIVATE ${ANGBAND_CORE_LINK_LIBRARIES})
-if(SUPPORT_DELUXE_FRONTEND)
+if(SUPPORT_ANYBANDUI_FRONTEND)
     if(SUPPORT_WINDOWS_FRONTEND OR SUPPORT_SDL_FRONTEND OR SUPPORT_SDL2_FRONTEND OR SUPPORT_X11_FRONTEND OR SUPPORT_GCU_FRONTEND)
         message(FATAL_ERROR "Configure the AnybandUI backend separately from platform frontends.")
     endif()
-    target_link_libraries(OurExecutable PRIVATE deluxe_json)
+    target_link_libraries(OurExecutable PRIVATE anybandui_json)
     set_target_properties(OurExecutable PROPERTIES OUTPUT_NAME angband-backend)
     if(WIN32)
         target_compile_definitions(OurCoreLib PRIVATE WINDOWS _CRT_SECURE_NO_WARNINGS)
@@ -1127,6 +1127,6 @@ else()
 endif()
 add_dependencies(alltests allunittests)
 
-if(BUILD_DELUXE_CLIENT)
-    add_subdirectory(deluxe)
+if(BUILD_ANYBANDUI_CLIENT)
+    add_subdirectory(anybandui)
 endif()

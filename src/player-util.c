@@ -142,20 +142,6 @@ void dungeon_change_level(struct player *p, int dlev)
 {
 	/* New depth */
 	p->depth = dlev;
-	/* Store first visits in the native, save-persistent history. Loading an
-	 * existing level does not call this path and cannot invent a milestone. */
-	if (dlev > 0 && !p->upkeep->arena_level) {
-		struct history_info *entries;
-		size_t i, n = history_get_list(p, &entries);
-		bool visited = false;
-		for (i = 0; i < n; ++i)
-			if (hist_has(entries[i].type, HIST_REACH_DEPTH) && entries[i].dlev == dlev) { visited = true; break; }
-		if (!visited) {
-			char note[80];
-			strnfmt(note, sizeof(note), "Reached depth %d", dlev);
-			history_add(p, note, HIST_REACH_DEPTH);
-		}
-	}
 
 	/* If we're returning to town, update the store contents
 	   according to how long we've been away */

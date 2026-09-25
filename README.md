@@ -7,11 +7,11 @@ A native, customizable interface for Angband 4.2.6.
 This fork now includes an experimental semantic gameplay backend and a native
 C++ SDL3/SDL_GPU client. The adapter uses existing engine hooks; gameplay
 source files are unchanged. The design is
-documented in the [AnybandUI specification](docs/deluxe-specification.md) and
-[proposed API contract](docs/deluxe-api.md). The current implementation speaks
+documented in the [AnybandUI specification](docs/anybandui-specification.md) and
+[proposed API contract](docs/anybandui-api.md). The current implementation speaks
 development protocol 0.1, not the proposed stable v1 contract.
 
-See [building and using AnybandUI](deluxe/README.md) for launch instructions,
+See [building and using AnybandUI](anybandui/README.md) for launch instructions,
 implemented features and remaining work. Windows has been exercised locally;
 macOS and Linux validation is still outstanding.
 
