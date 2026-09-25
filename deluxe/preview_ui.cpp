@@ -22,7 +22,7 @@ int main(int argc,char **argv) {
   SDL_GPUTransferBufferCreateInfo buf{}; buf.usage=SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD; buf.size=w*h*4;
   auto *download=SDL_CreateGPUTransferBuffer(gpu,&buf);
   if(!target || !download) throw std::runtime_error(SDL_GetError());
-  Connection c; c.connected=c.negotiated=true; c.catalog=fixture.value("catalog",json::object()); c.commands=fixture.value("commands",json::array());
+  Connection c; c.connected=c.negotiated=true; c.saves=fixture.value("saves",json::array()); c.catalog=fixture.value("catalog",json::object()); c.commands=fixture.value("commands",json::array());
   if(fixture.contains("previous_state")) { c.inventory_changes.update(fixture["previous_state"]); c.level_feedback.update(fixture["previous_state"],double(SDL_GetTicksNS())/1e9); }
   c.receive({{"kind","event"},{"event","state.changed"},{"data",fixture.at("state")}});
   if(fixture.contains("level_elapsed")) c.level_feedback.started=double(SDL_GetTicksNS())/1e9-fixture["level_elapsed"].get<double>();
@@ -32,6 +32,7 @@ int main(int argc,char **argv) {
   ui.quit_dialog=fixture.value("quit_dialog",false);
   c.inventory_requested=fixture.value("inventory_window",false);
   c.equipment_requested=fixture.value("equipment_window",false);
+  ui.theme_settings.load(fixture.value("theme",json::object())); DeluxeTheme::configure(ui.theme_settings);
   ui.quickbar_enabled=fixture.value("quickbar_enabled",false);
   c.capabilities=fixture.value("capabilities",json::object());
   if(fixture.contains("layout_preset")) ui.layout.preset(fixture["layout_preset"].get<int>());

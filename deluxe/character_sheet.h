@@ -9,7 +9,7 @@ struct CharacterSheet {
    for(const auto &row:sheet.value("rows",json::array())) if(row.value("group","")==group) {
     ImGui::TableNextRow(); ImGui::TableNextColumn();
     ImGui::TextUnformatted(row.value("label","").c_str()); ImGui::TableNextColumn();
-    ImGui::PushStyleColor(ImGuiCol_Text,color(row.value("color",1)));
+    ImGui::PushStyleColor(ImGuiCol_Text,ui_color(row.value("color",1)));
     ImGui::TextWrapped("%s",row.value("value","").c_str()); ImGui::PopStyleColor();
    }
    ImGui::EndTable();

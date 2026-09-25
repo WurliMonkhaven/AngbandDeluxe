@@ -37,7 +37,7 @@ struct StorePanel {
     if(!o || (!stock && !entry.value("eligible",false))) continue;
     ImGui::PushID(i); ImGui::TableNextRow(); ImGui::TableNextColumn();
     const auto label=o->value("label","");
-    ImGui::PushStyleColor(ImGuiCol_Text,color(o->value("name_color",1)));
+    ImGui::PushStyleColor(ImGuiCol_Text,ui_color(o->value("name_color",1)));
     if(DeluxeTheme::table_choice(label.c_str(),selection==i)) selection=i;
     if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",label.c_str());
     ImGui::PopStyleColor();
@@ -69,7 +69,7 @@ struct StorePanel {
   }
   ImGui::BeginChild("Inspection");
   if(selected) {
-   ImGui::PushStyleColor(ImGuiCol_Text,color(selected->value("name_color",1)));
+   ImGui::PushStyleColor(ImGuiCol_Text,ui_color(selected->value("name_color",1)));
    ImGui::TextWrapped("%s",selected->value("label","").c_str());
    ImGui::PopStyleColor();
    ImGui::Separator();
@@ -93,7 +93,7 @@ struct StorePanel {
     const auto *equipped=item(c,id.get<std::string>());
     if(!equipped) continue;
     DeluxeTheme::section("Currently equipped");
-    ImGui::PushStyleColor(ImGuiCol_Text,color(equipped->value("name_color",1)));
+    ImGui::PushStyleColor(ImGuiCol_Text,ui_color(equipped->value("name_color",1)));
     ImGui::TextWrapped("%s — %s",display_label(equipped->value("location","")).c_str(),equipped->value("label","").c_str());
     ImGui::PopStyleColor();
     ImGui::PushID(equipped->value("id","").c_str()); ItemDescription::draw(*equipped); ImGui::PopID();

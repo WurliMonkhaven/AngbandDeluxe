@@ -1129,3 +1129,18 @@ The character sheet keeps its visual equipment overview, with two-line item
 names and full names on hover and in inspection. Opening the browser consumes
 no turn, also applies to remapped equipment commands, and leaves legacy clients
 and store interactions unchanged.
+
+### Native themes
+
+Settings > Theme groups interface/dungeon fonts with native UI appearance.
+Presets: original Terminal (default), Dark / Graphite, Light / Paper, Amber
+terminal, Midnight / Ice. Background, surface, text and accent colours are
+editable, with corner rounding and optional decorative accents. A contained
+preview shows draft changes; Save and Close persists them, Cancel discards them.
+Gameplay palettes and CRT controls retain their own meaning. Native item text
+adapts for contrast on light backgrounds; resource bars keep light labels.
+
+Theme also offers Invert Dungeon Colours (off by default), inverting RGB of
+the dungeon/fallback-terminal background and glyph palette without changing
+UI colours. Character selection uses themed surfaces and text; filename-seeded
+accents retain their hue with darker values on light themes.

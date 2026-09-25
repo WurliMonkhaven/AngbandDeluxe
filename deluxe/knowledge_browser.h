@@ -62,7 +62,7 @@ struct KnowledgeBrowser {
    ImGuiListClipper clipper; clipper.Begin(int(visible.size()));
    while(clipper.Step()) for(int i=clipper.DisplayStart;i<clipper.DisplayEnd;++i) {
     const auto &row=*visible[i]; const int id=row.value("id",-1); ImGui::PushID(id);
-    ImGui::PushStyleColor(ImGuiCol_Text,color(row.value("color",1)));
+    ImGui::PushStyleColor(ImGuiCol_Text,ui_color(row.value("color",1)));
     if(ImGui::Selectable(row.value("name","").c_str(),selected==id)) select(c,id);
     ImGui::PopStyleColor();
     if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%s",row.value("name","").c_str(),display_label(row.value("group","")).c_str());
@@ -80,7 +80,7 @@ struct KnowledgeBrowser {
   ImGui::EndChild(); ImGui::EndTable();
  }
  static void details(const json &detail) {
-   ImGui::PushStyleColor(ImGuiCol_Text,color(detail.value("color",1)));
+   ImGui::PushStyleColor(ImGuiCol_Text,ui_color(detail.value("color",1)));
    ImGui::TextWrapped("%s",detail.value("name","").c_str()); ImGui::Separator(); ImGui::PopStyleColor();
    ImGui::TextDisabled("%s",display_label(detail.value("group","")).c_str()); ImGui::Spacing();
    const auto stats=detail.value("stats",json::array());

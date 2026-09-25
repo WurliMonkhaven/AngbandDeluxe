@@ -1,9 +1,82 @@
 #pragma once
 // One visual vocabulary for native panels. Decorations are bounded geometry,
 // not windows or input targets; the normal GPU/CRT pipeline renders them.
+struct ThemeSettings {
+ bool custom=false, decorations=true, invert_dungeon=false;
+ float rounding=5;
+ ImVec4 background{.027f,.043f,.052f,1},surface{.065f,.10f,.115f,1},text{.85f,.89f,.86f,1},accent{.50f,.72f,.57f,1};
+ static json rgba(ImVec4 v) { return json::array({v.x,v.y,v.z}); }
+ json serialize() const { return {{"invert_dungeon",invert_dungeon},{"custom",custom},{"decorations",decorations},{"rounding",rounding},{"background",rgba(background)},{"surface",rgba(surface)},{"text",rgba(text)},{"accent",rgba(accent)}}; }
+ void load(const json &j) {
+  if(!j.is_object()) return;
+  if(j.contains("invert_dungeon") && j["invert_dungeon"].is_boolean()) invert_dungeon=j["invert_dungeon"];
+  if(j.contains("custom") && j["custom"].is_boolean()) custom=j["custom"];
+  if(j.contains("decorations") && j["decorations"].is_boolean()) decorations=j["decorations"];
+  if(j.contains("rounding") && j["rounding"].is_number()) rounding=std::clamp(j["rounding"].get<float>(),0.f,16.f);
+  auto read=[&](const char *key,ImVec4 &v) { if(!j.contains(key)) return; const auto &a=j[key];
+   if(a.is_array() && a.size()==3 && a[0].is_number() && a[1].is_number() && a[2].is_number())
+    v={std::clamp(a[0].get<float>(),0.f,1.f),std::clamp(a[1].get<float>(),0.f,1.f),std::clamp(a[2].get<float>(),0.f,1.f),1}; };
+  read("background",background); read("surface",surface); read("text",text); read("accent",accent);
+ }
+ void preset(int n) {
+  *this=ThemeSettings{}; if(n==0) return; custom=true;
+  if(n==1) { background={.055f,.06f,.075f,1}; surface={.12f,.13f,.16f,1}; accent={.61f,.68f,.85f,1}; }
+  if(n==2) { background={.90f,.91f,.89f,1}; surface={.98f,.98f,.95f,1}; text={.12f,.17f,.18f,1}; accent={.13f,.36f,.32f,1}; rounding=8; }
+  if(n==3) { background={.065f,.045f,.025f,1}; surface={.14f,.10f,.055f,1}; text={.94f,.85f,.65f,1}; accent={.91f,.62f,.26f,1}; rounding=0; }
+  if(n==4) { background={.025f,.045f,.09f,1}; surface={.055f,.105f,.17f,1}; text={.81f,.9f,.96f,1}; accent={.35f,.76f,.88f,1}; rounding=7; }
+ }
+};
 struct DeluxeTheme {
- static ImVec4 green() { return ImVec4(.50f,.72f,.57f,1); }
+ inline static ThemeSettings current{};
+ static ImU32 dungeon_colour(ImU32 ink) { return current.invert_dungeon?ink ^ IM_COL32(255,255,255,0):ink; }
+ static ImVec4 green() { return current.accent; }
+ static ImVec4 mix(ImVec4 a,ImVec4 b,float t) { return {a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t,1}; }
+ static ImU32 tint(float alpha) { auto a=green(); a.w=alpha; return ImGui::GetColorU32(a); }
+ static void configure(const ThemeSettings &theme) {
+  current=theme; auto &s=ImGui::GetStyle();
+  s.WindowRounding=theme.rounding; s.ChildRounding=theme.rounding*.6f; s.PopupRounding=theme.rounding*.8f;
+  s.FrameRounding=s.TabRounding=s.GrabRounding=s.ScrollbarRounding=theme.rounding*.4f;
+  if(!theme.custom) return;
+  auto *c=s.Colors; const auto bg=theme.background,surface=theme.surface,fg=theme.text,accent=theme.accent;
+  c[ImGuiCol_Text]=fg; c[ImGuiCol_TextDisabled]=mix(surface,fg,.62f);
+  c[ImGuiCol_WindowBg]=bg; c[ImGuiCol_ChildBg]=mix(bg,surface,.3f); c[ImGuiCol_PopupBg]=surface;
+  c[ImGuiCol_Border]=mix(surface,fg,.28f); c[ImGuiCol_Separator]=c[ImGuiCol_Border];
+  for(auto id:{ImGuiCol_FrameBg,ImGuiCol_MenuBarBg,ImGuiCol_Tab,ImGuiCol_TabDimmed,ImGuiCol_TableHeaderBg,ImGuiCol_ScrollbarBg}) c[id]=surface;
+  for(auto id:{ImGuiCol_Button,ImGuiCol_Header,ImGuiCol_TitleBg,ImGuiCol_TitleBgCollapsed}) c[id]=mix(surface,accent,.17f);
+  for(auto id:{ImGuiCol_ButtonHovered,ImGuiCol_HeaderHovered,ImGuiCol_FrameBgHovered,ImGuiCol_TabHovered,ImGuiCol_ScrollbarGrabHovered}) c[id]=mix(surface,accent,.32f);
+  for(auto id:{ImGuiCol_ButtonActive,ImGuiCol_HeaderActive,ImGuiCol_FrameBgActive,ImGuiCol_TabSelected,ImGuiCol_TabDimmedSelected,ImGuiCol_TitleBgActive}) c[id]=mix(surface,accent,.24f);
+  for(auto id:{ImGuiCol_CheckMark,ImGuiCol_SliderGrab,ImGuiCol_SliderGrabActive,ImGuiCol_SeparatorHovered,ImGuiCol_SeparatorActive,ImGuiCol_TabSelectedOverline,ImGuiCol_TabDimmedSelectedOverline,ImGuiCol_NavCursor,ImGuiCol_ResizeGripHovered,ImGuiCol_ResizeGripActive,ImGuiCol_ScrollbarGrabActive}) c[id]=accent;
+  c[ImGuiCol_ScrollbarGrab]=mix(surface,fg,.3f); c[ImGuiCol_ResizeGrip]=mix(surface,accent,.4f);
+  c[ImGuiCol_TableBorderStrong]=c[ImGuiCol_Border]; c[ImGuiCol_TableBorderLight]=mix(surface,fg,.15f);
+  c[ImGuiCol_TableRowBgAlt]=mix(bg,surface,.65f); c[ImGuiCol_TextSelectedBg]=mix(surface,accent,.35f);
+ }
+ static void editor(ThemeSettings &theme) {
+  if(ImGui::BeginCombo("Preset","Choose a theme...")) {
+   const char *names[]={"Terminal (original)","Dark / Graphite","Light / Paper","Amber terminal","Midnight / Ice"};
+   for(int i=0;i<5;++i) if(ImGui::Selectable(names[i])) theme.preset(i);
+   ImGui::EndCombo();
+  }
+  bool changed=false;
+  changed|=ImGui::ColorEdit3("Background",&theme.background.x);
+  changed|=ImGui::ColorEdit3("Surfaces",&theme.surface.x);
+  changed|=ImGui::ColorEdit3("Text",&theme.text.x);
+  changed|=ImGui::ColorEdit3("Accent",&theme.accent.x);
+  theme.custom|=changed;
+  ImGui::SliderFloat("Corner rounding",&theme.rounding,0,16,"%.0f px");
+  ImGui::Checkbox("Decorative accents",&theme.decorations);
+  ImGui::Checkbox("Invert Dungeon Colours",&theme.invert_dungeon);
+  if(ImGui::IsItemHovered()) ImGui::SetTooltip("Invert the dungeon background and glyph colours, including the fallback terminal.");
+  ImGui::TextDisabled("Preview only until Save and Close.");
+  const auto saved=ImGui::GetStyle(); const auto previous=current;
+  configure(theme);
+  ImGui::BeginChild("Theme preview",{0,ImGui::GetFontSize()*8},ImGuiChildFlags_Borders);
+  section("Adventurer"); ImGui::TextUnformatted("A new chapter awaits.");
+  ImGui::TextDisabled("Secondary information"); ImGui::Button("Explore"); ImGui::SameLine();
+  bool checked=true; ImGui::Checkbox("Ready",&checked);
+  ImGui::EndChild(); ImGui::GetStyle()=saved; current=previous;
+ }
  static void apply() {
+  current=ThemeSettings{};
   ImGui::StyleColorsDark();
   auto &s=ImGui::GetStyle();
   s.WindowPadding=ImVec2(10,10); s.FramePadding=ImVec2(7,4);
@@ -70,28 +143,42 @@ struct DeluxeTheme {
   const float h=text.y+f*.6f;
   auto *d=ImGui::GetWindowDrawList(); const auto ink=ImGui::GetColorU32(green());
   d->PushClipRect(a,ImVec2(a.x+w,a.y+h),true);
-  d->AddRectFilledMultiColor(a,ImVec2(a.x+w,a.y+h),IM_COL32(28,48,43,180),IM_COL32(13,24,28,20),IM_COL32(13,24,28,20),IM_COL32(20,34,33,120));
+  if(current.decorations) d->AddRectFilledMultiColor(a,ImVec2(a.x+w,a.y+h),tint(.12f),tint(0),tint(0),tint(.05f));
   d->AddLine(ImVec2(a.x,a.y+h),ImVec2(a.x+w,a.y+h),ImGui::GetColorU32(ImGuiCol_Separator));
   d->AddLine(ImVec2(a.x,a.y+f*.3f),ImVec2(a.x,a.y+h-f*.3f),ink,2);
   d->AddText(ImGui::GetFont(),f,ImVec2(a.x+inset,a.y+f*.3f),ink,label,nullptr,wrap_label?wrap:0.f);
   // Short ruled end-stop, kept away from the title even when it wraps.
-  if(text.y<=f && text.x+inset+f*3<w)
-   for(int i=0;i<3;++i) d->AddLine(ImVec2(a.x+w-f*(.3f+i*.35f),a.y+h*.35f),ImVec2(a.x+w-f*(.3f+i*.35f),a.y+h*.65f),IM_COL32(72,102,87,180));
+  if(current.decorations && text.y<=f && text.x+inset+f*3<w)
+   for(int i=0;i<3;++i) d->AddLine(ImVec2(a.x+w-f*(.3f+i*.35f),a.y+h*.35f),ImVec2(a.x+w-f*(.3f+i*.35f),a.y+h*.65f),tint(.6f));
   d->PopClipRect(); ImGui::Dummy(ImVec2(w,h));
  }
- static void corners(ImDrawList *d,ImVec2 a,ImVec2 b,ImU32 ink,float length) {
+ static void corners(ImDrawList *d,ImVec2 a,ImVec2 b,ImU32 ink,float length,float rounding=0) {
+  if(!current.decorations) return;
   length=std::min(length,std::min(b.x-a.x,b.y-a.y)*.25f);
   for(int x=0;x<2;++x) for(int y=0;y<2;++y) {
    const ImVec2 p(x?b.x:a.x,y?b.y:a.y);
-   d->AddLine(p,ImVec2(p.x+(x?-length:length),p.y),ink);
-   d->AddLine(p,ImVec2(p.x,p.y+(y?-length:length)),ink);
+   const float sx=x?-1.f:1.f,sy=y?-1.f:1.f;
+   const float r=std::min(rounding,length);
+   if(r>0) {
+    const ImVec2 center(p.x+sx*r,p.y+sy*r);
+    d->PathLineTo({p.x+sx*length,p.y});
+    for(int i=0;i<=6;++i) {
+     const float angle=i*(3.14159265f*.5f/6);
+     d->PathLineTo({center.x-sx*r*std::sin(angle),center.y-sy*r*std::cos(angle)});
+    }
+    d->PathLineTo({p.x,p.y+sy*length}); d->PathStroke(ink,0,1);
+   } else {
+    d->AddLine(p,ImVec2(p.x+sx*length,p.y),ink);
+    d->AddLine(p,ImVec2(p.x,p.y+sy*length),ink);
+   }
   }
  }
  static void panel() {
+  if(!current.decorations) return;
   auto *d=ImGui::GetWindowDrawList(); const auto a=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
   const ImVec2 b(a.x+size.x,a.y+size.y);
-  d->AddRectFilledMultiColor(a,ImVec2(b.x,std::min(b.y,a.y+ImGui::GetFontSize()*7)),IM_COL32(26,44,43,85),IM_COL32(12,22,29,0),IM_COL32(12,22,29,0),IM_COL32(12,22,29,0));
-  corners(d,ImVec2(a.x+1,a.y+1),ImVec2(b.x-1,b.y-1),IM_COL32(51,79,69,170),ImGui::GetFontSize()*.7f);
+  d->AddRectFilledMultiColor(a,ImVec2(b.x,std::min(b.y,a.y+ImGui::GetFontSize()*7)),tint(.06f),tint(0),tint(0),tint(0));
+  corners(d,ImVec2(a.x+1,a.y+1),ImVec2(b.x-1,b.y-1),tint(.35f),ImGui::GetFontSize()*.7f);
  }
  // The hit target spans the row, but the name belongs to this column only.
  static bool table_choice(const char *label,bool selected,ImGuiSelectableFlags flags=ImGuiSelectableFlags_SpanAllColumns,const char *badge="",float row_height=0) {

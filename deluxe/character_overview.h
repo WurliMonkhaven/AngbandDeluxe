@@ -8,7 +8,7 @@ struct CharacterOverview {
   const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();
   const float pad=ImGui::GetStyle().FramePadding.x;
   const float y=a.y+(b.y-a.y-ImGui::GetFontSize())*.5f;
-  auto *draw=ImGui::GetWindowDrawList(); const auto ink=ImGui::GetColorU32(ImGuiCol_Text);
+  auto *draw=ImGui::GetWindowDrawList(); const auto ink=IM_COL32(235,240,236,255);
   // A lit glass face, a thin bright edge, and fine scale marks below the text.
   const float badge_width=badge.empty()?0.f:std::min(ImGui::CalcTextSize(badge.c_str()).x+2*pad,(b.x-a.x)*.55f);
   const ImVec2 track(a.x+badge_width,a.y);
@@ -57,9 +57,9 @@ struct CharacterOverview {
   const float height=ImGui::GetFontSize()*(stacked?2.f:1.f)+2*pad;
   const ImVec2 b(a.x+width,a.y+height);
   auto *draw=ImGui::GetWindowDrawList();
-  draw->AddRectFilledMultiColor(a,b,IM_COL32(23,37,40,255),IM_COL32(17,28,32,255),IM_COL32(12,22,27,255),IM_COL32(17,28,31,255));
+  draw->AddRectFilledMultiColor(a,b,ImGui::GetColorU32(ImGuiCol_FrameBg),ImGui::GetColorU32(ImGuiCol_ChildBg),ImGui::GetColorU32(ImGuiCol_ChildBg),ImGui::GetColorU32(ImGuiCol_FrameBg));
   draw->AddRect(a,b,ImGui::GetColorU32(ImGuiCol_Border),2);
-  DeluxeTheme::corners(draw,a,b,IM_COL32(74,109,92,180),pad);
+  DeluxeTheme::corners(draw,a,b,DeluxeTheme::tint(.5f),pad);
   draw->PushClipRect(a,b,true);
   draw->AddText(ImVec2(a.x+pad,a.y+pad),ImGui::GetColorU32(ImGuiCol_TextDisabled),label);
   draw->AddText(ImVec2(a.x+pad+(stacked?0:label_width+gap),a.y+pad+(stacked?ImGui::GetFontSize():0)),ImGui::GetColorU32(ImGuiCol_Text),value.c_str());
@@ -133,7 +133,7 @@ struct CharacterOverview {
    ImGui::TableNextRow();
    for(size_t i=0;i<p["stats"].size();++i) {
     ImGui::TableNextColumn();
-    ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,IM_COL32(18,31,34,255));
+    ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,ImGui::GetColorU32(ImGuiCol_FrameBg));
     const int v=p["stats"][i]; char value[32];
     if(v>18) SDL_snprintf(value,sizeof(value),"18/%02d",v-18); else SDL_snprintf(value,sizeof(value),"%d",v);
     auto centered=[&](const char *text,bool muted) {

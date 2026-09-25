@@ -95,6 +95,16 @@ static ImU32 color(int index) {
  const auto &c = colors[std::max(0,index) % std::size(colors)];
  return IM_COL32(c[0],c[1],c[2],255);
 }
+// Native text follows the theme; dungeon glyphs retain Angband's palette.
+static ImU32 ui_color(int index) {
+ auto ink=ImGui::ColorConvertU32ToFloat4(color(index));
+ const auto bg=ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+ if(DeluxeTheme::current.custom && bg.x*.2126f+bg.y*.7152f+bg.z*.0722f>.5f) {
+  auto luminance=[](ImVec4 v) { auto linear=[](float x) { return x<=.04045f?x/12.92f:std::pow((x+.055f)/1.055f,2.4f); }; return .2126f*linear(v.x)+.7152f*linear(v.y)+.0722f*linear(v.z); };
+  for(int i=0;i<30 && (luminance(bg)+.05f)/(luminance(ink)+.05f)<4.5f;++i) { ink.x*=.9f; ink.y*=.9f; ink.z*=.9f; }
+ }
+ return ImGui::ColorConvertFloat4ToU32(ink);
+}
 #include "scene_transitions.h"
 struct Connection {
  SceneTransitions transitions;
@@ -548,6 +558,7 @@ struct UI {
  CrtSettings crt_settings{}, draft_crt_settings{};
  FontLibrary *font_library=nullptr;
  FontSettings font_settings,draft_fonts;
+ ThemeSettings theme_settings,draft_theme;
  WorkspaceLayout layout;
  float draft_scale=1.f;
  std::string settings_error;
@@ -586,6 +597,7 @@ struct UI {
  void load_settings() {
   try { std::ifstream in(settings_path); if (!in) return; json j; in >> j;
    font_settings.load(j.value("fonts",json::object()));
+   theme_settings.load(j.value("theme",json::object()));
    layout.load(j.value("layout",json::object()));
    scale=std::clamp(j.value("scale",1.f),0.75f,1.5f);
    game_fraction=std::clamp(j.value("game_fraction",.72f),.2f,.9f);
@@ -612,10 +624,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr,const ThemeSettings *theme=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"layout",layout.serialize()},{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"theme",(theme?*theme:theme_settings).serialize()},{"layout",layout.serialize()},{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -623,7 +635,7 @@ struct UI {
   if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look,quick_targeting,quickbar_enabled)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
-  draft_fonts=font_settings;
+  draft_fonts=font_settings; draft_theme=theme_settings;
   draft_audio_settings=audio_settings;
   engine_options.reset(); settings_saving=false; saving_bindings=false;
   keybinding_editor.reset(); c.bindings_result=nullptr; c.bindings_saved=nullptr; c.bindings_request.clear();
@@ -651,11 +663,11 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts,&draft_theme)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
-  font_settings=draft_fonts;
+  font_settings=draft_fonts; theme_settings=draft_theme;
   audio_settings=draft_audio_settings; audio.configure(audio_settings,window_active);
   projectile_animation=draft_projectile_animation;
   movement_animation=draft_movement_animation; blink_animation=draft_blink_animation;
@@ -720,6 +732,10 @@ struct UI {
       }
       ImGui::EndCombo();
      }
+     ImGui::EndTabItem();
+    }
+    if(ImGui::BeginTabItem("Theme")) {
+     DeluxeTheme::editor(draft_theme);
      if(font_library) {
       ImGui::Spacing(); DeluxeTheme::section("Fonts");
       font_library->picker("Interface font",draft_fonts.interface_font);
@@ -902,6 +918,7 @@ struct UI {
   if(display_scale<=0) display_scale=1.f;
   // Rebuild from the unscaled style; repeated changes must not accumulate rounding.
   ImGui::GetStyle()=base_style;
+  DeluxeTheme::configure(theme_settings);
   ImGui::GetStyle().ScaleAllSizes(display_scale*scale);
   ImGui::GetStyle().FontScaleDpi=display_scale;
   ImGui::GetStyle().FontScaleMain=scale;
@@ -1006,7 +1023,7 @@ struct UI {
   if(ImGui::IsItemFocused()) grid_focus=true;
   auto draw=ImGui::GetWindowDrawList();
   game_draw_list=draw; game_pos=ImGui::GetWindowPos(); game_size=ImGui::GetWindowSize();
-  draw->AddRectFilled(start,ImVec2(start.x+viewport.x,start.y+viewport.y),IM_COL32(12,15,20,255));
+  draw->AddRectFilled(start,ImVec2(start.x+viewport.x,start.y+viewport.y),DeluxeTheme::dungeon_colour(color(0)));
   for(size_t y=0;y<grid.height;++y) for(size_t x=0;x<grid.width;++x) {
    const auto &cell=grid.cells[y*grid.width+x];
    if(cell.glyph && cell.glyph!=' ') {
@@ -1019,10 +1036,10 @@ struct UI {
      if(displacement.x || displacement.y) {
       unsigned glyph=0; int ink=0;
       for(int layer=0;layer<3;++layer) if(layers[layer*2].get<unsigned>()) { glyph=layers[layer*2]; ink=layers[layer*2+1]; }
-      if(glyph) draw->AddText(dungeon_font,pixels,at,color(ink),utf8(glyph).c_str());
+      if(glyph) draw->AddText(dungeon_font,pixels,at,DeluxeTheme::dungeon_colour(color(ink)),utf8(glyph).c_str());
      }
     }
-    draw->AddText(dungeon_font,pixels,{at.x+displacement.x*cw,at.y+displacement.y*ch},color(cell.color),utf8(cell.glyph).c_str());
+    draw->AddText(dungeon_font,pixels,{at.x+displacement.x*cw,at.y+displacement.y*ch},DeluxeTheme::dungeon_colour(color(cell.color)),utf8(cell.glyph).c_str());
    }
   }
   if(grid.semantic) {
@@ -1200,7 +1217,7 @@ struct UI {
   }
   if(c.state.contains("items")) for(const auto &o:c.state["items"]) {
    if(o.value("location","")!="Floor" || o.value("x",-1)!=x || o.value("y",-1)!=y) continue;
-   ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
+   ImGui::PushStyleColor(ImGuiCol_Text,ui_color(o.value("name_color",1)));
    ImGui::TextWrapped("%s",o.value("label","").c_str());
    ImGui::PopStyleColor();
    if(full) ImGui::TextWrapped("%s",o.value("description","").c_str());
@@ -1251,7 +1268,7 @@ struct UI {
    for(const auto *item:items) {
     const auto &o=*item; const auto id=o.value("id","");
     ImGui::PushID(id.c_str()); ImGui::TableNextRow(); ImGui::TableNextColumn();
-    ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
+    ImGui::PushStyleColor(ImGuiCol_Text,ui_color(o.value("name_color",1)));
     if(DeluxeTheme::table_choice(o.value("label","").c_str(),selected==id,ImGuiSelectableFlags_None,"",ImGui::GetFrameHeight())) selected=id;
     ImGui::PopStyleColor();
     if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",o.value("label","").c_str());
@@ -1301,7 +1318,7 @@ struct UI {
     if(!matches(label,item_filter)) continue;
     auto id=o.value("id",""); ImGui::PushID(id.c_str());
     ImGui::TableNextRow(); ImGui::TableNextColumn();
-    ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
+    ImGui::PushStyleColor(ImGuiCol_Text,ui_color(o.value("name_color",1)));
     const auto *change=c.inventory_changes.find(o);
     const std::string badge=change?(change->fresh?"NEW":"+"+std::to_string(change->amount)):"";
     if(change) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,IM_COL32(67,125,85,65));
@@ -1361,7 +1378,7 @@ struct UI {
    }
    ImGui::EndDisabled();
    ImGui::Spacing();
-   ImGui::PushStyleColor(ImGuiCol_Text,color(o.value("name_color",1)));
+   ImGui::PushStyleColor(ImGuiCol_Text,ui_color(o.value("name_color",1)));
    ImGui::TextWrapped("%s",o.value("label","").c_str()); ImGui::PopStyleColor();
    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding,ImVec2(ImGui::GetFontSize()*.4f,ImGui::GetFontSize()*.3f));
    if(ImGui::BeginTable("Item facts",2,ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_RowBg)) {
@@ -1446,7 +1463,7 @@ struct UI {
    if(!m.value("visible",false)) continue;
    any=true; ImGui::PushID(m.value("id","").c_str());
    const bool can_inspect=c.capabilities.value("knowledge",0)>0 && m.contains("race_id");
-   ImGui::PushStyleColor(ImGuiCol_Text,color(m.value("color",1)));
+   ImGui::PushStyleColor(ImGuiCol_Text,ui_color(m.value("color",1)));
    if(ImGui::Selectable(display_label(m.value("name","")).c_str()) && can_inspect) inspect_creature(m.value("race_id",-1));
    ImGui::PopStyleColor();
    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s\nPosition %d, %d%s",m.value("asleep",false)?"Asleep":"Awake",m.value("x",0),m.value("y",0),can_inspect?"\nClick to inspect":"");
@@ -1498,7 +1515,7 @@ struct UI {
     ImGui::PushID(id.c_str()); ImGui::TableNextRow(); ImGui::TableNextColumn();
     if(!option) ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     ImGui::TextUnformatted(option?option->value("shortcut","").c_str():""); ImGui::TableNextColumn();
-    ImGui::PushStyleColor(ImGuiCol_Text,option?color(item->value("name_color",1)):ImGui::GetColorU32(ImGuiCol_TextDisabled));
+    ImGui::PushStyleColor(ImGuiCol_Text,option?ui_color(item->value("name_color",1)):ImGui::GetColorU32(ImGuiCol_TextDisabled));
     if(DeluxeTheme::table_choice(item->value("label","").c_str(),prompt_item==id,ImGuiSelectableFlags_SpanAllColumns|ImGuiSelectableFlags_AllowDoubleClick)) {
      prompt_item=id;
      if(option && ImGui::IsMouseDoubleClicked(0)) answer=option->value("id","");
@@ -1581,6 +1598,7 @@ struct UI {
  }
  void messages_panel() {
    DeluxeTheme::panel();
+   ImGui::Indent(ImGui::GetFontSize()*.65f);
    ImGui::AlignTextToFramePadding(); ImGui::TextColored(DeluxeTheme::green(),"Messages"); ImGui::SameLine();
    if(c.state.value("message_pending",false)) { ImGui::TextColored(ImVec4(1,.73f,.3f,1),"WAITING"); ImGui::SameLine(); }
    const float icon=ImGui::GetFrameHeight();
@@ -1602,6 +1620,7 @@ struct UI {
     if(focus_search) ImGui::SetKeyboardFocusHere();
     ImGui::InputTextWithHint("##messages","Search messages",message_filter,sizeof(message_filter));
    }
+   ImGui::Unindent(ImGui::GetFontSize()*.65f);
    for(const auto &m:c.messages) {
     auto text=m.value("text",""); if(!matches(text,message_filter)) continue;
     const auto a=ImGui::GetCursorScreenPos();

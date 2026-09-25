@@ -35,7 +35,7 @@ struct EquipmentPortrait {
   const float glyph=font*glyph_ratio,line=font*1.07f;
   const ImVec2 figure(origin.x+(width-21*glyph)*.5f,origin.y+(height-17*line)*.5f);
   if(diagram) {
-   draw->AddRectFilled(origin,{origin.x+width,origin.y+height},IM_COL32(9,17,20,255),5);
+   draw->AddRectFilled(origin,{origin.x+width,origin.y+height},ImGui::GetColorU32(ImGuiCol_ChildBg),5);
    const float left=origin.x+card_w+f,right=origin.x+width-card_w-f;
    for(float y=origin.y+f;y<origin.y+height-f;y+=f) draw->AddLine({left,y},{right,y},IM_COL32(37,62,60,40));
    // Deliberately plain ASCII: all supported fonts can render this figure.
@@ -67,7 +67,7 @@ struct EquipmentPortrait {
    if(positioned && (hover || (active && !trace_hover))) {
     trace=anchor; trace_at=at; trace_width=w; trace_hover=hover;
    }
-   draw->AddRectFilled(at,{at.x+w,at.y+card_h},active?IM_COL32(28,48,46,255):hover?IM_COL32(23,37,38,255):IM_COL32(14,24,28,255),4);
+   draw->AddRectFilled(at,{at.x+w,at.y+card_h},ImGui::GetColorU32(active?ImGuiCol_HeaderActive:hover?ImGuiCol_HeaderHovered:ImGuiCol_FrameBg),4);
    draw->AddRect(at,{at.x+w,at.y+card_h},active||hover?ink:IM_COL32(43,63,66,255),4);
    if(item) draw->AddRectFilled({at.x,at.y+f*.5f},{at.x+2,at.y+card_h-f*.5f},ink);
    const auto title=anchor?std::string(anchor->label):display_label(slot);
@@ -82,7 +82,7 @@ struct EquipmentPortrait {
     }
     name+="...";
    }
-   draw->AddText(ImGui::GetFont(),f,{at.x+f*.55f,at.y+f*1.65f},item?ImGui::GetColorU32(color(item->value("name_color",1))):ImGui::GetColorU32(ImGuiCol_TextDisabled),name.c_str(),nullptr,available);
+   draw->AddText(ImGui::GetFont(),f,{at.x+f*.55f,at.y+f*1.65f},item?ImGui::GetColorU32(ui_color(item->value("name_color",1))):ImGui::GetColorU32(ImGuiCol_TextDisabled),name.c_str(),nullptr,available);
    if(hover) {
     ImGui::BeginTooltip(); ImGui::PushTextWrapPos(f*30);
     ImGui::TextUnformatted(title.c_str());
@@ -110,7 +110,7 @@ struct EquipmentPortrait {
    const auto slot=slots[selected].value("label",""); const auto *item=item_at(items,slot);
    if(item) {
     ImGui::PushTextWrapPos();
-    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(color(item->value("name_color",1))),"%s",item->value("label","").c_str());
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui_color(item->value("name_color",1))),"%s",item->value("label","").c_str());
     ImGui::PopTextWrapPos();
     ItemDescription::draw(*item);
    } else ImGui::TextDisabled("%s: nothing equipped.",display_label(slot).c_str());

@@ -423,8 +423,14 @@ struct Quickbar {
    if(ImGui::InvisibleButton("Slot",ImVec2(width,h)) && usable && !dragging) activated=i;
    const bool hovered=ImGui::IsItemHovered();
    auto *draw=ImGui::GetWindowDrawList();
-   draw->AddRectFilled(a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(hovered?ImVec4(.13f,.23f,.20f,1):ImVec4(.04f,.075f,.09f,1)),3);
-   draw->AddRect(a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(usable?ImVec4(.32f,.49f,.40f,1):ImVec4(.18f,.24f,.25f,1)),3);
+   draw->AddRectFilled(a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(hovered?ImGuiCol_FrameBgHovered:ImGuiCol_FrameBg));
+   // Keep the full stroke (including its antialiased fringe) inside the slot's
+   // bounds: a tightly fitted quickbar clips geometry at its bottom edge.
+   const float inset=std::min(1.5f,std::min(width,h)*.25f);
+   const ImVec2 border_min(a.x+inset,a.y+inset),border_max(a.x+width-inset,a.y+h-inset);
+   const ImVec2 border_points[]={border_min,{border_max.x,border_min.y},border_max,{border_min.x,border_max.y}};
+   draw->AddPolyline(border_points,4,ImGui::GetColorU32(ImGuiCol_Border),ImDrawFlags_Closed,1);
+
    const auto ink=usable?appearance_color(s[i]):ImGui::GetColorU32(ImGuiCol_TextDisabled);
    if(!s[i].is_null()) {
     content(draw,a,width,h,s[i],ink);
@@ -434,8 +440,8 @@ struct Quickbar {
      draw->AddText(ImVec2(a.x+std::max(2.f,width-measure.x-3),a.y+h-ImGui::GetFontSize()-2),ink,count.c_str());
     }
    }
-   DeluxeTheme::corners(draw,a,ImVec2(a.x+width,a.y+h),ImGui::GetColorU32(usable?DeluxeTheme::green():ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)),h*.12f);
-   const auto number=std::to_string((i+1)%10); draw->AddText(ImVec2(a.x+3,a.y+2),ImGui::GetColorU32(ImGuiCol_TextDisabled),number.c_str());
+   DeluxeTheme::corners(draw,border_min,border_max,ImGui::GetColorU32(usable?DeluxeTheme::green():ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)),h*.12f);
+   const auto number=std::to_string((i+1)%10); draw->AddText(ImVec2(a.x+5,a.y+3),ImGui::GetColorU32(ImGuiCol_TextDisabled),number.c_str());
    drag_source(s[i],i);
    drop_target(i);
    if(hovered && !ImGui::GetDragDropPayload()) tooltip(s[i],c,action,i);

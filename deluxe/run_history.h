@@ -116,7 +116,7 @@ struct RunHistory {
       int i=0;
       for(const auto &item:current.at("items")) {
        ImGui::PushID(i); ImGui::TableNextRow(); ImGui::TableNextColumn();
-       ImGui::PushStyleColor(ImGuiCol_Text,color(item.value("name_color",1)));
+       ImGui::PushStyleColor(ImGuiCol_Text,ui_color(item.value("name_color",1)));
        const auto label=item.value("label","");
        if(ImGui::Selectable(label.c_str(),selected_item==i,ImGuiSelectableFlags_SpanAllColumns)) selected_item=i;
        if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",label.c_str());

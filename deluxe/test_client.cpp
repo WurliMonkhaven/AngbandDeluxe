@@ -26,6 +26,15 @@ static BackendReader::Batch read_test_frames(const std::string &wire) {
 int main(int argc,char **argv) {
  try {
   check(argc==2,"Pass an unused settings-file path");
+  for(int i=0;i<5;++i) {
+   ThemeSettings theme; theme.preset(i); theme.invert_dungeon=true; ThemeSettings loaded; loaded.load(theme.serialize());
+   check(loaded.serialize()==theme.serialize(),"Theme presets must round-trip exactly");
+  }
+  DeluxeTheme::current.invert_dungeon=true;
+  check(DeluxeTheme::dungeon_colour(IM_COL32(12,15,20,180))==IM_COL32(243,240,235,180),"Dungeon inversion preserves alpha");
+  DeluxeTheme::current=ThemeSettings{};
+  ThemeSettings bounded; bounded.load({{"rounding",100},{"accent",json::array({-1,2,.5})},{"text","invalid"}});
+  check(bounded.rounding==16 && bounded.accent.x==0 && bounded.accent.y==1,"Theme input must be bounded");
   {
    MotionFeedback motion; std::deque<json> events;
    json state={{"phase","playing"},{"revision","1"},{"dungeon",{{"level_id","one"}}},{"monsters",json::array({{{"index",7},{"visible",true},{"x",11},{"y",10}}})}};
@@ -402,10 +411,12 @@ int main(int argc,char **argv) {
   check(!ui.crt_settings.parts[Hum].enabled,"Hum bar draft applied immediately");
   check(ui.scale==1.25f && ui.crt==0 && !ui.fullscreen,"Draft changed live settings");
   ui.draft_audio_settings.master=.1f; ui.draft_audio_settings.enabled=false;
-  ui.draft_fonts.interface_font="Hack-Regular.ttf";
+  ui.draft_fonts.interface_font="Hack-Regular.ttf"; ui.draft_theme.preset(2);
+  check(!ui.theme_settings.custom,"Theme drafts must not change live settings");
   check(ui.font_settings.interface_font=="Nouveau_IBM.ttf","Font preview must not change the live interface");
   ui.begin_settings(); // Reopening after Cancel discards the draft.
   check(ui.draft_fonts.interface_font=="Nouveau_IBM.ttf","Cancel must discard font choices");
+  check(!ui.draft_theme.custom,"Cancel must discard theme edits");
   check(ui.draft_audio_settings.enabled && ui.draft_audio_settings.master==.8f,"Cancel must discard audio edits");
   check(!ui.draft_proceed_with_click,"Cancelled gameplay draft retained");
   check(!ui.draft_click_exits_look,"Cancelled look click draft retained");
@@ -427,9 +438,11 @@ int main(int argc,char **argv) {
   ui.quickbar.profile="test-character"; ui.quickbar.slots()[0]=Quickbar::command_binding({{"id","core.hold"},{"label","Hold"}});
   ui.draft_audio_settings.master=.43f; ui.draft_audio_settings.gameplay=.25f;
   ui.draft_fonts.interface_font="Hack-Regular.ttf"; ui.draft_fonts.dungeon_font="Flexi_IBM_VGA_True.ttf";
+  ui.draft_theme.preset(3); ui.draft_theme.rounding=11; ui.draft_theme.invert_dungeon=true; ui.draft_theme.decorations=false;
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
   check(loaded.font_settings.interface_font=="Hack-Regular.ttf" && loaded.font_settings.dungeon()=="Flexi_IBM_VGA_True.ttf","Both font choices persist");
+  check(loaded.theme_settings.serialize()==ui.draft_theme.serialize(),"Theme colours and styling persist");
   check(!loaded.scene_animation,"Scene transitions setting persists");
   check(loaded.audio_settings.master==.43f && loaded.audio_settings.gameplay==.25f,"Audio volumes must persist after Save and Close");
   check(loaded.proceed_with_click,"Gameplay option did not persist");

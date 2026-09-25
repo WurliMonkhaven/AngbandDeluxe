@@ -14,16 +14,21 @@ struct CharacterSelect {
   // Preserve the saturation and value of the original muted green (128,183,141).
   ImVec4 color(0,0,0,1);
   ImGui::ColorConvertHSVtoRGB(hue,55.f/183.f,183.f/255.f,color.x,color.y,color.z);
+  // Keep the filename's hue, but give it enough weight on light surfaces.
+  const auto bg=DeluxeTheme::current.background;
+  if(DeluxeTheme::current.custom && bg.x*.2126f+bg.y*.7152f+bg.z*.0722f>.5f) {
+   color.x*=.52f; color.y*=.52f; color.z*=.52f;
+  }
   return ImGui::ColorConvertFloat4ToU32(color);
  }
  static void emblem(float height,ImU32 ink) {
   const auto p=ImGui::GetCursorScreenPos(); const float width=ImGui::GetContentRegionAvail().x;
   auto *draw=ImGui::GetWindowDrawList();
-  draw->AddRectFilled(p,ImVec2(p.x+width,p.y+height),IM_COL32(12,19,26,255),6);
+  draw->AddRectFilled(p,ImVec2(p.x+width,p.y+height),ImGui::GetColorU32(ImGuiCol_FrameBg),ImGui::GetStyle().FrameRounding);
   const ImVec2 c(p.x+width*.5f,p.y+height*.5f);
   for(int i=0;i<4;++i) {
    float r=height*(.25f+.065f*i);
-   draw->AddRect(ImVec2(c.x-r,c.y-r*.75f),ImVec2(c.x+r,c.y+r*.75f),IM_COL32(36,49,61,180),2);
+   draw->AddRect(ImVec2(c.x-r,c.y-r*.75f),ImVec2(c.x+r,c.y+r*.75f),ImGui::GetColorU32(ImGuiCol_Border),ImGui::GetStyle().FrameRounding);
   }
   draw->AddLine(ImVec2(p.x+12,c.y),ImVec2(c.x-height*.48f,c.y),ink);
   draw->AddLine(ImVec2(c.x+height*.48f,c.y),ImVec2(p.x+width-12,c.y),ink);
@@ -48,7 +53,7 @@ struct CharacterSelect {
   if(!chosen && !saves.empty()) { selected=saves.front().value("id",""); chosen=&saves.front(); }
   ImGui::BeginChild("Character selection",ImVec2(0,-ImGui::GetTextLineHeightWithSpacing()*2));
   if(saves.empty()) {
-   emblem(font*11,IM_COL32(128,183,141,255)); ImGui::Spacing();
+   emblem(font*11,ImGui::GetColorU32(DeluxeTheme::green())); ImGui::Spacing();
    ImGui::TextUnformatted("A new name. A new descent.");
    ImGui::TextDisabled("Your adventurers will be waiting here between journeys.");
   } else {
@@ -67,12 +72,12 @@ struct CharacterSelect {
      const auto p=ImGui::GetCursorScreenPos(); const float width=ImGui::GetContentRegionAvail().x,h=font*5.6f;
      if(ImGui::Selectable("##Character card",selected==id,ImGuiSelectableFlags_None,ImVec2(width,h))) { selected=id; chosen=&s; }
      auto *draw=ImGui::GetWindowDrawList(); const auto ink=accent(id);
-     draw->AddRect(p,ImVec2(p.x+width,p.y+h),selected==id?ink:IM_COL32(44,52,60,255),4);
+     draw->AddRect(p,ImVec2(p.x+width,p.y+h),selected==id?ink:ImGui::GetColorU32(ImGuiCol_Border),4);
      draw->PushClipRect(ImVec2(p.x+8,p.y+4),ImVec2(p.x+width-8,p.y+h-4),true);
      draw->AddText(ImGui::GetFont(),font*1.8f,ImVec2(p.x+10,p.y+font*1.6f),ink,"@");
      const float x=p.x+font*3.2f;
-     draw->AddText(ImGui::GetFont(),font*1.15f,ImVec2(x,p.y+font*.6f),IM_COL32(237,232,222,255),name.c_str());
-     draw->AddText(ImVec2(x,p.y+font*2),IM_COL32(155,169,183,255),identity.c_str());
+     draw->AddText(ImGui::GetFont(),font*1.15f,ImVec2(x,p.y+font*.6f),ImGui::GetColorU32(ImGuiCol_Text),name.c_str());
+     draw->AddText(ImVec2(x,p.y+font*2),ImGui::GetColorU32(ImGuiCol_TextDisabled),identity.c_str());
      std::string status=s.value("dead",false)?"FALLEN":s.contains("depth")?(s.value("depth",0)==0?"IN TOWN":"DEPTH "+std::to_string(s.value("depth",0))):"SAVED JOURNEY";
      if(s.contains("level")) status+="    /    LEVEL "+std::to_string(s.value("level",0));
      draw->AddText(ImVec2(x,p.y+font*3.7f),ink,status.c_str());
