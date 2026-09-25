@@ -78,7 +78,25 @@ struct CharacterOverview {
   DeluxeTheme::section(label);
   ImGui::Dummy(ImVec2(0,ImGui::GetFontSize()*.1f));
  }
- static bool draw(const json &p,bool can_open,bool *open_spells=nullptr,const LevelFeedback *level_up=nullptr,double now=0,bool headings=true) {
+ static float height(const json &p,float width,bool headings=true) {
+  const auto &style=ImGui::GetStyle(); const float font=ImGui::GetFontSize();
+  const float row_padding=2*style.CellPadding.y;
+  float total=std::max(ImGui::GetFrameHeight(),headings?font*1.6f:ImGui::GetFrameHeight())+row_padding;
+  total+=style.ItemSpacing.y+2*(ImGui::GetFrameHeight()+row_padding);
+  if(p.contains("stats") && !p["stats"].empty()) total+=style.ItemSpacing.y+2*font+style.ItemSpacing.y+row_padding;
+  const char *labels[]={"Gold","Armour","Speed"};
+  const int speed=p.value("speed",0);
+  const std::string values[]={std::to_string(p.value("gold",0)),std::to_string(p.value("armour",0)),(speed>=0?"+":"")+std::to_string(speed)};
+  const float cell=width/3-2*style.CellPadding.x; float metric_height=0;
+  for(int i=0;i<3;++i) {
+   const bool stacked=ImGui::CalcTextSize(labels[i]).x+ImGui::CalcTextSize(values[i].c_str()).x+font*1.4f>cell;
+   metric_height=std::max(metric_height,font*(stacked?2.8f:1.8f));
+  }
+  total+=style.ItemSpacing.y+metric_height+row_padding;
+  if(p.value("extra_moves",0)) total+=ImGui::GetTextLineHeightWithSpacing();
+  return total;
+ }
+ static bool draw(const json &p,bool can_open,const LevelFeedback *level_up=nullptr,double now=0,bool headings=true) {
   bool open=false;
   std::string identity=p.value("name","");
   if(!identity.empty()) identity+=" Â· ";
@@ -157,7 +175,6 @@ struct CharacterOverview {
    ImGui::EndTable();
   }
   if(p.value("extra_moves",0)) ImGui::Text("Extra moves: %+d",p.value("extra_moves",0));
-  StatusEffects::draw(p,open_spells,level_up?level_up->intensity(now):0);
   return open;
  }
  static float tracked_height(bool headings=true) {
@@ -181,21 +198,41 @@ struct CharacterOverview {
   ImGui::ProgressBar(0,ImVec2(-1,ImGui::GetFrameHeight()),"HP  -- / --");
   ImGui::EndDisabled();
  }
+ static int dungeon_columns(const json &p,float width) {
+  const char *labels[]={"Depth","Light","Feel",""};
+  const std::string values[]={std::to_string(p.value("depth",0)),std::to_string(p.value("light",0)),p.value("feeling","—"),display_label(p.value("floor",""))};
+  float tile_width=0;
+  for(int i=0;i<4;++i) tile_width=std::max(tile_width,ImGui::CalcTextSize(labels[i]).x+ImGui::CalcTextSize(values[i].c_str()).x+ImGui::GetFontSize()*(*labels[i]?1.4f:.8f)+2*ImGui::GetStyle().CellPadding.x+2);
+  return width>=4*tile_width?4:2;
+ }
+ static float dungeon_height(const json &p,float width,bool headings=true) {
+  const int columns=dungeon_columns(p,width);
+  const char *labels[]={"Depth","Light","Feel",""};
+  const std::string values[]={std::to_string(p.value("depth",0)),std::to_string(p.value("light",0)),p.value("feeling","—"),display_label(p.value("floor",""))};
+  const auto &style=ImGui::GetStyle();
+  const float cell=width/columns-2*style.CellPadding.x;
+  float height=headings?ImGui::GetFontSize()*1.6f+style.ItemSpacing.y:0;
+  for(int row=0;row<4;row+=columns) {
+   float line=0;
+   for(int i=row;i<row+columns;++i) {
+    const bool stacked=*labels[i] && ImGui::CalcTextSize(labels[i]).x+ImGui::CalcTextSize(values[i].c_str()).x+ImGui::GetFontSize()*1.4f>cell;
+    line=std::max(line,ImGui::GetFontSize()*(stacked?2.8f:1.8f));
+   }
+   height+=line+2*style.CellPadding.y;
+  }
+  for(const char *key:{"trap_detected","recall","descent","resting","running","repeat","unignoring"})
+   if(p.contains(key) && (p[key].is_boolean()?p[key].get<bool>():p[key].is_number() && p[key].get<int>()!=0)) height+=ImGui::GetTextLineHeightWithSpacing();
+  // The table already includes its bottom cell padding; the panel supplies
+  // equal outer padding. Extra item spacing here makes the bottom look heavy.
+  return height;
+ }
  static void dungeon(const json &p,bool headings=true) {
-  if(headings) DeluxeTheme::section("Dungeon");
+  if(headings) DeluxeTheme::section("Dungeon",false);
   const char *dungeon_labels[]={"Depth","Light","Feel",""};
   const std::string dungeon_values[]={std::to_string(p.value("depth",0)),std::to_string(p.value("light",0)),p.value("feeling","â€”"),display_label(p.value("floor",""))};
   const std::string dungeon_tips[]={"Depth: "+std::to_string(p.value("depth_feet",p.value("depth",0)*50))+" feet","",p.value("feeling_description",""),""};
-  // Match metric's label/value spacing, plus the table's cell padding.
-  // Use the widest tile so every tile stays on one line at the breakpoint.
-  float tile_width=0;
-  for(int i=0;i<4;++i) {
-   const float content=ImGui::CalcTextSize(dungeon_labels[i]).x+ImGui::CalcTextSize(dungeon_values[i].c_str()).x;
-   const float padding=ImGui::GetFontSize()*(*dungeon_labels[i]?1.4f:.8f)+2*ImGui::GetStyle().CellPadding.x+2;
-   tile_width=std::max(tile_width,content+padding);
-  }
-  const int dungeon_columns=ImGui::GetContentRegionAvail().x>=4*tile_width?4:2;
-  if(ImGui::BeginTable("Dungeon overview",dungeon_columns,ImGuiTableFlags_SizingStretchSame)) {
+  const int columns=dungeon_columns(p,ImGui::GetContentRegionAvail().x);
+  if(ImGui::BeginTable("Dungeon overview",columns,ImGuiTableFlags_SizingStretchSame)) {
    for(int i=0;i<4;++i) {
     ImGui::TableNextColumn(); metric(dungeon_labels[i],dungeon_values[i],dungeon_tips[i]);
    }

@@ -12,8 +12,8 @@
 // Layout owns geometry and panel IDs only. Gameplay and inspection state stay in UI.
 struct WorkspaceLayout {
  using Json=nlohmann::json;
- enum Panel { Dungeon,Character,Messages,Inventory,Spells,Creatures,Map,Commands,More,Target,Quickbar,DungeonDetails,TrackedCreature,Count };
- inline static constexpr const char *names[]={"Dungeon","Character","Messages","Inventory","Spells","Creatures","Map","Commands","More","Look / Target","Quickbar","Dungeon details","Tracked creature"};
+ enum Panel { Dungeon,Character,Messages,Inventory,Spells,Creatures,Map,Commands,More,Target,Quickbar,DungeonDetails,TrackedCreature,Status,Count };
+ inline static constexpr const char *names[]={"Dungeon","Character","Messages","Inventory","Spells","Creatures","Map","Commands","More","Look / Target","Quickbar","Dungeon details","Tracked creature","Status effects"};
  struct Node {
   int id=0,axis=0; float ratio=.5f; // axis: 0 tabs, 1 left/right, 2 top/bottom
   std::vector<int> tabs; int active=-1;
@@ -22,15 +22,16 @@ struct WorkspaceLayout {
  struct Floating { Node node; float x=.15f,y=.15f,w=.36f,h=.4f; };
  struct Detached { bool open=false; int x=0,y=0,w=560,h=640; bool placed=false; };
  std::array<Detached,Count> detached{};
- bool native_windows_available=false;
- static bool detachable(int p) { return p==Inventory || p==Messages || p==Map || p==Character || p==DungeonDetails || p==TrackedCreature; }
+ bool native_windows_available=false,measuring_drop=false;
+ static bool detachable(int p) { return p==Inventory || p==Messages || p==Map || p==Character || p==DungeonDetails || p==TrackedCreature || p==Status; }
  void detach(int p,bool open) { if(!detachable(p)) return; if(open || contains(p)) reveal(p); detached[p].open=open; dirty=true; }
  Node root; std::vector<Floating> floating;
  Json saved=Json::object(),before;
  bool editing=false,dirty=false,dividers_locked=true,floating_locked=false; int next_id=1;
  std::array<bool,Count> panel_headings=[] { std::array<bool,Count> values{}; values.fill(true); return values; }();
- static bool has_heading(int p) { return p==Character || p==Messages || p==DungeonDetails || p==TrackedCreature; }
- bool heading(int p) const { return panel_headings[p]; }
+ static bool has_heading(int p) { return p==Messages || p==DungeonDetails || p==TrackedCreature || p==Status; }
+ bool heading(int p) const { return p==Character || panel_headings[p]; }
+ std::function<float(int,float)> compact_height;
  float tracker_content_height=0;
  float quickbar_content_height=0; // Supplied by the quickbar renderer, in current UI pixels.
  char save_name[65]{};
@@ -38,7 +39,7 @@ struct WorkspaceLayout {
  Move pending;
  Node leaf(std::initializer_list<int> tabs) { Node n; n.id=next_id++; n.tabs=tabs; if(!n.tabs.empty()) n.active=n.tabs[0]; return n; }
  Node split(int axis,float ratio,Node a,Node b) { Node n; n.id=next_id++; n.axis=axis; n.ratio=ratio; n.children={std::move(a),std::move(b)}; return n; }
- Node overview() { return split(2,.54f,leaf({Character}),split(2,.56f,leaf({DungeonDetails}),leaf({TrackedCreature}))); }
+ Node overview() { return split(2,.54f,split(2,.78f,leaf({Character}),leaf({Status})),split(2,.56f,leaf({DungeonDetails}),leaf({TrackedCreature}))); }
  WorkspaceLayout() { preset(0); dirty=false; }
  void preset(int index) {
   next_id=1; floating.clear(); detached={};
@@ -56,7 +57,7 @@ struct WorkspaceLayout {
   } else {
    auto tools=leaf({Inventory,Spells,Creatures,Map,Commands,More,Target});
    auto play=split(2,.75f,split(2,.88f,leaf({Dungeon}),leaf({Quickbar})),leaf({Messages}));
-   auto side=split(2,.60f,overview(),std::move(tools));
+   auto side=split(2,.68f,overview(),std::move(tools));
    root=split(1,.69f,std::move(play),std::move(side));
   }
   dirty=true;
@@ -67,13 +68,47 @@ struct WorkspaceLayout {
   return j;
  }
  Json arrangement() const {
-  Json j={{"version",3},{"root",encode(root)},{"floating",Json::array()}};
+  Json j={{"version",4},{"root",encode(root)},{"floating",Json::array()}};
   for(const auto &f:floating) j["floating"].push_back({{"node",encode(f.node)},{"x",f.x},{"y",f.y},{"w",f.w},{"h",f.h}});
   j["detached"]=Json::array();
   for(int p=0;p<Count;++p) if(detached[p].placed || detached[p].open) { const auto &d=detached[p]; j["detached"].push_back({{"panel",p},{"open",d.open},{"placed",d.placed},{"x",d.x},{"y",d.y},{"w",d.w},{"h",d.h}}); }
   return j;
  }
- Json serialize() const { return {{"version",3},{"panel_headings",panel_headings},{"dividers_locked",dividers_locked},{"floating_locked",floating_locked},{"current",editing?before:arrangement()},{"saved",saved}}; }
+ Json serialize() const { return {{"version",4},{"panel_headings",editing && history_ready?edit_initial.headings:panel_headings},{"dividers_locked",editing && history_ready?edit_initial.dividers_locked:dividers_locked},{"floating_locked",editing && history_ready?edit_initial.floating_locked:floating_locked},{"current",editing?before:arrangement()},{"saved",saved}}; }
+ struct EditSnapshot {
+  Node root; std::vector<Floating> floating; std::array<Detached,Count> detached;
+  std::array<bool,Count> headings; bool dividers_locked,floating_locked; int next_id; Json key;
+ };
+ std::vector<EditSnapshot> undo_steps,redo_steps;
+ EditSnapshot edit_initial,edit_checkpoint;
+ bool history_ready=false;
+ Json edit_key() const { auto key=arrangement(); key["headings"]=panel_headings; key["dividers_locked"]=dividers_locked; key["floating_locked"]=floating_locked; return key; }
+ EditSnapshot snapshot() const { return {root,floating,detached,panel_headings,dividers_locked,floating_locked,next_id,edit_key()}; }
+ void apply_snapshot(const EditSnapshot &state) {
+  root=state.root; floating=state.floating; detached=state.detached; panel_headings=state.headings;
+  dividers_locked=state.dividers_locked; floating_locked=state.floating_locked; next_id=state.next_id; pending={}; dirty=true;
+ }
+ void begin_edit() {
+  before=arrangement(); editing=true; undo_steps.clear(); redo_steps.clear();
+  edit_initial=edit_checkpoint=snapshot(); history_ready=true;
+ }
+ void record_edit() {
+  if(!editing || !history_ready || edit_key()==edit_checkpoint.key) return;
+  undo_steps.push_back(edit_checkpoint); if(undo_steps.size()>64) undo_steps.erase(undo_steps.begin());
+  edit_checkpoint=snapshot(); redo_steps.clear();
+ }
+ void undo_edit() {
+  record_edit(); if(undo_steps.empty()) return;
+  redo_steps.push_back(edit_checkpoint); apply_snapshot(undo_steps.back()); undo_steps.pop_back(); edit_checkpoint=snapshot();
+ }
+ void redo_edit() {
+  if(redo_steps.empty()) return;
+  undo_steps.push_back(edit_checkpoint); apply_snapshot(redo_steps.back()); redo_steps.pop_back(); edit_checkpoint=snapshot();
+ }
+ void finish_edit(bool cancel=false) {
+  if(cancel) { if(history_ready) apply_snapshot(edit_initial); else restore(before); }
+  editing=false; dirty=true; history_ready=false; undo_steps.clear(); redo_steps.clear();
+ }
  // Bounded parser rejects duplicates, invalid panels and unreasonable trees.
  bool restore(const Json &j) {
   try {
@@ -139,16 +174,27 @@ struct WorkspaceLayout {
     };
     if(!migrate_tracker(root)) for(auto &f:floating) if(migrate_tracker(f.node)) break;
    }
+   if(j.value("version",1)<4 && !contains(Status)) {
+    std::function<bool(Node&)> migrate_status=[&](Node &n) {
+     if(!n.axis && contains(n,Character)) {
+      Node old=std::move(n); n=split(2,.78f,std::move(old),leaf({Status})); return true;
+     }
+     for(auto &child:n.children) if(migrate_status(child)) return true;
+     return false;
+    };
+    if(!migrate_status(root)) for(auto &f:floating) if(migrate_status(f.node)) break;
+   }
    return true;
   } catch(...) { return false; }
  }
  void load(const Json &j) {
-  if(!j.is_object() || j.value("version",0)<1 || j.value("version",0)>3) return;
+  if(!j.is_object() || j.value("version",0)<1 || j.value("version",0)>4) return;
   panel_headings.fill(j.contains("show_headings") && j["show_headings"].is_boolean()?j["show_headings"].get<bool>():true);
   if(j.contains("panel_headings") && j["panel_headings"].is_array()) {
    const auto &values=j["panel_headings"];
    for(int p=0;p<Count && p<int(values.size());++p) if(values[p].is_boolean()) panel_headings[p]=values[p].get<bool>();
   }
+  panel_headings[Character]=true; // Identity is information, not an optional heading.
   if(j.contains("floating_locked") && j["floating_locked"].is_boolean()) floating_locked=j["floating_locked"].get<bool>();
   if(j.contains("dividers_locked") && j["dividers_locked"].is_boolean()) dividers_locked=j["dividers_locked"].get<bool>();
   if(j.contains("current")) restore(j["current"]);
@@ -219,32 +265,16 @@ struct WorkspaceLayout {
   ImGui::EndDisabled();
   if(ImGui::BeginPopup("Layout menu")) {
    if(ImGui::MenuItem(editing?"Finish customizing":"Customize layout")) {
-    if(editing) { editing=false; dirty=true; }
-    else { before=arrangement(); editing=true; }
+    if(editing) finish_edit(); else begin_edit();
    }
-   if(ImGui::BeginMenu("Panel headings")) {
-    for(int p=0;p<Count;++p) if(has_heading(p))
-     if(ImGui::MenuItem(names[p],nullptr,panel_headings[p])) { panel_headings[p]=!panel_headings[p]; dirty=true; }
-    ImGui::EndMenu();
+   if(editing) {
+    if(ImGui::MenuItem("Undo","Ctrl+Z",false,!undo_steps.empty())) undo_edit();
+    if(ImGui::MenuItem("Redo","Ctrl+Y",false,!redo_steps.empty())) redo_edit();
+    if(ImGui::MenuItem("Cancel customization")) finish_edit(true);
    }
-   if(ImGui::MenuItem("Lock dividers",nullptr,dividers_locked)) { dividers_locked=!dividers_locked; dirty=true; }
-   if(ImGui::IsItemHovered()) ImGui::SetTooltip("Unlock to resize panel dividers during normal play. Customization allows resizing where panel minimum sizes and fixed heights permit.");
-   if(ImGui::MenuItem("Lock floating panels",nullptr,floating_locked)) { floating_locked=!floating_locked; dirty=true; }
-   if(ImGui::IsItemHovered()) ImGui::SetTooltip("Floating panels can be dragged by their title bar during play unless locked. Customization always allows moving them.");
-   ImGui::SeparatorText("Starting layouts");
-   const char *presets[]={"Classic","Dungeon first","Command centre"};
-   const char *descriptions[]={"Dungeon, messages and the familiar tabbed sidebar.","Large dungeon, character overview and messages. Optional panels hidden.","Separate inventory, map and messages, plus spells when available."};
-   for(int i=0;i<3;++i) {
-    if(ImGui::MenuItem(presets[i])) preset(i);
-    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",descriptions[i]);
-   }
-   if(!saved.empty()) {
-    ImGui::SeparatorText("Saved layouts");
-    for(auto it=saved.begin();it!=saved.end();++it) if(ImGui::MenuItem(it.key().c_str())) { restore(it.value()); dirty=true; }
-   }
-   ImGui::Separator();
-   if(ImGui::BeginMenu("Panels")) {
-    ImGui::TextDisabled("Checked panels are included. Click to show or hide.");
+   ImGui::SeparatorText("Panels");
+   if(ImGui::BeginMenu("Show / hide panels")) {
+    ImGui::TextDisabled("Checked panels are visible in your workspace.");
     ImGui::Separator();
     for(int p=Character;p<Count;++p) {
      const bool usable=enabled(p);
@@ -253,24 +283,57 @@ struct WorkspaceLayout {
     }
     ImGui::EndMenu();
    }
-   if(native_windows_available && ImGui::BeginMenu("Detached windows",!editing)) {
+   if(ImGui::BeginMenu("Panel headings")) {
+    for(int p=0;p<Count;++p) if(has_heading(p))
+     if(ImGui::MenuItem(names[p],nullptr,panel_headings[p])) { panel_headings[p]=!panel_headings[p]; dirty=true; }
+    ImGui::EndMenu();
+   }
+   if(native_windows_available && ImGui::BeginMenu("Separate windows",!editing)) {
+    ImGui::TextDisabled("Checked panels open in their own window.");
+    ImGui::Separator();
     for(int p=0;p<Count;++p) if(detachable(p) && enabled(p))
      if(ImGui::MenuItem(names[p],nullptr,detached[p].open)) detach(p,!detached[p].open);
+    const bool any=std::any_of(detached.begin(),detached.end(),[](const Detached &d) { return d.open; });
     ImGui::Separator();
-    if(ImGui::MenuItem("Return all panels")) { for(auto &d:detached) d.open=false; dirty=true; }
+    if(ImGui::MenuItem("Return all to main window",nullptr,false,any)) { for(auto &d:detached) d.open=false; dirty=true; }
     ImGui::EndMenu();
    }
-   ImGui::InputTextWithHint("##layout name","Layout name",save_name,sizeof(save_name));
-   ImGui::BeginDisabled(save_name[0]==0 || (saved.size()>=32 && !saved.contains(save_name)));
-   if(ImGui::Button("Save named layout")) { saved[save_name]=arrangement(); dirty=true; save_name[0]=0; }
-   ImGui::EndDisabled();
-   if(ImGui::BeginMenu("Delete saved layout",!saved.empty())) {
-    std::string erase;
-    for(auto it=saved.begin();it!=saved.end();++it) if(ImGui::MenuItem(it.key().c_str())) erase=it.key();
-    if(!erase.empty()) { saved.erase(erase); dirty=true; }
+   if(native_windows_available && editing && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Finish customizing before opening separate windows.");
+   ImGui::SeparatorText("Movement during play");
+   if(ImGui::MenuItem("Lock dividers",nullptr,dividers_locked)) { dividers_locked=!dividers_locked; dirty=true; }
+   if(ImGui::IsItemHovered()) ImGui::SetTooltip("Prevent accidental divider resizing during play. Customization always allows resizing where space permits.");
+   if(ImGui::MenuItem("Lock floating panels",nullptr,floating_locked)) { floating_locked=!floating_locked; dirty=true; }
+   if(ImGui::IsItemHovered()) ImGui::SetTooltip("Prevent dragging panels floated inside the main window. Customization always allows moving them.");
+   ImGui::SeparatorText("Arrangements");
+   if(ImGui::BeginMenu("Starting layouts")) {
+    const char *presets[]={"Classic","Dungeon first","Command centre"};
+    const char *descriptions[]={"Restore the classic dungeon, messages and tabbed sidebar.","Large dungeon, character overview and messages. Optional panels hidden.","Separate inventory, map and messages, plus spells when available."};
+    for(int i=0;i<3;++i) {
+     if(ImGui::MenuItem(presets[i])) preset(i);
+     if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",descriptions[i]);
+    }
     ImGui::EndMenu();
    }
-   if(ImGui::MenuItem("Reset layout")) preset(0);
+   if(ImGui::BeginMenu("Saved layouts")) {
+    if(saved.empty()) ImGui::TextDisabled("No saved layouts yet.");
+    else {
+     ImGui::TextDisabled("Choose a layout to restore it.");
+     for(auto it=saved.begin();it!=saved.end();++it) if(ImGui::MenuItem(it.key().c_str())) { restore(it.value()); dirty=true; }
+    }
+    ImGui::SeparatorText("Save current arrangement");
+    ImGui::SetNextItemWidth(ImGui::GetFontSize()*18);
+    ImGui::InputTextWithHint("##layout name","Layout name",save_name,sizeof(save_name));
+    ImGui::BeginDisabled(save_name[0]==0 || (saved.size()>=32 && !saved.contains(save_name)));
+    if(ImGui::Button(saved.contains(save_name)?"Replace saved layout":"Save layout")) { saved[save_name]=arrangement(); dirty=true; save_name[0]=0; }
+    ImGui::EndDisabled();
+    if(ImGui::BeginMenu("Delete saved layout",!saved.empty())) {
+     std::string erase;
+     for(auto it=saved.begin();it!=saved.end();++it) if(ImGui::MenuItem(it.key().c_str())) erase=it.key();
+     if(!erase.empty()) { saved.erase(erase); dirty=true; }
+     ImGui::EndMenu();
+    }
+    ImGui::EndMenu();
+   }
    ImGui::EndPopup();
   }
  }
@@ -285,48 +348,104 @@ struct WorkspaceLayout {
    ImGui::SetDragDropPayload("DELUXE_PANEL",&panel,sizeof(panel)); ImGui::TextUnformatted(names[panel]); ImGui::EndDragDropSource();
   }
  }
- void target(int id,int edge) {
+ struct DockPreview { bool active=false; ImVec2 pos,size; std::string label; } dock_preview;
+ ImVec2 workspace_pos,workspace_size,floating_preview_pos,floating_preview_size;
+ bool measure_panel(const Node &n,ImVec2 pos,ImVec2 size,int panel,const Enabled &enabled,ImVec2 &out_pos,ImVec2 &out_size) const {
+  if(!visible(n,enabled) || !contains(n,panel)) return false;
+  if(!n.axis) {
+   if(float fitted=fitted_height(n,enabled,size.x); fitted>0) size.y=std::min(size.y,fitted);
+   out_pos=pos; out_size=size; return true;
+  }
+  const bool a=visible(n.children[0],enabled),b=visible(n.children[1],enabled);
+  if(!a || !b) return measure_panel(n.children[a?0:1],pos,size,panel,enabled,out_pos,out_size);
+  const float usable=std::max(2.f,(n.axis==1?size.x:size.y)-6);
+  auto ma=minimum(n.children[0],enabled,n.axis==1?size.x*n.ratio:size.x),mb=minimum(n.children[1],enabled,n.axis==1?size.x*(1-n.ratio):size.x);
+  float lower=n.axis==1?ma.x:ma.y,upper=n.axis==1?mb.x:mb.y;
+  if(lower+upper>usable) { float fit=usable/(lower+upper); lower*=fit; upper*=fit; }
+  upper=std::max(lower,usable-upper);
+  const float fa=n.axis==2?fitted_height(n.children[0],enabled,size.x):0,fb=n.axis==2?fitted_height(n.children[1],enabled,size.x):0;
+  const float first=std::clamp(fa>0?fa:fb>0?usable-fb:usable*n.ratio,lower,upper);
+  const int child=contains(n.children[0],panel)?0:1;
+  if(n.axis==1) { if(child) pos.x+=first+6; size.x=child?usable-first:first; }
+  else { if(child) pos.y+=first+6; size.y=child?usable-first:first; }
+  return measure_panel(n.children[child],pos,size,panel,enabled,out_pos,out_size);
+ }
+ void target(int id,int edge,ImVec2 pos,ImVec2 size,const Enabled &enabled) {
   if(ImGui::BeginDragDropTarget()) {
-   if(const auto *p=ImGui::AcceptDragDropPayload("DELUXE_PANEL")) pending={*static_cast<const int*>(p->Data),id,edge};
+   if(const auto *payload=ImGui::AcceptDragDropPayload("DELUXE_PANEL",ImGuiDragDropFlags_AcceptBeforeDelivery|ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
+    const int panel=*static_cast<const int*>(payload->Data);
+    auto *destination=find(id);
+    const std::string destination_name=destination && destination->active>=0?names[destination->active]:"panel";
+    WorkspaceLayout planned; planned.root=root; planned.floating=floating; planned.detached=detached; planned.next_id=next_id;
+    planned.compact_height=compact_height; planned.editing=editing; planned.measuring_drop=true; planned.quickbar_content_height=quickbar_content_height; planned.tracker_content_height=tracker_content_height;
+    const Move action{panel,id,edge};
+    if(planned.move(action)) {
+     // Measure the proposed tree after removing the source, so its vacated
+     // space and fixed-height panels are included in the landing preview.
+     ImVec2 landing_pos=pos,landing_size=size;
+     if(!planned.measure_panel(planned.root,workspace_pos,workspace_size,panel,enabled,landing_pos,landing_size)) {
+      for(const auto &f:planned.floating) if(contains(f.node,panel)) {
+       // Floating destinations retain their window footprint.
+       planned.measure_panel(f.node,floating_preview_pos,floating_preview_size,panel,enabled,landing_pos,landing_size); break;
+      }
+     }
+     static const char *verbs[]={"Stack with ","Place left of ","Place right of ","Place above ","Place below "};
+     dock_preview={true,landing_pos,landing_size,std::string(verbs[edge])+destination_name};
+     if(payload->IsDelivery()) pending=action;
+    } else if(payload->IsPreview()) ImGui::SetTooltip("This panel cannot be docked here. The dungeon must stay visible.");
+   }
    ImGui::EndDragDropTarget();
   }
  }
+ void draw_dock_preview() const {
+  if(!dock_preview.active) return;
+  const auto &p=dock_preview; auto *d=ImGui::GetForegroundDrawList();
+  ImVec4 accent=ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive); accent.w=.3f;
+  const ImVec2 end(p.pos.x+p.size.x,p.pos.y+p.size.y);
+  d->AddRectFilled(p.pos,end,ImGui::GetColorU32(accent),4);
+  accent.w=1; d->AddRect(p.pos,end,ImGui::GetColorU32(accent),4,0,2);
+  const float pad=ImGui::GetFontSize()*.5f,wrap=std::max(1.f,p.size.x-4*pad);
+  const ImVec2 text=ImGui::CalcTextSize(p.label.c_str(),nullptr,false,wrap);
+  const ImVec2 label(p.pos.x+pad,p.pos.y+pad);
+  d->AddRectFilled(label,{label.x+text.x+2*pad,label.y+text.y+2*pad},ImGui::GetColorU32(ImGuiCol_WindowBg),3);
+  d->AddText(ImGui::GetFont(),ImGui::GetFontSize(),{label.x+pad,label.y+pad},ImGui::GetColorU32(ImGuiCol_Text),p.label.c_str(),nullptr,wrap);
+ }
  // Dedicated compact panels have a natural height, not a share of a split.
  // Mixed tab groups remain flexible because their other panels need the space.
- float fitted_height(const Node &n,const Enabled &enabled) const {
+ float fitted_height(const Node &n,const Enabled &enabled,float width=0) const {
   if(!visible(n,enabled)) return 0;
   if(n.axis) {
    bool a=visible(n.children[0],enabled),b=visible(n.children[1],enabled);
-   if(!a || !b) return fitted_height(n.children[a?0:1],enabled);
-   float ah=fitted_height(n.children[0],enabled),bh=fitted_height(n.children[1],enabled);
+   if(!a || !b) return fitted_height(n.children[a?0:1],enabled,width);
+   float ah=fitted_height(n.children[0],enabled,n.axis==1?width*n.ratio:width),bh=fitted_height(n.children[1],enabled,n.axis==1?width*(1-n.ratio):width);
    return ah>0 && bh>0?(n.axis==2?ah+bh+6:std::max(ah,bh)):0;
   }
   int count=0,panel=-1;
   for(int p:n.tabs) if(enabled(p)) { ++count; panel=p; }
   if(count!=1) return 0;
-  const float content=panel==Quickbar?quickbar_content_height:panel==TrackedCreature?tracker_content_height:0;
+  const float content=panel==Quickbar?quickbar_content_height:panel==TrackedCreature?tracker_content_height:compact_height?compact_height(panel,std::max(1.f,(width>0?width:22*ImGui::GetFontSize())-2*ImGui::GetStyle().WindowPadding.x)):0;
   if(content<=0) return 0;
   float height=content+2*ImGui::GetStyle().WindowPadding.y;
   if(editing) {
    height+=ImGui::GetFrameHeightWithSpacing();
-   if(ImGui::GetDragDropPayload()) height+=ImGui::GetTextLineHeightWithSpacing()+ImGui::GetFrameHeightWithSpacing();
+   if(ImGui::GetDragDropPayload() && !measuring_drop) height+=ImGui::GetTextLineHeightWithSpacing()+ImGui::GetFrameHeightWithSpacing();
   }
   return height;
  }
- ImVec2 minimum(const Node &n,const Enabled &enabled) const {
+ ImVec2 minimum(const Node &n,const Enabled &enabled,float width=0) const {
   if(!visible(n,enabled)) return {0,0};
   if(n.axis) {
-   auto a=minimum(n.children[0],enabled),b=minimum(n.children[1],enabled);
+   auto a=minimum(n.children[0],enabled,n.axis==1?width*n.ratio:width),b=minimum(n.children[1],enabled,n.axis==1?width*(1-n.ratio):width);
    if(a.x==0) return b; if(b.x==0) return a;
    return n.axis==1?ImVec2(a.x+b.x+6,std::max(a.y,b.y)):ImVec2(std::max(a.x,b.x),a.y+b.y+6);
   }
-  if(float height=fitted_height(n,enabled); height>0) return {22*ImGui::GetFontSize(),height};
-  float width=10,height=5;
+  if(float height=fitted_height(n,enabled,width); height>0) return {22*ImGui::GetFontSize(),height};
+  float width_units=10,height=5;
   for(int p:n.tabs) if(enabled(p)) {
-   width=std::max(width,p==Character?20.f:p==Dungeon||p==Quickbar?22.f:p==Inventory||p==Spells?18.f:14.f);
+   width_units=std::max(width_units,p==Character?20.f:p==Dungeon||p==Quickbar?22.f:p==Inventory||p==Spells?18.f:14.f);
    height=std::max(height,p==Dungeon?10.f:p==Character?12.f:p==Inventory||p==Spells?8.f:5.f);
   }
-  return {width*ImGui::GetFontSize(),height*ImGui::GetFontSize()+(editing?ImGui::GetFrameHeightWithSpacing():0)};
+  return {width_units*ImGui::GetFontSize(),height*ImGui::GetFontSize()+(editing?ImGui::GetFrameHeightWithSpacing():0)};
  }
  // Ancestor geometry lets a divider push a compact panel through the stack
  // without stretching it or changing unrelated siblings' heights.
@@ -356,13 +475,13 @@ struct WorkspaceLayout {
    const bool a=visible(n.children[0],enabled),b=visible(n.children[1],enabled);
    if(!a||!b) { draw_node(n.children[a?0:1],pos,size,enabled,draw); return; }
    const float gap=6.f,extent=n.axis==1?size.x:size.y,usable=std::max(2.f,extent-gap);
-   const auto min_a=minimum(n.children[0],enabled),min_b=minimum(n.children[1],enabled);
+   const auto min_a=minimum(n.children[0],enabled,n.axis==1?size.x*n.ratio:size.x),min_b=minimum(n.children[1],enabled,n.axis==1?size.x*(1-n.ratio):size.x);
    float lower=n.axis==1?min_a.x:min_a.y,upper=n.axis==1?min_b.x:min_b.y;
    const bool space_limited=lower+upper>=usable-.5f;
    if(lower+upper>usable) { const float fit=usable/(lower+upper); lower*=fit; upper*=fit; }
    upper=std::max(lower,usable-upper);
-   const float fixed_a=n.axis==2?fitted_height(n.children[0],enabled):0;
-   const float fixed_b=n.axis==2?fitted_height(n.children[1],enabled):0;
+   const float fixed_a=n.axis==2?fitted_height(n.children[0],enabled,size.x):0;
+   const float fixed_b=n.axis==2?fitted_height(n.children[1],enabled,size.x):0;
    const bool fitted_split=fixed_a>0 || fixed_b>0;
    const float desired=fixed_a>0?fixed_a:fixed_b>0?usable-fixed_b:usable*n.ratio;
    const float first=std::clamp(desired,lower,upper);
@@ -412,7 +531,7 @@ struct WorkspaceLayout {
    }
    ImGui::PopID(); return;
   }
-  if(float height=fitted_height(n,enabled); height>0) size.y=std::min(size.y,height);
+  if(float height=fitted_height(n,enabled,size.x); height>0) size.y=std::min(size.y,height);
   if(trace_panel) for(int p:n.tabs) if(enabled(p)) trace_panel(p,pos,size);
   ImGui::SetCursorScreenPos(pos); ImGui::PushID(n.id);
   ImGui::BeginChild("Pane",size,ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
@@ -441,29 +560,45 @@ struct WorkspaceLayout {
    const char *labels[]={"Tabs","Left","Right","Above","Below"};
    for(int e=0;e<5;++e) {
     if(e) ImGui::SameLine();
-    ImGui::SmallButton(labels[e]); target(n.id,e);
+    ImGui::SmallButton(labels[e]); target(n.id,e,pos,size,enabled);
    }
   }
   // Gameplay controls are disabled during editing; layout controls remain active.
-  ImGui::BeginChild("Content",ImVec2(0,0),ImGuiChildFlags_None,n.active==Dungeon||n.active==Map||n.active==Quickbar||n.active==TrackedCreature?ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse:ImGuiWindowFlags_None);
+  ImGui::BeginChild("Content",ImVec2(0,0),ImGuiChildFlags_None,n.active==Dungeon||n.active==Map||n.active==Quickbar||n.active==TrackedCreature||n.active==DungeonDetails||n.active==Character||n.active==Status?ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse:ImGuiWindowFlags_None);
   ImGui::BeginDisabled(editing); draw(n.active); ImGui::EndDisabled();
   ImGui::EndChild(); ImGui::EndChild(); ImGui::PopID();
  }
  void draw(const Enabled &enabled,const std::function<void(int)> &panel) {
+  if(editing && !history_ready) { edit_initial=edit_checkpoint=snapshot(); history_ready=true; undo_steps.clear(); redo_steps.clear(); }
+  if(editing && !ImGui::IsMouseDown(0) && !ImGui::GetDragDropPayload()) {
+   record_edit();
+   if(!ImGui::GetIO().WantTextInput && ImGui::GetIO().KeyCtrl) {
+    if(ImGui::IsKeyPressed(ImGuiKey_Z,false)) { if(ImGui::GetIO().KeyShift) redo_edit(); else undo_edit(); }
+    else if(ImGui::IsKeyPressed(ImGuiKey_Y,false)) redo_edit();
+   }
+  }
   if(editing) {
    ImGui::TextColored(ImVec4(.5f,.9f,.7f,1),"LAYOUT EDITOR"); ImGui::SameLine();
-   if(ImGui::Button("Done")) { editing=false; dirty=true; }
-   ImGui::SameLine(); if(ImGui::Button("Cancel")) { restore(before); editing=false; dirty=true; }
+   if(ImGui::Button("Done")) finish_edit();
+   ImGui::SameLine(); if(ImGui::Button("Cancel")) finish_edit(true);
+   ImGui::SameLine(); ImGui::BeginDisabled(undo_steps.empty());
+   if(ImGui::Button("Undo")) undo_edit();
+   if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Undo the last layout change (Ctrl+Z)");
+   ImGui::EndDisabled(); ImGui::SameLine(); ImGui::BeginDisabled(redo_steps.empty());
+   if(ImGui::Button("Redo")) redo_edit();
+   if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Redo the last undone change (Ctrl+Y or Ctrl+Shift+Z)");
+   ImGui::EndDisabled();
    ImGui::TextWrapped("Drag panel tabs onto docking guides. Drag dividers to resize. Right-click a tab to float or hide it. Use Layout to bring panels back.");
   }
   const ImVec2 pos=ImGui::GetCursorScreenPos(),size=ImGui::GetContentRegionAvail();
   if(size.x<4||size.y<4) return;
+  workspace_pos=pos; workspace_size=size; dock_preview.active=false;
   draw_node(root,pos,size,enabled,panel);
   for(auto &f:floating) {
    if(!visible(f.node,enabled)) continue;
    float w=std::clamp(f.w*size.x,std::min(size.x,ImGui::GetFontSize()*16),size.x);
    float h=std::clamp(f.h*size.y,std::min(size.y,ImGui::GetFontSize()*8),size.y);
-   const float fitted=fitted_height(f.node,enabled);
+   const float fitted=fitted_height(f.node,enabled,w);
    if(fitted>0) h=std::min(size.y,fitted+2*ImGui::GetStyle().WindowPadding.y+
     (editing||!floating_locked?ImGui::GetFrameHeightWithSpacing():0)+(editing?ImGui::GetFrameHeightWithSpacing():0));
    float x=std::clamp(f.x*size.x,0.f,size.x-w),y=std::clamp(f.y*size.y,0.f,size.y-h);
@@ -480,6 +615,7 @@ struct WorkspaceLayout {
    }
    auto content_pos=ImGui::GetCursorScreenPos(),content_size=ImGui::GetContentRegionAvail();
    if(editing) content_size.y=std::max(1.f,content_size.y-ImGui::GetFrameHeightWithSpacing());
+   floating_preview_pos=content_pos; floating_preview_size=content_size;
    draw_node(f.node,content_pos,content_size,enabled,panel);
    if(editing) {
     const char *resize_label=fitted>0?"Width":"Resize";
@@ -489,9 +625,11 @@ struct WorkspaceLayout {
     if(ImGui::IsItemActive()) { w=std::clamp(w+ImGui::GetIO().MouseDelta.x,std::min(size.x-x,ImGui::GetFontSize()*16),size.x-x); if(fitted<=0) h=std::clamp(h+ImGui::GetIO().MouseDelta.y,std::min(size.y-y,ImGui::GetFontSize()*8),size.y-y); dirty=true; }
    }
    ImGui::EndChild(); ImGui::PopID();
-   f.x=x/size.x; f.y=y/size.y; f.w=w/size.x; f.h=h/size.y;
+   f.x=x/size.x; f.y=y/size.y; f.w=w/size.x; if(fitted<=0) f.h=h/size.y;
   }
   ImGui::SetCursorScreenPos(pos); ImGui::Dummy(size);
   if(pending.panel>=0) { auto action=pending; pending={}; move(action); }
+  if(editing && !ImGui::IsMouseDown(0) && !ImGui::GetDragDropPayload()) record_edit();
+  draw_dock_preview();
  }
 };

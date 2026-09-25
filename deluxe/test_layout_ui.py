@@ -1,5 +1,6 @@
 """Offscreen mouse interaction checks. Does not open or control desktop windows."""
 import argparse
+import copy
 import json
 from pathlib import Path
 import subprocess
@@ -50,10 +51,14 @@ def main():
         return json.loads(Path(str(target) + ".json").read_text())
 
     original = run("original")
+    probe = run("drag-guides", frames=7, input=drag([60, 790], [500, 400]))
+    stack_point = [probe["panel_rects"]["3"]["x"] + 38, probe["panel_rects"]["3"]["y"] + 72]
+    normal = run("normal", layout_edit=False)
+    spells_point = [normal["panel_rects"]["3"]["x"] + 158, normal["panel_rects"]["3"]["y"] + 23]
     docked = run("dock-right", input=drag([60, 790], [1260, 168]))
     assert canonical(docked["root"]) != canonical(original["root"])
     assert leaf(docked["root"], 2) and not docked["floating"]
-    stacked = run("stack-tabs", input=drag([60, 790], [1140, 741]))
+    stacked = run("stack-tabs", input=drag([60, 790], stack_point))
     assert 2 in leaf(stacked["root"], 3)["tabs"], "Message drop should stack with Inventory"
     moved = run("move-float", layout_float=True, input=drag([500, 251], [650, 325]))
     assert moved["floating"][0]["x"] > .20 and moved["floating"][0]["y"] > .20
@@ -67,7 +72,7 @@ def main():
                     [{"frame": 8, "mouse": [242, 53]}, {"frame": 9, "down": True}, {"frame": 10, "down": False}])
     assert canonical(cancelled["root"]) == canonical(original["root"]), "Cancel must restore geometry"
     switched = run("switch-tab", layout_edit=False, input=[
-        {"frame": 2, "mouse": [1260, 638]}, {"frame": 3, "down": True}, {"frame": 4, "down": False}])
+        {"frame": 2, "mouse": spells_point}, {"frame": 3, "down": True}, {"frame": 4, "down": False}])
     assert leaf(switched["root"], 3)["active"] == 5, "Locked tabs must remain selectable"
     unlocked = run("unlocked", layout_edit=False, layout_dividers_locked=False,
                    input=drag([1098, 400], [980, 400]))
@@ -92,13 +97,35 @@ def main():
         assert abs(after[str(below)]["h"] - before[str(below)]["h"] + shift) < 1, "Opposite flexible panel yields the same space"
         return result
 
-    pushed = check_push("push-tracker-down", 12, 11, 3, original, 60)
-    assert abs(pushed["panel_rects"]["1"]["h"] - original["panel_rects"]["1"]["h"]) < 1, "Character height must not change"
-    check_push("push-tracker-up", 12, 11, 3, pushed, -40)
+    tracker_layout = copy.deepcopy(original)
+    leaf(tracker_layout["root"], 8)["tabs"].remove(8)
+    leaf(tracker_layout["root"], 11)["tabs"] = [8]
+    leaf(tracker_layout["root"], 8)["active"] = 8
+    tracker_original = run("tracker-flexible-neighbour", layout={"version": 4, "current": tracker_layout})
+    pushed = check_push("push-tracker-down", 12, 8, 3, tracker_original, 60)
+    assert abs(pushed["panel_rects"]["1"]["h"] - tracker_original["panel_rects"]["1"]["h"]) < 1, "Character height must not change"
+    check_push("push-tracker-up", 12, 8, 3, pushed, -40)
     check_push("push-quickbar-down", 10, 0, 2, original, 40)
-    limit = check_push("push-tracker-limit", 12, 11, 3, original, 10000)
+    limit = check_push("push-tracker-limit", 12, 8, 3, tracker_original, 10000)
     assert limit["panel_rects"]["3"]["h"] >= 8 * 18, "Inventory must retain its minimum height"
-    print("Fifteen offscreen layout interaction checks passed")
+    assert split["undo_count"] == 1, "A complete divider drag must be one undo step"
+    undo = run("undo-docking", frames=14, input=drag([60, 790], [1260, 168]) + [
+        {"frame": 9, "mouse": [312, 53]}, {"frame": 10, "down": True}, {"frame": 11, "down": False}])
+    assert canonical(undo["root"]) == canonical(original["root"]), "Undo button restores the previous docking"
+    redo = run("redo-docking", frames=20, input=drag([60, 790], [1260, 168]) + [
+        {"frame": 9, "mouse": [312, 53]}, {"frame": 10, "down": True}, {"frame": 11, "down": False},
+        {"frame": 14, "mouse": [365, 53]}, {"frame": 15, "down": True}, {"frame": 16, "down": False}])
+    assert canonical(redo["root"]) == canonical(docked["root"]), "Redo button reapplies the docking"
+    for name, destination, delivered, label in [
+            ("preview-right", [1260, 168], docked, "Place right of Character"),
+            ("preview-stack", stack_point, stacked, "Stack with Inventory")]:
+        preview = run(name, frames=7, input=drag([60, 790], destination))
+        hint = preview["dock_preview"]
+        assert hint["active"] and hint["label"] == label, "Docking hint must describe the proposed action"
+        landed = delivered["panel_rects"]["2"]
+        assert all(abs(hint[k] - landed[k]) < 2 for k in ("x", "y", "w", "h")), "Preview must match the delivered panel bounds"
+        assert canonical(preview["root"]) == canonical(original["root"]), "Hovering a preview must not change the layout"
+    print("Layout checks passed: resizing, docking, undo/redo and measured drop previews")
 
 
 

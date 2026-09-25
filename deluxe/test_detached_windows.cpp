@@ -21,9 +21,9 @@ int main(int argc,char **argv) {
   require(ImGui::GetCurrentContext()==root,"Detached draw leaked its context");
   for(int p=0;p<WorkspaceLayout::Count;++p) if(WorkspaceLayout::detachable(p)) {
    require(bool(manager.windows[p]),"Detached window failed to open"); auto &w=*manager.windows[p];
-   if(p==WorkspaceLayout::TrackedCreature) {
+   if(p==WorkspaceLayout::TrackedCreature || p==WorkspaceLayout::Character || p==WorkspaceLayout::Status || p==WorkspaceLayout::DungeonDetails) {
     int low,high; SDL_GetWindowMinimumSize(w.window,nullptr,&low); SDL_GetWindowMaximumSize(w.window,nullptr,&high);
-    require(low>0 && low==high,"Detached creature tracker must have a fixed height");
+    require(low>0 && low==high,"Detached compact panels must have a fixed height");
    }
    require(w.frame.scope==2,"Full-window CRT must include detached panels");
    ui.crt=1; require(DetachedPanels::crt_frame(ui,w,1).scope==0,"Game-only CRT must exclude utility panels");

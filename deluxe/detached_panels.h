@@ -122,9 +122,15 @@ struct DetachedPanels {
     float x,y; SDL_GetMouseState(&x,&y); const auto point=mouse_position(ui,w,{x,y}); ImGui::GetIO().AddMousePosEvent(point.x,point.y);
    }
    ImGui::NewFrame();
-   if(p==WorkspaceLayout::TrackedCreature) {
+   if(p==WorkspaceLayout::TrackedCreature || p==WorkspaceLayout::DungeonDetails || p==WorkspaceLayout::Character || p==WorkspaceLayout::Status) {
     const auto &style=ImGui::GetStyle();
-    const float pixels=CharacterOverview::tracked_height(ui.layout.heading(WorkspaceLayout::TrackedCreature))+4*style.WindowPadding.y+ImGui::GetFrameHeightWithSpacing()+1+style.ItemSpacing.y;
+    const auto player=ui.c.state.value("player",json::object());
+    const float width=std::max(1.f,ImGui::GetIO().DisplaySize.x-4*style.WindowPadding.x);
+    const float content=p==WorkspaceLayout::TrackedCreature?CharacterOverview::tracked_height(ui.layout.heading(p)):
+     p==WorkspaceLayout::Character?CharacterOverview::height(player,width,ui.layout.heading(p)):
+     p==WorkspaceLayout::Status?StatusEffects::height(player,width,ui.layout.heading(p)):
+     CharacterOverview::dungeon_height(player,width,ui.layout.heading(p));
+    const float pixels=content+4*style.WindowPadding.y+ImGui::GetFrameHeightWithSpacing()+1+style.ItemSpacing.y;
     int ww,hh; SDL_GetWindowSize(w.window,&ww,&hh);
     const int fitted=std::max(1,int(std::ceil(pixels*hh/std::max(1.f,ImGui::GetIO().DisplaySize.y))));
     int min_height,max_height;
@@ -142,7 +148,7 @@ struct DetachedPanels {
    ImGui::Separator();
    const auto before=ui.c.outgoing.size(); const bool details=ui.open_character_sheet,history=ui.message_history.open,inscribe=ui.item_rules_panel.auto_open,study=ui.select_spells_tab;
    auto *old_fonts=ui.font_library; ui.font_library=&w.fonts;
-   ImGui::BeginChild("Panel content");
+   ImGui::BeginChild("Panel content",ImVec2(0,0),ImGuiChildFlags_None,(p==WorkspaceLayout::DungeonDetails || p==WorkspaceLayout::Character || p==WorkspaceLayout::Status)?ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse:ImGuiWindowFlags_None);
    ImGui::BeginDisabled(modal || ui.layout.editing || ui.c.state.contains("store"));
    ui.workspace_panel(p);
    ImGui::EndDisabled(); ImGui::EndChild(); ui.font_library=old_fonts;

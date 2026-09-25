@@ -359,6 +359,22 @@ int main(int argc,char **argv) {
    check(!restored.restore(malformed) && restored.arrangement()==valid,"Malformed layout is transactional");
    auto duplicate=original; duplicate["floating"]={{{"node",WorkspaceLayout::encode(layout.leaf({WorkspaceLayout::Dungeon}))}}};
    check(!restored.restore(duplicate),"Duplicate panels rejected");
+   {
+    WorkspaceLayout edits; edits.begin_edit(); const auto initial=edits.edit_key();
+    edits.move({WorkspaceLayout::Inventory,0,5}); edits.record_edit(); const auto floated=edits.edit_key();
+    edits.floating[0].x=.3f; edits.floating[0].y=.25f; edits.record_edit();
+    edits.undo_edit(); check(edits.edit_key()==floated,"Undo restores a floating panel's position as one action");
+    edits.undo_edit(); check(edits.edit_key()==initial,"Undo restores original docking and IDs");
+    edits.redo_edit(); check(edits.edit_key()==floated,"Redo restores the dock change");
+    edits.panel_headings[WorkspaceLayout::TrackedCreature]=false; edits.record_edit();
+    check(edits.redo_steps.empty(),"New edits clear the redo branch");
+    check(edits.serialize()["panel_headings"][WorkspaceLayout::TrackedCreature]==true,"Draft headings do not leak into saved preferences");
+    edits.finish_edit(true); check(edits.edit_key()==initial,"Cancel restores the entire customization session");
+    edits.begin_edit(); edits.preset(1); edits.record_edit(); edits.undo_edit();
+    check(edits.edit_key()==initial,"Starting layout changes can be undone");
+    edits.redo_edit(); edits.finish_edit();
+    check(!edits.contains(WorkspaceLayout::Inventory) && edits.undo_steps.empty(),"Done retains the result and ends history");
+   }
    layout.before=original; layout.editing=true;
    check(layout.serialize()["current"]==original,"Unsaved edits must not leak into settings writes");
    check(layout.restore(layout.before),"Cancel recovers original arrangement");
@@ -392,8 +408,19 @@ int main(int argc,char **argv) {
     migrated.detach(WorkspaceLayout::TrackedCreature,true);
     check(previous.restore(migrated.arrangement()) && previous.detached[WorkspaceLayout::TrackedCreature].open,"Detached tracker persists");
    }
+   {
+    WorkspaceLayout previous; previous.move({WorkspaceLayout::Status,0,6});
+    auto v3=previous.arrangement(); v3["version"]=3;
+    WorkspaceLayout migrated; check(migrated.restore(v3) && migrated.contains(WorkspaceLayout::Status),"Legacy layouts gain a status panel");
+    migrated.move({WorkspaceLayout::Status,0,6});
+    check(previous.restore(migrated.arrangement()) && !previous.contains(WorkspaceLayout::Status),"Hidden status panel stays hidden after reload");
+    migrated.detach(WorkspaceLayout::Status,true);
+    check(previous.restore(migrated.arrangement()) && previous.detached[WorkspaceLayout::Status].open,"Detached status panel persists");
+   }
    old.panel_headings[WorkspaceLayout::TrackedCreature]=false; restored.load(old.serialize());
    check(!restored.heading(WorkspaceLayout::TrackedCreature) && restored.heading(WorkspaceLayout::Character),"Independent panel headings persist");
+   restored.panel_headings[WorkspaceLayout::Character]=false;
+   check(restored.heading(WorkspaceLayout::Character) && !WorkspaceLayout::has_heading(WorkspaceLayout::Character),"Character identity cannot be hidden");
    WorkspaceLayout legacy_headings; legacy_headings.load({{"version",3},{"show_headings",false}});
    check(!legacy_headings.heading(WorkspaceLayout::TrackedCreature) && !legacy_headings.heading(WorkspaceLayout::Messages),"Legacy global heading preference migrates");
    old.dividers_locked=false; restored.load(old.serialize());
@@ -540,6 +567,16 @@ int main(int argc,char **argv) {
   {
    UI final_ui{postgame}; final_ui.run_history.current=archived;
    ImGui::NewFrame(); ImGui::Begin("Old gameplay popup"); ImGui::OpenPopup("Stale menu"); ImGui::End();
+   const json badge_player={{"study",2},{"statuses",json::array({{{"name","Poisoned"}},{{"name","Fast"}},{{"name","Blessed"}}})}};
+   check(StatusEffects::height(badge_player,150)>StatusEffects::height(badge_player,900),"Status panel grows when badges wrap");
+   check(StatusEffects::height(json::object(),400,false)==ImGui::GetTextLineHeight(),"Empty status panel fits its placeholder");
+   const json character_metrics={{"gold",100000},{"armour",100},{"speed",10},{"stats",json::array({18,18,18,18,18})}};
+   check(CharacterOverview::height(character_metrics,250)>CharacterOverview::height(character_metrics,900),"Character panel reserves height for stacked metrics");
+   const json dungeon_metrics={{"depth",12},{"light",2},{"feeling","1 / 4"},{"floor","Open floor"}};
+   check(CharacterOverview::dungeon_columns(dungeon_metrics,2000)==4 && CharacterOverview::dungeon_columns(dungeon_metrics,400)==2,"Dungeon height uses the same width breakpoint as its tiles");
+   check(CharacterOverview::dungeon_height(dungeon_metrics,400)>CharacterOverview::dungeon_height(dungeon_metrics,2000),"Two-row Dungeon details reserve enough height");
+   auto recall_metrics=dungeon_metrics; recall_metrics["recall"]=5;
+   check(CharacterOverview::dungeon_height(recall_metrics,400)>CharacterOverview::dungeon_height(dungeon_metrics,400),"Dungeon notices expand its fitted height");
    check(CharacterOverview::tracked_height(false)<CharacterOverview::tracked_height(true),"Hiding tracker heading reclaims height");
    final_ui.draw(nullptr);
    check(!ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel),"Death screen must dismiss stale gameplay popups");

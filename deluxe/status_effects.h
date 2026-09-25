@@ -9,11 +9,35 @@ struct StatusEffects {
   std::stable_sort(effects.begin(),effects.end(),[](const json &a,const json &b) { return a.value("priority",2)<b.value("priority",2); });
   return effects;
  }
- static void draw(const json &player,bool *open_spells=nullptr,float study_flash=0) {
+ static std::vector<json> badges(const json &player) {
   auto effects=active(player);
   const int study=player.value("study",0);
   if(study>0) effects.push_back({{"name","Study"},{"kind","study"},{"duration",study},
    {"description","You can learn "+std::to_string(study)+(study==1?" new spell.":" new spells.")+" Open Spells to choose from your books."}});
+  return effects;
+ }
+ static std::string badge_label(const json &effect) {
+  const auto name=display_label(effect.value("name",effect.value("label","Effect")));
+  return effect.value("kind","")=="study"?name+" \xC2\xB7 "+std::to_string(effect.value("duration",0)):name;
+ }
+ static float height(const json &player,float width,bool headings=true) {
+  const auto effects=badges(player); const auto &style=ImGui::GetStyle();
+  const float title=headings?ImGui::GetFontSize()*1.6f+style.ItemSpacing.y:0;
+  if(effects.empty()) return title+ImGui::GetTextLineHeight();
+  width=std::max(1.f,width);
+  const float pad=ImGui::GetFontSize()*.4f;
+  float used=0,row_height=0,total=0;
+  for(const auto &effect:effects) {
+   const auto label=badge_label(effect);
+   const float badge_width=std::min(width,ImGui::CalcTextSize(label.c_str()).x+3*pad);
+   if(used>0 && used+style.ItemSpacing.x+badge_width>width) { total+=row_height+style.ItemSpacing.y; used=0; row_height=0; }
+   const float h=ImGui::CalcTextSize(label.c_str(),nullptr,false,std::max(1.f,badge_width-3*pad)).y+pad;
+   row_height=std::max(row_height,h); used+=(used>0?style.ItemSpacing.x:0)+badge_width;
+  }
+  return title+total+row_height+2*style.ItemSpacing.y;
+ }
+ static void draw(const json &player,bool *open_spells=nullptr,float study_flash=0) {
+  const auto effects=badges(player);
   if(effects.empty()) return;
   ImGui::PushID("Status effects"); ImGui::Spacing();
   const float left=ImGui::GetCursorScreenPos().x,width=std::max(1.f,ImGui::GetContentRegionAvail().x);
@@ -28,7 +52,7 @@ struct StatusEffects {
    const auto text_ink=light?ImVec4(accent.x*.42f,accent.y*.42f,accent.z*.42f,1):accent;
    const auto background=light?DeluxeTheme::mix(surface,accent,.16f):ImVec4(accent.x*.16f,accent.y*.16f,accent.z*.16f,1);
    const auto border=light?DeluxeTheme::mix(surface,text_ink,.45f):ImVec4(accent.x,accent.y,accent.z,.5f);
-   const auto label=kind=="study"?name+" · "+std::to_string(study):name;
+   const auto label=badge_label(effect);
    const float badge_width=std::min(width,ImGui::CalcTextSize(label.c_str()).x+3*pad);
    if(!first && ImGui::GetItemRectMax().x+gap+badge_width<=left+width) ImGui::SameLine();
    const auto a=ImGui::GetCursorScreenPos();

@@ -42,7 +42,7 @@ int main(int argc,char **argv) {
   if(fixture.contains("panel_headings")) for(int p=0;p<WorkspaceLayout::Count && p<int(fixture["panel_headings"].size());++p) ui.layout.panel_headings[p]=fixture["panel_headings"][p].get<bool>();
   ui.layout.dividers_locked=fixture.value("layout_dividers_locked",true);
   ui.layout.floating_locked=fixture.value("layout_floating_locked",false);
-  if(fixture.value("layout_edit",false)) { ui.layout.before=ui.layout.arrangement(); ui.layout.editing=true; }
+  if(fixture.value("layout_edit",false)) { ui.layout.begin_edit(); }
   if(fixture.value("layout_float",false)) ui.layout.move({WorkspaceLayout::Inventory,0,5});
   ui.scene_animation=fixture.contains("transition");
   ui.scale=std::clamp(fixture.value("scale",1.f),.75f,1.5f);
@@ -117,7 +117,9 @@ int main(int argc,char **argv) {
    SDL_DownloadFromGPUTexture(copy,&region,&dest); SDL_EndGPUCopyPass(copy);
    auto *fence=SDL_SubmitGPUCommandBufferAndAcquireFence(cmd); SDL_WaitForGPUFences(gpu,true,&fence,1); SDL_ReleaseGPUFence(gpu,fence);
   }
-  if(fixture.value("layout_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); auto trace=ui.layout.arrangement(); trace["panel_rects"]=panel_rects; out<<trace.dump(2); }
+  if(fixture.value("layout_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); auto trace=ui.layout.arrangement(); trace["panel_rects"]=panel_rects; trace["undo_count"]=ui.layout.undo_steps.size(); trace["redo_count"]=ui.layout.redo_steps.size();
+   const auto &preview=ui.layout.dock_preview;
+   trace["dock_preview"]={{"active",preview.active},{"x",preview.pos.x},{"y",preview.pos.y},{"w",preview.size.x},{"h",preview.size.y},{"label",preview.label}}; out<<trace.dump(2); }
   if(fixture.value("inventory_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); out<<json{{"open",ui.inventory_window_open},{"selected",ui.inventory_selected},{"outgoing",c.outgoing}}.dump(2); }
   auto *bytes=SDL_MapGPUTransferBuffer(gpu,download,false);
   auto *surface=SDL_CreateSurfaceFrom(w,h,SDL_PIXELFORMAT_RGBA32,bytes,w*4);

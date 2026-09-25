@@ -1202,3 +1202,11 @@ a hover explanation distinguishing fixed heights, minimum sizes and locking.
 Panel headings can be toggled independently under Layout > Panel headings for Character, Messages, Dungeon details and Tracked creature. Existing global preferences migrate to all four panels. Divider lock markers are three times larger and scale with the interface font.
 
 Dragging a divider beside a compact fixed-height panel can now push that panel along its vertical stack. The nearest flexible area beyond it supplies or receives space, preserving the compact height and unrelated sibling heights. Normal divider locks and minimum sizes still apply.
+
+Layout customization offers Undo and Redo (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z), retaining up to 64 changes per session. Continuous drags form one action; new edits discard the redo branch. Cancel restores the starting arrangement and heading/lock preferences, while Done keeps the result. Hovering a valid docking guide shades the proposed destination and names the operation; previews account for removal of the source and fixed-height panels without changing the actual layout.
+
+Status effects (including Study) have their own dockable, floatable and detachable panel with a per-panel heading toggle. Layout version 4 migrates older Character panels by inserting Status effects beneath them; deliberate hiding persists thereafter. Dungeon details uses a width-aware fitted height for its one-row or two-row tiles and current notices, without scrolling. Detached Dungeon details windows also follow the content height as their width changes.
+
+Character and Status effects panels also fit their content height in standalone docked, floating and detached forms. Character height follows stacked metrics and optional extra-move text; Status effects follows badge wrapping, including Study, and keeps a compact placeholder when empty. Mixed tab groups remain flexible.
+
+Layout menu groups workspace editing, panel visibility/headings/windows, movement locks, and starting/saved arrangements. Named-layout save/restore/delete tools live together in Saved layouts. Character identity is always displayed and is excluded from optional heading controls, including when loading older preferences.
