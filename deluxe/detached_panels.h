@@ -149,7 +149,7 @@ struct DetachedPanels {
    const auto before=ui.c.outgoing.size(); const bool details=ui.open_character_sheet,history=ui.message_history.open,inscribe=ui.item_rules_panel.auto_open,study=ui.select_spells_tab;
    auto *old_fonts=ui.font_library; ui.font_library=&w.fonts;
    ImGui::BeginChild("Panel content",ImVec2(0,0),ImGuiChildFlags_None,(p==WorkspaceLayout::DungeonDetails || p==WorkspaceLayout::Character || p==WorkspaceLayout::Status)?ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse:ImGuiWindowFlags_None);
-   ImGui::BeginDisabled(modal || ui.layout.editing || ui.c.state.contains("store"));
+   ImGui::BeginDisabled(ui.c.saving || modal || ui.layout.editing || ui.c.state.contains("store"));
    ui.workspace_panel(p);
    ImGui::EndDisabled(); ImGui::EndChild(); ui.font_library=old_fonts;
    ImGui::End(); ImGui::Render();

@@ -1210,3 +1210,5 @@ Status effects (including Study) have their own dockable, floatable and detachab
 Character and Status effects panels also fit their content height in standalone docked, floating and detached forms. Character height follows stacked metrics and optional extra-move text; Status effects follows badge wrapping, including Study, and keeps a compact placeholder when empty. Mixed tab groups remain flexible.
 
 Layout menu groups workspace editing, panel visibility/headings/windows, movement locks, and starting/saved arrangements. Named-layout save/restore/delete tools live together in Saved layouts. Character identity is always displayed and is excluded from optional heading controls, including when loading older preferences.
+
+Saving shows a centered animated progress indicator and temporarily blocks gameplay input. Save-and-quit keeps rendering through backend shutdown rather than ending the UI loop on acknowledgement. Successful saves, request errors and backend termination clear progress appropriately.

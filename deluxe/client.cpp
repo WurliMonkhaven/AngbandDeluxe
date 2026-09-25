@@ -145,7 +145,7 @@ struct Connection {
  std::map<std::string,std::string> requests;
  unsigned long next = 0;
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
- bool pickup_travel=false, resting=false;
+ bool pickup_travel=false, resting=false, saving=false;
  bool return_to_menu = false, restart_ready = false, close_confirmed = false;
  json state = json::object(), prompt = json::object(), pending_prompt = json::object(), commands = json::array(), saves = json::array(), catalog = json::object();
  Connection()=default;
@@ -183,7 +183,7 @@ struct Connection {
  }
  void save(bool leave=false, bool menu=false) {
   if(!ready()) return;
-  close_requested=leave; return_to_menu=menu;
+  close_requested=leave; return_to_menu=menu; saving=true;
   send(leave?"session.close":"session.save"); busy=true;
  }
  void quit_without_saving() {
@@ -339,6 +339,7 @@ struct Connection {
   }
   if (j.contains("error")) {
    const auto error=j["error"].value("message","Request failed"); notice(error); busy = false; pickup_travel=false;
+   if(method=="session.save" || method=="session.close") saving=false;
    if(!state.contains("terminal") || method=="birth.action" || method=="birth.cancel") menu_error=error;
    if(method=="session.close" || method=="debug.quit" || method=="birth.cancel") { close_requested=false; return_to_menu=false; }
    if(method=="session.replay") { replay_save.clear(); send("saves.list"); }
@@ -363,8 +364,8 @@ struct Connection {
   else if (method == "catalog.get") catalog = result;
   else if (method == "item.rules.list") item_rules=result;
   else if (method == "session.new" || method == "session.load" || method=="session.replay") { menu_error.clear(); send("catalog.get"); }
-  else if (method == "session.save") { busy = false; notice("Game saved."); }
-  else if (method == "session.close" || method == "debug.quit" || method == "birth.cancel") { close_confirmed=true; closed = !return_to_menu; busy = false; }
+  else if (method == "session.save") { saving=false; busy = false; notice("Game saved."); }
+  else if (method == "session.close" || method == "debug.quit" || method == "birth.cancel") { close_confirmed=true; closed = !return_to_menu && !saving; busy = false; }
   else if (method == "prompt.reply") pending_prompt = json::object();
  }
  void flush_input() {
@@ -374,7 +375,8 @@ struct Connection {
   }
  }
  void process_stopped(int exit_code) {
-  connected=false; busy=false; pickup_travel=false; resting=false;
+  if(saving && close_confirmed && !return_to_menu && exit_code==0) closed=true;
+  saving=false; connected=false; busy=false; pickup_travel=false; resting=false;
   // Death/post-game screens remain interactive until the engine reports that
   // play_game completed. A crash must not masquerade as a normal game ending.
   const bool finished=postgame_finished || state.value("phase","")=="finished";
@@ -393,13 +395,13 @@ struct Connection {
   if(diagnostic.size()>65536) diagnostic.erase(0,diagnostic.size()-65536);
   try { for(auto &frame:batch.frames) receive(std::move(frame)); }
   catch(const std::exception &e) { batch.error=e.what(); }
-  if(!batch.error.empty()) { notice("Invalid backend message: "+batch.error); connected=false; return; }
+  if(!batch.error.empty()) { notice("Invalid backend message: "+batch.error); connected=false; saving=false; return; }
   if(!exited) flush_input();
   // EOF must be drained by the reader before interpreting the final game state.
   else if(batch.finished) process_stopped(exit_code);
  }
  bool has_prompt() const { return !prompt.empty() || !pending_prompt.empty(); }
- bool ready() const { return run_report.is_null() && connected && !busy && !has_prompt() && !state.value("message_pending",false) && state.value("readiness","") == "ready"; }
+ bool ready() const { return run_report.is_null() && connected && !busy && !saving && !has_prompt() && !state.value("message_pending",false) && state.value("readiness","") == "ready"; }
  bool can_view_character() const {
   return run_report.is_null() && !has_prompt() &&
    state.contains("player") && state["player"].contains("character_sheet");
@@ -967,7 +969,7 @@ struct UI {
   focus_game();
  }
  bool owns_keyboard() const {
-  return !layout.editing && c.run_report.is_null() && c.state.contains("terminal") && !c.state.contains("birth") && !c.state.contains("store") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
+  return !c.saving && !layout.editing && c.run_report.is_null() && c.state.contains("terminal") && !c.state.contains("birth") && !c.state.contains("store") && grid_focus && window_active && c.prompt.empty() && c.pending_prompt.empty()
    && !quit_dialog && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId);
  }
  void prepare_frame(SDL_Window *window) {
@@ -1798,7 +1800,7 @@ struct UI {
   }
   // Freeze the death transition without dimming it, but restore normal
   // disabled styling immediately for controls nested inside this scope.
-  ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha,1.f); ImGui::BeginDisabled(ending); ImGui::PopStyleVar();
+  ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha,1.f); ImGui::BeginDisabled(ending || c.saving); ImGui::PopStyleVar();
   const bool in_game=c.state.contains("terminal");
   if(in_game && !c.state.contains("birth")) {
    ImGui::BeginDisabled(!c.ready());
@@ -1990,8 +1992,31 @@ struct UI {
   }
   }
   ImGui::EndDisabled();
-  if(!ending) prompts(); ImGui::End();
+  if(!ending && !c.saving) prompts();
+  save_progress(); ImGui::End();
   dispatch_keys();
+ }
+ void save_progress() {
+  if(c.saving) { keys.clear(); grid_focus=false; ImGui::OpenPopup("Saving###Save progress"); }
+  const auto *viewport=ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(viewport->GetCenter(),ImGuiCond_Always,{.5f,.5f});
+  if(ImGui::BeginPopupModal("Saving###Save progress",nullptr,ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings)) {
+   if(!c.saving) ImGui::CloseCurrentPopup();
+   else {
+    const float radius=ImGui::GetFontSize()*.65f,pad=ImGui::GetStyle().FramePadding.y;
+    const auto pos=ImGui::GetCursorScreenPos();
+    auto *draw=ImGui::GetWindowDrawList(); const ImVec2 center(pos.x+radius+pad,pos.y+radius+pad);
+    draw->AddCircle(center,radius,ImGui::GetColorU32(ImGuiCol_Border),32,2);
+    const float phase=float(std::fmod(ImGui::GetTime()*5.,6.2831853));
+    draw->PathArcTo(center,radius,phase,phase+4.4f,32);
+    draw->PathStroke(ImGui::GetColorU32(DeluxeTheme::green()),0,2.5f);
+    ImGui::Dummy({2*(radius+pad),2*(radius+pad)}); ImGui::SameLine();
+    ImGui::BeginGroup();
+    ImGui::TextUnformatted(c.close_requested?(c.close_confirmed?"Closing game...":c.return_to_menu?"Saving and returning to menu...":"Saving and quitting..."):"Saving game...");
+    ImGui::TextDisabled("Please wait"); ImGui::EndGroup();
+   }
+   ImGui::EndPopup();
+  }
  }
  void dispatch_keys() {
   if(!owns_keyboard() || ImGui::GetIO().WantTextInput || !c.prompt.empty() || !c.connected) { keys.clear(); return; }
@@ -2142,6 +2167,7 @@ int main(int argc,char **argv) {
    if(connection.run_report.is_null() && ui.quickbar_event(e)) continue;
    ImGui_ImplSDL3_ProcessEvent(&e);
    if(e.type==SDL_EVENT_QUIT || (e.type==SDL_EVENT_WINDOW_CLOSE_REQUESTED && e.window.windowID==SDL_GetWindowID(window))) {
+    if(connection.saving) continue;
     if(!connection.run_report.is_null()) { ui.quit_after_run=true; continue; }
     if(!connection.state.contains("terminal") || (!connection.run_report.is_null() && !connection.connected)) { connection.closed=true; if(connection.process) SDL_KillProcess(connection.process.get(),true); }
     else ui.quit_dialog=true;

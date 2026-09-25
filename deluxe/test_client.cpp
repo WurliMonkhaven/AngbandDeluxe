@@ -315,6 +315,19 @@ int main(int argc,char **argv) {
   check(!incomplete.restart_ready && !incomplete.messages.empty(),"Unannounced exit must remain visible");
   Connection menu; menu.close_confirmed=true; menu.return_to_menu=true; menu.process_stopped(0);
   check(menu.restart_ready && !menu.closed,"Save and return to menu regression");
+  {
+   Connection saving; saving.connected=true; saving.receive(state_event("playing")); saving.state["readiness"]="ready";
+   saving.save(true); check(saving.saving && !saving.ready(),"Save progress starts with the request");
+   const auto id=saving.requests.rbegin()->first;
+   saving.receive(state_event("playing")); check(saving.saving && !saving.ready(),"State events must not dismiss saving feedback");
+   saving.receive({{"id",id},{"result",json::object()}});
+   check(saving.close_confirmed && !saving.closed && saving.saving,"Keep rendering shutdown progress until the backend exits");
+   saving.process_stopped(0); check(saving.closed && !saving.saving,"Completed shutdown closes the application");
+   Connection failed; failed.connected=true; failed.receive(state_event("playing")); failed.state["readiness"]="ready";
+   failed.save(true); const auto failure_id=failed.requests.rbegin()->first;
+   failed.receive({{"id",failure_id},{"error",{{"message","Save failed"}}}});
+   check(!failed.saving && !failed.close_requested && !failed.closed,"Save failure restores the UI instead of trapping it behind progress");
+  }
   Connection quit; quit.close_confirmed=true; quit.closed=true; quit.process_stopped(0);
   check(quit.closed && !quit.restart_ready,"Save and quit must not relaunch");
   const fs::path path=argv[1];

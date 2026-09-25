@@ -28,6 +28,7 @@ int main(int argc,char **argv) {
   if(fixture.contains("level_elapsed")) c.level_feedback.started=double(SDL_GetTicksNS())/1e9-fixture["level_elapsed"].get<double>();
   if(fixture.contains("prompt")) c.prompt=fixture["prompt"];
   if(fixture.contains("blast")) c.blast=fixture["blast"];
+  if(fixture.value("saving_preview",false)) { c.saving=true; c.close_requested=true; c.busy=true; }
   UI ui{c}; ui.font_library=&fonts; ui.font_settings.load(fixture.value("fonts",json::object())); ui.base_style=ImGui::GetStyle();
   ui.settings_page=fixture.value("settings_page",0);
   ui.quit_dialog=fixture.value("quit_dialog",false);
