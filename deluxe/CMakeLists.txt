@@ -11,10 +11,11 @@ FetchContent_Declare(json GIT_REPOSITORY https://github.com/nlohmann/json.git
     GIT_TAG 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
 FetchContent_MakeAvailable(SDL3 json imgui)
 include("${CMAKE_CURRENT_SOURCE_DIR}/imgui_gpu_patch.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/imgui_platform_patch.cmake")
 add_library(deluxe_imgui STATIC
     "${imgui_SOURCE_DIR}/imgui.cpp" "${imgui_SOURCE_DIR}/imgui_draw.cpp"
     "${imgui_SOURCE_DIR}/imgui_tables.cpp" "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
+    "${platform_backend_file}"
     "${gpu_backend_file}")
 target_include_directories(deluxe_imgui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
 target_link_libraries(deluxe_imgui PUBLIC SDL3::SDL3)
@@ -64,3 +65,9 @@ add_dependencies(deluxe-audio-tests deluxe-audio)
 if(WIN32)
     set_target_properties(angband-deluxe PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
+
+add_executable(deluxe-window-tests EXCLUDE_FROM_ALL test_detached_windows.cpp)
+target_compile_features(deluxe-window-tests PRIVATE cxx_std_17)
+target_compile_definitions(deluxe-window-tests PRIVATE SDL_MAIN_HANDLED DELUXE_CLIENT_TEST
+    DELUXE_FONTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fonts")
+target_link_libraries(deluxe-window-tests PRIVATE deluxe_crt)

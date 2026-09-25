@@ -551,7 +551,7 @@ struct UI {
  bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
  int damage_amount=1, xp_amount=100, blast_radius=2, breath_element=0;
  DevStatusDialog dev_status_dialog;
- int crt=0, draft_crt=0;
+ int crt=0, draft_crt=0; // Persisted IDs: 0 off, 1 dungeon, 2 full, 3 main window.
  int crt_strength=1, draft_crt_strength=1;
  AudioSettings audio_settings{}, draft_audio_settings{};
  AudioPlayer audio;
@@ -616,7 +616,7 @@ struct UI {
    level_animation=j.value("level_animation",true);
    scene_animation=j.value("scene_animation",true);
    low_animation=j.value("low_health_animation",true); death_animation=j.value("death_animation",true);
-   crt=std::clamp(j.value("crt",0),0,2);
+   crt=std::clamp(j.value("crt",0),0,3);
    crt_strength=std::clamp(j.value("crt_strength",1),-1,3);
    crt_settings=CrtSettings(crt_strength);
    crt_settings.parts[Hum].enabled=j.value("hum_bar",false);
@@ -796,8 +796,10 @@ struct UI {
     }
     if(ImGui::BeginTabItem("CRT effects")) {
      ImGui::Spacing(); ImGui::TextUnformatted("Effects Enabled"); ImGui::SetNextItemWidth(-1);
-     const char *effects[]={"Off","Game Window Only","Full"};
-     ImGui::Combo("##CRT Effects",&draft_crt,effects,3);
+     const char *effects[]={"Off","Dungeon Only","Main Window Only","Full"};
+     const int scope_ids[]={0,1,3,2};
+     int choice=draft_crt==2?3:draft_crt==3?2:draft_crt;
+     if(ImGui::Combo("##CRT Effects",&choice,effects,4)) draft_crt=scope_ids[choice];
      ImGui::Spacing(); ImGui::TextUnformatted("Tube preset"); ImGui::SetNextItemWidth(-1);
      const char *tubes[]={"Desktop Monitor","Shadow-mask Monitor","Soft Terminal"};
      if(ImGui::BeginCombo("##Tube",draft_crt_settings.tube_preset<0?"Custom":tubes[draft_crt_settings.tube_preset])) {
@@ -1864,7 +1866,7 @@ struct UI {
    if(select_creatures_tab) { layout.reveal(WorkspaceLayout::Creatures); select_creatures_tab=false; }
    layout.quickbar_content_height=Quickbar::height()-ImGui::GetStyle().ItemSpacing.y;
    const bool editing_before_draw=layout.editing;
-   layout.draw([&](int panel) { return workspace_panel_available(panel);
+   layout.draw([&](int panel) { return workspace_panel_available(panel) && !(layout.native_windows_available && layout.detached[panel].open);
    },[&](int panel) {
     if(panel==WorkspaceLayout::Spells && (!c.state.contains("player") || !c.state["player"].value("spellcasting",false))) ImGui::TextWrapped("Spells appear here for spellcasting characters.");
     else if(panel==WorkspaceLayout::Target && !targeting_active) ImGui::TextWrapped("Look and targeting details appear here when needed.");
@@ -1915,6 +1917,8 @@ struct UI {
   }
  }
 };
+
+#include "detached_panels.h"
 
 #ifndef DELUXE_CLIENT_TEST
 int main(int argc,char **argv) {
@@ -1979,6 +1983,8 @@ int main(int argc,char **argv) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Angband Deluxe",("Cannot open the save/settings folder: "+std::string(error.what())).c_str(),window); return 1;
  }
  ui.settings_path=(fs::path(user)/"settings.json").string(); ui.load_settings();
+ DetachedPanels detached(gpu,window,paths.font.parent_path());
+ ui.layout.native_windows_available=true;
  if(!ui.audio.open(paths.audio)) connection.notice("Audio unavailable: "+ui.audio.error);
  ui.audio.configure(ui.audio_settings,true);
  if(ui.fullscreen && !SDL_SetWindowFullscreen(window,true)) { ui.fullscreen=false; connection.notice(std::string("Fullscreen unavailable: ")+SDL_GetError()); }
@@ -1990,6 +1996,7 @@ int main(int argc,char **argv) {
   const auto phase=connection.state.value("phase","");
   const auto readiness=connection.state.value("readiness","");
   connection.poll();
+  ui.window_active=detached.focused();
   ui.audio.configure(ui.audio_settings,ui.window_active);
   for(const auto &cue:connection.sound_cues) ui.audio.play(cue);
   connection.sound_cues.clear();
@@ -2027,12 +2034,13 @@ int main(int argc,char **argv) {
   }
   ui.prepare_frame(window); SDL_Event e;
   while(SDL_PollEvent(&e)) {
+   if(detached.event(ui,e)) continue;
    if(e.type==SDL_EVENT_WINDOW_FOCUS_LOST) { ui.window_active=false; ui.keys.clear(); }
    if(e.type==SDL_EVENT_WINDOW_FOCUS_GAINED) ui.window_active=true;
    if(e.type==SDL_EVENT_MOUSE_BUTTON_DOWN) { ui.grid_focus=false; ui.keys.clear(); }
-   if(e.type==SDL_EVENT_MOUSE_MOTION && ui.crt!=0 && (ui.crt==2 || ui.game_draw_list) && crt_renderer.ready()) {
+   if(e.type==SDL_EVENT_MOUSE_MOTION && ui.crt!=0 && (ui.crt>=2 || ui.game_draw_list) && crt_renderer.ready()) {
     auto vp=ImGui::GetMainViewport();
-    CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_settings);
+    CrtCurve curve(ui.crt>=2?vp->Pos:ui.game_pos,ui.crt>=2?vp->Size:ui.game_size,ui.crt_settings);
     if(e.motion.x>=curve.pos.x && e.motion.x<=curve.pos.x+curve.size.x && e.motion.y>=curve.pos.y && e.motion.y<=curve.pos.y+curve.size.y) {
      auto p=curve.map(ImVec2(e.motion.x,e.motion.y),true); e.motion.x=p.x; e.motion.y=p.y;
     }
@@ -2044,7 +2052,7 @@ int main(int argc,char **argv) {
    // Forward releases so the death acknowledgement cannot leave input held.
    if(connection.run_report.is_null() && ui.quickbar_event(e)) continue;
    ImGui_ImplSDL3_ProcessEvent(&e);
-   if(e.type==SDL_EVENT_QUIT) {
+   if(e.type==SDL_EVENT_QUIT || (e.type==SDL_EVENT_WINDOW_CLOSE_REQUESTED && e.window.windowID==SDL_GetWindowID(window))) {
     if(!connection.run_report.is_null()) { ui.quit_after_run=true; continue; }
     if(!connection.state.contains("terminal") || (!connection.run_report.is_null() && !connection.connected)) { connection.closed=true; if(connection.process) SDL_KillProcess(connection.process.get(),true); }
     else ui.quit_dialog=true;
@@ -2071,17 +2079,19 @@ int main(int argc,char **argv) {
   // overlap UI rendering rather than starting only after it has finished.
   ui.dispatch_keys();
   poll_backend();
+  detached.draw(ui);
   ImGui_ImplSDLGPU3_NewFrame(); ImGui_ImplSDL3_NewFrame();
-  if(ui.crt!=0 && (ui.crt==2 || ui.game_draw_list) && crt_renderer.ready() && SDL_GetMouseFocus()==window) {
+  if(ui.crt!=0 && (ui.crt>=2 || ui.game_draw_list) && crt_renderer.ready() && SDL_GetMouseFocus()==window) {
    float x,y; SDL_GetMouseState(&x,&y);
    auto vp=ImGui::GetMainViewport();
-   CrtCurve curve(ui.crt==2?vp->Pos:ui.game_pos,ui.crt==2?vp->Size:ui.game_size,ui.crt_settings);
+   CrtCurve curve(ui.crt>=2?vp->Pos:ui.game_pos,ui.crt>=2?vp->Size:ui.game_size,ui.crt_settings);
    if(x>=curve.pos.x && x<=curve.pos.x+curve.size.x && y>=curve.pos.y && y<=curve.pos.y+curve.size.y) {
     auto p=curve.map(ImVec2(x,y),true); ImGui::GetIO().AddMousePosEvent(p.x,p.y);
    }
   }
   io.FontDefault=fonts.get(ui.font_settings.interface_font);
   ImGui::NewFrame(); ui.draw(window);
+  ui.window_active=detached.focused();
   ui.audio.configure(ui.audio_settings,ui.window_active);
   if(!ui.grid_focus && !ImGui::GetIO().WantTextInput && ((ImGui::GetIO().MouseClicked[0] && GImGui->ActiveId && GImGui->ActiveIdIsJustActivated) || GImGui->NavActivateId)) ui.audio.play("ui");
   ImGui::Render();
@@ -2095,7 +2105,7 @@ int main(int argc,char **argv) {
   if(!SDL_WaitAndAcquireGPUSwapchainTexture(cmd,window,&surface,&surface_width,&surface_height)) { SDL_CancelGPUCommandBuffer(cmd); break; }
   if(surface) {
    CrtFrame frame;
-   frame.scope=ui.crt; frame.settings=ui.crt_settings;
+   frame.scope=ui.crt>=2?2:ui.crt; frame.settings=ui.crt_settings;
    frame.game=ui.game_draw_list; frame.game_pos=ui.game_pos; frame.game_size=ui.game_size;
    frame.seconds=double(SDL_GetTicksNS())/1e9; frame.ui_scale=ui.scale*ui.display_scale; frame.session=connection.state.value("phase","");
    frame.desaturation=ui.scene_animation?connection.transitions.desaturation(frame.seconds):0;
@@ -2112,6 +2122,7 @@ int main(int argc,char **argv) {
   SDL_SubmitGPUCommandBuffer(cmd);
   if(SDL_GetWindowFlags(window)&SDL_WINDOW_MINIMIZED) SDL_Delay(20);
  }
+ detached.shutdown();
  ui.audio.close();
  SDL_WaitForGPUIdle(gpu); crt_renderer.shutdown(); ImGui_ImplSDLGPU3_Shutdown(); ImGui_ImplSDL3_Shutdown(); ImGui::DestroyContext();
  connection.close_process();

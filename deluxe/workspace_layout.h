@@ -20,6 +20,11 @@ struct WorkspaceLayout {
   std::vector<Node> children;
  };
  struct Floating { Node node; float x=.15f,y=.15f,w=.36f,h=.4f; };
+ struct Detached { bool open=false; int x=0,y=0,w=560,h=640; bool placed=false; };
+ std::array<Detached,Count> detached{};
+ bool native_windows_available=false;
+ static bool detachable(int p) { return p==Inventory || p==Messages || p==Map || p==Character || p==DungeonDetails; }
+ void detach(int p,bool open) { if(!detachable(p)) return; if(open || contains(p)) reveal(p); detached[p].open=open; dirty=true; }
  Node root; std::vector<Floating> floating;
  Json saved=Json::object(),before;
  bool editing=false,dirty=false,dividers_locked=true,floating_locked=false; int next_id=1;
@@ -32,7 +37,7 @@ struct WorkspaceLayout {
  Node overview() { return split(2,.70f,leaf({Character}),leaf({DungeonDetails})); }
  WorkspaceLayout() { preset(0); dirty=false; }
  void preset(int index) {
-  next_id=1; floating.clear();
+  next_id=1; floating.clear(); detached={};
   if(index==1) {
    // Keep only the essentials; other panels can be restored from Panels.
    auto play=split(2,.86f,split(2,.88f,leaf({Dungeon}),leaf({Quickbar})),leaf({Messages}));
@@ -60,6 +65,8 @@ struct WorkspaceLayout {
  Json arrangement() const {
   Json j={{"version",2},{"root",encode(root)},{"floating",Json::array()}};
   for(const auto &f:floating) j["floating"].push_back({{"node",encode(f.node)},{"x",f.x},{"y",f.y},{"w",f.w},{"h",f.h}});
+  j["detached"]=Json::array();
+  for(int p=0;p<Count;++p) if(detached[p].placed || detached[p].open) { const auto &d=detached[p]; j["detached"].push_back({{"panel",p},{"open",d.open},{"placed",d.placed},{"x",d.x},{"y",d.y},{"w",d.w},{"h",d.h}}); }
   return j;
  }
  Json serialize() const { return {{"version",2},{"dividers_locked",dividers_locked},{"floating_locked",floating_locked},{"current",editing?before:arrangement()},{"saved",saved}}; }
@@ -95,7 +102,15 @@ struct WorkspaceLayout {
     if(!std::isfinite(f.x)||!std::isfinite(f.y)||!std::isfinite(f.w)||!std::isfinite(f.h)) throw std::runtime_error("Invalid floating geometry");
     f.w=std::clamp(f.w,.12f,1.f); f.h=std::clamp(f.h,.1f,1.f); f.x=std::clamp(f.x,0.f,1-f.w); f.y=std::clamp(f.y,0.f,1-f.h); floats.push_back(std::move(f));
    }
+   std::array<Detached,Count> windows{};
+   for(const auto &v:j.value("detached",Json::array())) {
+    int p=v.at("panel").get<int>(); if(!detachable(p) || !seen[p]) continue;
+    auto &d=windows[p]; d.open=v.value("open",false); d.placed=v.value("placed",false);
+    d.x=std::clamp(v.value("x",0),-100000,100000); d.y=std::clamp(v.value("y",0),-100000,100000);
+    d.w=std::clamp(v.value("w",560),280,4096); d.h=std::clamp(v.value("h",640),180,4096);
+   }
    if(!seen[Dungeon]) return false;
+   detached=windows;
    root=std::move(candidate); floating=std::move(floats); next_id=serial; pending={};
    // Older layouts included dungeon details inside Character. Preserve their
    // location when separating it, without reviving deliberately hidden v2 panels.
@@ -153,6 +168,7 @@ struct WorkspaceLayout {
   // Moving the dungeon into a tab group is intentionally disallowed: it must stay visible.
   if(action.edge==0 && (action.panel==Dungeon || contains(*destination,Dungeon))) return false;
   if(contains(root,action.panel) && !root.axis && root.tabs.size()==1) return false;
+  detached[action.panel].open=false;
   remove(root,action.panel);
   for(auto it=floating.begin();it!=floating.end();) { if(remove(it->node,action.panel)) it=floating.erase(it); else ++it; }
   if(action.edge==5) { Floating f; f.node=leaf({action.panel}); floating.push_back(std::move(f)); }
@@ -210,6 +226,13 @@ struct WorkspaceLayout {
      if(ImGui::MenuItem(names[p],nullptr,usable && contains(p),usable)) toggle(p);
      if(!usable && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("This panel is unavailable in the current game state or gameplay settings.");
     }
+    ImGui::EndMenu();
+   }
+   if(native_windows_available && ImGui::BeginMenu("Detached windows",!editing)) {
+    for(int p=0;p<Count;++p) if(detachable(p) && enabled(p))
+     if(ImGui::MenuItem(names[p],nullptr,detached[p].open)) detach(p,!detached[p].open);
+    ImGui::Separator();
+    if(ImGui::MenuItem("Return all panels")) { for(auto &d:detached) d.open=false; dirty=true; }
     ImGui::EndMenu();
    }
    ImGui::InputTextWithHint("##layout name","Layout name",save_name,sizeof(save_name));
@@ -319,6 +342,7 @@ struct WorkspaceLayout {
      if(ImGui::IsItemClicked()) { n.active=p; dirty=true; }
      source(p);
      if(editing && p!=Dungeon && ImGui::BeginPopupContextItem()) {
+      if(native_windows_available && detachable(p) && ImGui::MenuItem("Detach into new window")) detach(p,true);
       if(ImGui::MenuItem("Float inside window")) pending={p,0,5};
       if(ImGui::MenuItem("Hide panel")) pending={p,0,6};
       ImGui::EndPopup();

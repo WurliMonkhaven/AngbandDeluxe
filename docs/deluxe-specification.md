@@ -1149,3 +1149,26 @@ Light theme styling is an explicit Theme checkbox, independent of background
 colour. It controls resource/status styling and native colour contrast variants.
 Light / Paper enables it; other presets disable it. Old settings without the
 field inherit their prior brightness-based behaviour on load.
+
+### Detached utility windows (Windows)
+
+Layout > Detached windows opens Inventory, Messages, Map, Character or Dungeon
+ details in separate native windows. The layout retains each original dock slot;
+closing a window or using Return to main window restores the panel there. Named
+layouts and settings retain detached state and window geometry. Positions are
+clamped to available monitor work areas when restored. Returning to the launcher
+closes the native windows; they reopen with the next active character.
+
+Each window owns an ImGui context, font atlas, SDL platform backend and GPU
+renderer; gameplay state and panel actions remain shared. Native windows use the
+selected theme/fonts and display scaling. Full-window CRT includes detached
+windows; Game-only CRT excludes them. Each window owns its effect history and
+curvature-corrected mouse coordinates. Detached keyboard
+input is isolated from dungeon movement. Main-window prompts block detached game
+controls, and actions needing a main-window prompt raise the main window. Dungeon,
+quickbar and targeting remain in the main window for this first version.
+
+CRT scope choices are Off, Dungeon Only, Main Window Only, Full (in that order).
+Main Window Only applies whole-window effects and curved input mapping to the
+main window, leaving detached utility windows plain. Existing saved Full scope
+retains its meaning; persisted scope IDs remain backward compatible.

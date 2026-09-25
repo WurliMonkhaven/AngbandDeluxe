@@ -467,6 +467,9 @@ int main(int argc,char **argv) {
   loaded.begin_settings(); loaded.draft_crt=2; loaded.draft_crt_settings.parts[Hum].enabled=false;
   check(loaded.apply_settings(nullptr),"Replace settings file");
   ui.load_settings(); check(!ui.crt_settings.parts[Hum].enabled,"Hum bar off did not persist"); check(ui.crt==2,"Full CRT persistence");
+  loaded.begin_settings(); loaded.draft_crt=3;
+  check(loaded.apply_settings(nullptr),"Save main-window-only CRT");
+  ui.load_settings(); check(ui.crt==3,"Main-window-only CRT must persist independently of Full");
   for(int strength=0;strength<4;++strength) {
    loaded.begin_settings(); loaded.draft_crt_strength=strength; loaded.draft_crt_settings=CrtSettings(strength);
    check(loaded.apply_settings(nullptr),"Save CRT strength");
