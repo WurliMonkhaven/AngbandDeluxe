@@ -1857,6 +1857,39 @@ class BackendTests(unittest.TestCase):
         labels=[o['actual']['label'] for o in e.state['items'] if o['location']=='Floor' and o['actual']['artifact']]
         self.assertEqual(len(labels),len(set(labels)),'Developer tool must not duplicate an existing artifact')
 
+    def test_scene_effect_tools(self):
+        e=self.engine; e.hello(); e.birth()
+        catalog=e.call('catalog.get')['result']
+        races={m['name']:m['id'] for m in catalog['uniques']}
+        floors={f['id'] for f in catalog['features'] if f['name']=='open floor'}
+        unique_names=iter(('Bullroarer the Hobbit','Morgoth, Lord of Darkness'))
+        for kind in ('up','down','lava','unique','unique'):
+            v=e.state['dungeon']
+            choices=[(x+v['x'],y+v['y']) for y,row in enumerate(v['cells']) for x,c in enumerate(row)
+                     if c[8] in floors and c[10] and not c[4] and not c[6] and not c[12]]
+            self.assertTrue(choices)
+            x,y=min(choices,key=lambda xy:abs(xy[0]-e.state['player']['x'])+abs(xy[1]-e.state['player']['y']))
+            params={'kind':kind,'x':x,'y':y}
+            if kind=='unique':
+                name=next(unique_names)
+                params['race']=races[name]
+            before=e.state['revision']; turn=e.state['turn']
+            self.assertIn('result',e.call('debug.scene',params)); e.next_state(before)
+            while e.state['readiness']!='ready': e.key('enter')
+            self.assertEqual(turn,e.state['turn'])
+            if kind=='unique':
+                monster=next(m for m in e.state['monsters'] if m['race_id']==params['race'])
+                self.assertTrue(monster['unique']); self.assertEqual(monster['morgoth'],name.startswith('Morgoth'))
+                self.assertIn('error',e.call('debug.scene',params))
+            else:
+                feature=next(f for f in catalog['features'] if f['id']==e.state['map']['known'][y][x])
+                self.assertTrue(feature['fiery'] if kind=='lava' else feature['map_kind']==kind)
+        for kind,expected in [('recall',20),('recall_cancel',0)]:
+            before=e.state['revision']; self.assertIn('result',e.call('debug.scene',{'kind':kind})); e.next_state(before)
+            self.assertEqual(e.state['player']['recall'],expected)
+        for params in ({'kind':'unknown'},{'kind':'lava','x':-1,'y':0},{'kind':'unique','race':-1},{'kind':'up','x':1.5,'y':1}):
+            self.assertIn('error',e.call('debug.scene',params))
+
     def test_debug_glow_placement(self):
         e=self.engine; e.hello(); e.birth()
         for kind in ('artifact','rune','cursed'):

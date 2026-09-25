@@ -1118,6 +1118,35 @@ int main(int argc,char **argv) {
    }
    glow_item["x"]=1; check(!ItemGlow::kind(glow_item,glow_view),"Glow stays within dungeon viewport");
   }
+  {
+   auto terrain_cell=sleep_view["cells"][0][0]; terrain_cell[10]=0;
+   check(ScenePresence::known_terrain(terrain_cell),"Remembered terrain keeps its effect outside current sight");
+   terrain_cell[8]=0; check(!ScenePresence::known_terrain(terrain_cell),"Unknown terrain cannot gain a glow");
+   terrain_cell[8]=1; terrain_cell[11]=1; check(!ScenePresence::known_terrain(terrain_cell),"Hallucinations do not expose terrain effects");
+   check(ScenePresence::observed(sleep_view,3,4,true),"Unique effects require an observed monster glyph");
+   for(int field:{10,11,6,12}) {
+    auto hidden=sleep_view; hidden["cells"][0][0][field]=(field==10 || field==6)?0:1;
+    check(!ScenePresence::observed(hidden,3,4,true),"Auras cannot reveal hidden or hallucinated monsters");
+   }
+   PresenceSettings settings,restored; settings.terrain=false; restored.load(settings.serialize());
+   check(!restored.terrain && restored.uniques && restored.recall,"Scene effect preferences round trip independently");
+   ScenePresence effect;
+   auto monster=sleeper; monster["unique"]=true; monster["index"]=1; monster["hp"]=20;
+   auto view=sleep_view; view["level_id"]="first";
+   json state={{"dungeon",view},{"monsters",json::array({monster})}};
+   ImGui::NewFrame(); ImGui::Begin("Scene presence host");
+   auto *draw=ImGui::GetWindowDrawList(); auto pos=ImGui::GetCursorScreenPos();
+   int before=draw->VtxBuffer.Size;
+   effect.draw(draw,state,json::object(),pos,{200,200},20,24,10,settings);
+   check(draw->VtxBuffer.Size>before && effect.actors.size()==1,"Visible uniques render their aura");
+   state["monsters"][0]["asleep"]=false;
+   effect.draw(draw,state,json::object(),pos,{200,200},20,24,11,settings);
+   check(effect.actors[1].flare==11,"Waking intensifies the unique aura");
+   settings.uniques=false; before=draw->VtxBuffer.Size;
+   effect.draw(draw,state,json::object(),pos,{200,200},20,24,12,settings);
+   check(draw->VtxBuffer.Size==before && effect.actors.empty(),"Disabling auras stops drawing and clears arrival state");
+   ImGui::End(); ImGui::Render();
+  }
   check(MonsterFeedback::eligible(sleeper,sleep_view),"Visible sleeping monster should have sleep markers");
   sleeper["afraid"]=true;
   check(MonsterFeedback::eligible(sleeper,sleep_view,"afraid"),"Feared monsters must use the engine fear flag");

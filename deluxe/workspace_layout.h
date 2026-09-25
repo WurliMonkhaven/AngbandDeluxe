@@ -462,7 +462,8 @@ struct WorkspaceLayout {
    if(h<=0) return 0; // A mixed group still needs a resizable content area.
    if(active<0 || p==n.active) { active=p; selected=h; }
   }
-  return selected>0?selected+chrome_height(n,enabled):0;
+  // ImGui floors child rectangles to pixels; round up to avoid tiny scrollbars.
+  return selected>0?std::ceil(selected+chrome_height(n,enabled))+1.f:0;
  }
  ImVec2 minimum(const Node &n,const Enabled &enabled,float width=0) const {
   if(!visible(n,enabled)) return {0,0};
@@ -479,7 +480,7 @@ struct WorkspaceLayout {
    const float content=panel_height(p,width);
    height=std::max(height,content>0?content:(p==Dungeon?10.f:p==Character?12.f:p==Inventory||p==Spells?8.f:5.f)*ImGui::GetFontSize());
   }
-  return {minimum_width(n,enabled),height+chrome_height(n,enabled)};
+  return {minimum_width(n,enabled),std::ceil(height+chrome_height(n,enabled))+1.f};
  }
  // Resolve scrollbar space before drawing (or previewing) the tree. Waiting
  // for last frame's scrollbar width causes compact rows to oscillate on resize.
@@ -499,6 +500,7 @@ struct WorkspaceLayout {
  // without stretching it or changing unrelated siblings' heights.
  struct SplitFrame { Node *node; int child; float usable,first,lower,upper; bool fitted; };
  std::vector<SplitFrame> split_path;
+ std::function<void(int)> trace_content; // Runs inside the content child for optional UI checks.
  std::function<void(int,ImVec2,ImVec2)> trace_panel; // Optional offscreen geometry checks.
  int resize_ancestor(bool trailing) const {
   for(int i=int(split_path.size())-1;i>=0;--i) {
@@ -610,6 +612,7 @@ struct WorkspaceLayout {
   const bool clipped=natural>ImGui::GetContentRegionAvail().y+.5f;
   ImGui::BeginChild("Content",ImVec2(0,0),ImGuiChildFlags_None,!clipped && (n.active==Dungeon||n.active==Map||natural>0)?ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse:ImGuiWindowFlags_None);
   ImGui::BeginDisabled(editing); draw(n.active); ImGui::EndDisabled();
+  if(trace_content) trace_content(n.active);
   ImGui::EndChild();
   // Docking controls overlay disabled content so starting a drag cannot push
   // every target away or suddenly make the workspace taller.

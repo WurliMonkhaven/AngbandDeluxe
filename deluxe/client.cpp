@@ -517,6 +517,7 @@ static void properties(const json &value) {
 #include "blast_preview.h"
 #include "monster_feedback.h"
 #include "item_glow.h"
+#include "scene_presence.h"
 #include "dungeon_tooltip.h"
 #include "rest_dialog.h"
 #include "quantity_picker.h"
@@ -572,7 +573,8 @@ struct UI {
  bool fear_animation=true, draft_fear_animation=true;
  bool level_animation=true, draft_level_animation=true;
  bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
- int glow_placement=0;
+ int glow_placement=0,scene_race=0;
+ PresenceSettings presence_settings,draft_presence; ScenePresence presence;
  int damage_amount=1, xp_amount=100, blast_radius=2, breath_element=0;
  DevStatusDialog dev_status_dialog;
  int settings_page=0;
@@ -641,6 +643,7 @@ struct UI {
    projectile_animation=j.value("projectile_animation",true);
    combat_animation=j.value("combat_animation",true);
    item_glow=j.value("item_glow",true);
+   presence_settings.load(j.value("presence",json::object()));
    sleep_animation=j.value("sleep_animation",true);
    fear_animation=j.value("fear_animation",true);
    level_animation=j.value("level_animation",true);
@@ -654,10 +657,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr,const ThemeSettings *theme=nullptr,const bool *glow=nullptr,const DungeonCameraSettings *camera=nullptr) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr,const ThemeSettings *theme=nullptr,const bool *glow=nullptr,const DungeonCameraSettings *camera=nullptr,const PresenceSettings *presence_options=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"camera",(camera?*camera:camera_settings).serialize()},{"item_glow",glow?*glow:item_glow},{"theme",(theme?*theme:theme_settings).serialize()},{"layout",layout.serialize()},{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"presence",(presence_options?*presence_options:presence_settings).serialize()},{"camera",(camera?*camera:camera_settings).serialize()},{"item_glow",glow?*glow:item_glow},{"theme",(theme?*theme:theme_settings).serialize()},{"layout",layout.serialize()},{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -685,7 +688,7 @@ struct UI {
   draft_projectile_animation=projectile_animation;
   draft_movement_animation=movement_animation; draft_blink_animation=blink_animation;
   draft_combat_animation=combat_animation;
-  draft_item_glow=item_glow;
+  draft_item_glow=item_glow; draft_presence=presence_settings;
   draft_sleep_animation=sleep_animation;
   draft_fear_animation=fear_animation;
   draft_level_animation=level_animation;
@@ -698,7 +701,7 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts,&draft_theme,&draft_item_glow,&draft_camera)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts,&draft_theme,&draft_item_glow,&draft_camera,&draft_presence)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
@@ -709,7 +712,7 @@ struct UI {
   projectile_animation=draft_projectile_animation;
   movement_animation=draft_movement_animation; blink_animation=draft_blink_animation;
   combat_animation=draft_combat_animation;
-  item_glow=draft_item_glow;
+  item_glow=draft_item_glow; presence_settings=draft_presence;
   sleep_animation=draft_sleep_animation;
   fear_animation=draft_fear_animation;
   level_animation=draft_level_animation;
@@ -895,6 +898,11 @@ struct UI {
      ImGui::Spacing(); DeluxeTheme::section("Dungeon indicators");
      ImGui::Checkbox("Ground item glow",&draft_item_glow);
      if(ImGui::IsItemHovered()) ImGui::SetTooltip("Soft glows for known artifacts, runes and curses on visible ground items. Works with CRT effects off.");
+     ImGui::Checkbox("Unique enemy auras",&draft_presence.uniques);
+     if(ImGui::IsItemHovered()) ImGui::SetTooltip("Broken halos for visible uniques; Morgoth has a crimson corona. Arrival, waking and injury intensify the effect.");
+     ImGui::Checkbox("Stairway glow",&draft_presence.stairs);
+     ImGui::Checkbox("Hazardous terrain effects",&draft_presence.terrain);
+     ImGui::Checkbox("Recall gathering effect",&draft_presence.recall);
      ImGui::Checkbox("Sleeping monsters",&draft_sleep_animation);
      ImGui::Checkbox("Frightened monsters",&draft_fear_animation);
 
@@ -1153,6 +1161,7 @@ struct UI {
   game_draw_list=draw; game_pos=ImGui::GetWindowPos(); game_size=ImGui::GetWindowSize();
   draw->AddRectFilled(start,ImVec2(start.x+viewport.x,start.y+viewport.y),DeluxeTheme::dungeon_colour(color(0)));
   draw->PushClipRect(start,ImVec2(start.x+viewport.x,start.y+viewport.y),true);
+  if(grid.semantic) presence.draw(draw,c.state,c.catalog,origin,size,cw,ch,double(SDL_GetTicksNS())/1e9,presence_settings);
   if(grid.semantic && item_glow) ItemGlow::draw(draw,c.state["dungeon"],origin,size,cw,ch,double(SDL_GetTicksNS())/1e9);
   const int x0=std::clamp(int(std::floor((start.x-origin.x)/cw))-1,0,int(grid.width));
   const int y0=std::clamp(int(std::floor((start.y-origin.y)/ch))-1,0,int(grid.height));
@@ -1247,13 +1256,15 @@ struct UI {
    if(dungeon_tooltip.dwell(tooltip_allowed,c.state.value("context",""),x,y,ImGui::GetTime())) dungeon_tooltip.draw(c.state,c.catalog);
    if(glow_placement && (!c.ready() || c.state.value("phase","")!="playing")) glow_placement=0;
    if(glow_placement && hovered) {
-    const char *labels[]={"","artifact","runed weapon","cursed weapon"};
+    const char *labels[]={"","artifact","runed weapon","cursed weapon","unique monster","up staircase","down staircase","lava"};
     outline(x,y,IM_COL32(255,215,95,255),2.f*display_scale);
     ImGui::SetTooltip("Place %s here (%d, %d)\nClick an empty visible floor tile. Right-click or Esc cancels.",labels[glow_placement],x,y);
     if(ImGui::IsMouseClicked(1)) glow_placement=0;
     else if(ImGui::IsMouseClicked(0)) {
      const char *kinds[]={"","artifact","rune","cursed"};
-     c.send("debug.glow_items",{{"kind",kinds[glow_placement]},{"x",x},{"y",y}}); c.busy=true; glow_placement=0; keys.clear();
+     if(glow_placement<=3) c.send("debug.glow_items",{{"kind",kinds[glow_placement]},{"x",x},{"y",y}});
+     else { const char *scenes[]={"unique","up","down","lava"}; c.send("debug.scene",{{"kind",scenes[glow_placement-4]},{"race",scene_race},{"x",x},{"y",y}}); }
+     c.busy=true; glow_placement=0; keys.clear();
     }
    } else if(hovered && !c.state.value("message_pending",false)) {
     if(!mouse_target) outline(x,y,IM_COL32(140,185,220,190),display_scale);
@@ -1917,6 +1928,22 @@ struct UI {
   ImGui::PopStyleColor(3);
   bool open_damage=false,open_status=false,open_xp=false,open_blast=false,open_breath=false;
   if(ImGui::BeginPopup("Developer tools")) {
+   if(ImGui::BeginMenu("Scene effect tests",c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.scene",0)>0)) {
+    ImGui::TextDisabled("Places real enemies and terrain");
+    if(ImGui::IsItemHovered()) ImGui::SetTooltip("These test actions mark the current run as a developer run.");
+    if(ImGui::BeginMenu("Spawn unique...")) {
+     for(const auto &race:c.catalog.value("uniques",json::array())) if(ImGui::MenuItem(race.value("name","").c_str())) { scene_race=race.value("id",0); glow_placement=4; keys.clear(); }
+     ImGui::EndMenu();
+    }
+    if(ImGui::MenuItem("Spawn Morgoth...")) for(const auto &race:c.catalog.value("uniques",json::array())) if(race.value("name","")=="Morgoth, Lord of Darkness") { scene_race=race.value("id",0); glow_placement=4; keys.clear(); }
+    if(ImGui::MenuItem("Place up staircase...")) glow_placement=5;
+    if(ImGui::MenuItem("Place down staircase...")) glow_placement=6;
+    if(ImGui::MenuItem("Place lava...")) glow_placement=7;
+    ImGui::Separator();
+    if(ImGui::MenuItem("Start recall (20 turns)")) { c.send("debug.scene",{{"kind","recall"}}); c.busy=true; }
+    if(ImGui::MenuItem("Cancel recall")) { c.send("debug.scene",{{"kind","recall_cancel"}}); c.busy=true; }
+    ImGui::EndMenu();
+   }
    if(ImGui::BeginMenu("Spawn glow test item",c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.glow_items",0)>0)) {
     const char *choices[]={"Artifact","Runed weapon","Cursed weapon"};
     for(int i=0;i<3;++i) if(ImGui::MenuItem(choices[i])) { glow_placement=i+1; keys.clear(); }
@@ -2019,6 +2046,7 @@ struct UI {
   else if(was_store) { focus_game(); store_panel.last_name.clear(); }
   was_store=in_store;
   const bool creating_character=in_game && (phase=="birth" || phase=="launcher");
+  if(!in_game || creating_character) presence=ScenePresence{};
   if(creating_character) {
    if(c.state.contains("birth")) { grid_focus=false; keys.clear(); birth_panel.draw(c); }
    else grid(std::max(1.f,ImGui::GetContentRegionAvail().y));

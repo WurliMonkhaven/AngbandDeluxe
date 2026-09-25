@@ -105,3 +105,19 @@ directory. Keep this companion when moving a tuned save between installations.
 Older saves without a companion use the installed stock capacities. Rename and
 delete through Deluxe also handle the companion. Replaced tuning files retain
 a `.bak` backup, and invalid values are rejected before saving.
+
+## Dungeon presence effects
+
+Settings → Animations has independent toggles for unique enemy auras, stairway
+glow, hazardous terrain effects, and recall gathering. Uniques have broken
+violet halos; Morgoth has a crimson corona and pale fractures. First sight,
+waking, and injury briefly intensify them. Known stairs have a bright, softly pulsing glow,
+lava has a persistent hot surface with brighter embers (including remembered tiles), and recall gathers blue motes as its countdown decreases.
+These effects work without CRT and do not reveal unseen or hallucinated actors.
+
+Dev tools → Scene effect tests lets you choose a unique (or Morgoth directly)
+and click an empty visible floor tile, or place stairs and lava the same way.
+Right-click or Escape cancels placement. Start/Cancel recall tests the real
+recall countdown. These are real world changes and mark the run as a developer
+run; spawning respects unique availability, with a dev-only exception to depth
+restrictions so Morgoth can be tested in town.

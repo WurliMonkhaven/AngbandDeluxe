@@ -388,3 +388,18 @@ not change the active game, state revision, or item handles. The backend applies
 saved tuning on its next initialization. Structural settings are captured per save
 and are only chosen afresh for new characters. The editor does not add or remove
 critical tier rows.
+
+### Scene effect tests
+
+Monster observations include `unique` and `morgoth` flags. The renderer still
+requires a visible, seen, non-hallucinated monster glyph. Feature catalog entries
+include `fiery`; `catalog.get` also lists `uniques` as `{id,name}` records for the
+developer picker.
+
+The `debug.scene` capability accepts `{kind,x,y,race}` for `unique`, `up`, `down`,
+or `lava`; only `unique` requires `race`. Placement requires an empty visible
+floor tile. Duplicate or dead uniques are rejected. `recall` and `recall_cancel`
+need no coordinates and set the real countdown to 20 or 0. All operations require
+normal live play, mark the run as a developer run, and execute at an engine input
+boundary without consuming a turn. Normal monster-generation depth constraints
+remain unchanged.

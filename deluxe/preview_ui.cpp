@@ -52,6 +52,7 @@ int main(int argc,char **argv) {
   ImGui::GetStyle().ScaleAllSizes(ui.scale); ImGui::GetStyle().FontScaleMain=ui.scale;
   for(const auto &item:c.state.value("items",json::array())) if(item.value("location","")=="Pack") { ui.selected=item.value("id",""); break; }
   json panel_rects=json::object();
+  if(fixture.value("layout_trace",false)) ui.layout.trace_content=[&](int p) { panel_rects[std::to_string(p)]["scrollbar"]=ImGui::GetCurrentWindow()->ScrollbarY; panel_rects[std::to_string(p)]["scroll_max"]=ImGui::GetScrollMaxY(); };
   if(fixture.value("layout_trace",false)) ui.layout.trace_panel=[&](int p,ImVec2 pos,ImVec2 size) {
    panel_rects[std::to_string(p)]={{"x",pos.x},{"y",pos.y},{"w",size.x},{"h",size.y}};
   };

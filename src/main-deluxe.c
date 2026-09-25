@@ -11,6 +11,7 @@
 #include "deluxe-messages.h"
 #include "monster.h"
 #include "mon-util.h"
+#include "mon-make.h"
 #include "obj-desc.h"
 #include "obj-gear.h"
 #include "obj-ignore.h"
@@ -86,6 +87,8 @@ static char revision_text[32], context_text[32];
 static const char *phase = "launcher";
 static bool debug_blink;
 static bool debug_glow_items;
+static int debug_scene_kind,debug_scene_race;
+static struct loc debug_scene_grid;
 static int debug_glow_kind;
 static struct loc debug_glow_grid;
 static int debug_breath_element = -1;
@@ -578,6 +581,8 @@ static cJSON *capture(void)
    number(j, "hp", m->hp); number(j, "max_hp", m->maxhp);
    number(j, "glyph", m->race->d_char); number(j, "color", m->race->d_attr);
    json_bool(j, "visible", monster_is_visible(m)); json_bool(j, "asleep", m->m_timed[MON_TMD_SLEEP] > 0);
+   json_bool(j,"unique",rf_has(m->race->flags,RF_UNIQUE));
+   json_bool(j,"morgoth",streq(m->race->name,"Morgoth, Lord of Darkness"));
    json_bool(j,"afraid",m->m_timed[MON_TMD_FEAR]>0); number(j,"index",i);
    { char description[160]=""; look_mon_desc(description,sizeof(description),i); string(j,"condition",description); }
    cJSON_AddItemToArray(monsters, j);
@@ -765,7 +770,7 @@ static void pump(void)
   negotiated = true;
   native_inventory=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_inventory"));
   native_equipment=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_equipment"));
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"tuning\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"presentation.camera\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"tuning\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.scene\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"presentation.camera\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   cJSON_SetNumberValue(cJSON_GetObjectItem(out,"max_frame_bytes"),(double)frame_limit);
   response(id, out); goto done;
  }
@@ -848,9 +853,15 @@ static void pump(void)
   if (initialized) for (i = 0; i < FEAT_MAX; ++i) {
    cJSON *f = cJSON_CreateObject(); number(f, "id", (int)i); string(f, "name", f_info[i].name);
    string(f,"map_kind",tf_has(f_info[i].flags,TF_UPSTAIR)?"up":tf_has(f_info[i].flags,TF_DOWNSTAIR)?"down":tf_has(f_info[i].flags,TF_SHOP)?"shop":tf_has(f_info[i].flags,TF_DOOR_ANY)?"door":tf_has(f_info[i].flags,TF_PASSABLE)?"floor":"wall");
+   json_bool(f,"fiery",tf_has(f_info[i].flags,TF_FIERY));
    number(f, "glyph", f_info[i].d_char); number(f, "color", f_info[i].d_attr); cJSON_AddItemToArray(features, f);
   }
-  cJSON_AddItemToObject(out, "features", features); response(id, out);
+  cJSON_AddItemToObject(out, "features", features);
+  cJSON *uniques=cJSON_CreateArray();
+  if(initialized) for(i=1;i<z_info->r_max;++i) if(r_info[i].name && rf_has(r_info[i].flags,RF_UNIQUE)) {
+   cJSON *entry=cJSON_CreateObject(); number(entry,"id",i); string(entry,"name",r_info[i].name); cJSON_AddItemToArray(uniques,entry);
+  }
+  cJSON_AddItemToObject(out,"uniques",uniques); response(id, out);
  } else if (streq(method,"birth.action") || streq(method,"birth.cancel")) {
   if(streq(method,"birth.cancel")) cJSON_AddStringToObject(p,"action","cancel");
   deluxe_birth_action(id,p);
@@ -1149,6 +1160,20 @@ static void pump(void)
    debug_status=idx; debug_status_amount=amount->valueint; ready=false;
    response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0);
   }
+ } else if(streq(method,"debug.scene")) {
+  const char *kind=str(p,"kind");
+  int action=streq(kind,"unique")?1:streq(kind,"up")?2:streq(kind,"down")?3:streq(kind,"lava")?4:streq(kind,"recall")?5:streq(kind,"recall_cancel")?6:0;
+  struct loc grid=loc(num(p,"x",-1),num(p,"y",-1));
+  const cJSON *jx=cJSON_GetObjectItem(p,"x"),*jy=cJSON_GetObjectItem(p,"y"),*jr=cJSON_GetObjectItem(p,"race");
+  int race=num(p,"race",0);
+  if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing")) error(id,"busy","Return to normal play before using scene test tools.");
+  else if(!action) error(id,"invalid_argument","Unknown scene test.");
+  else if(action<=4 && (!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) || jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint ||
+   !square_in_bounds_fully(cave,grid) || !square_isseen(cave,grid) || !square_isfloor(cave,grid) || square_object(cave,grid) || square_monster(cave,grid) || square_isplayer(cave,grid)))
+   error(id,"invalid_argument","Choose an empty, visible floor tile.");
+  else if(action==1 && (!cJSON_IsNumber(jr) || jr->valuedouble!=race || race<1 || race>=z_info->r_max || !r_info[race].name || !rf_has(r_info[race].flags,RF_UNIQUE) || r_info[race].cur_num || !r_info[race].max_num))
+   error(id,"invalid_argument","Choose a living unique that is not already on this level.");
+  else { debug_scene_kind=action; debug_scene_race=race; debug_scene_grid=grid; ready=false; response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0); }
  } else if (streq(method, "debug.glow_items")) {
   const char *type=str(p,"kind");
   int kind=streq(type,"artifact")?1:streq(type,"rune")?2:streq(type,"cursed")?3:0;
@@ -1317,6 +1342,25 @@ static errr get_command(cmd_context context)
   if(debug_status>=0) {
    int idx=debug_status,amount=debug_status_amount; debug_status=-1; ready=false;
    player_set_timed(player,idx,amount,true,true);
+  }
+  if(debug_scene_kind) {
+   int kind=debug_scene_kind; debug_scene_kind=0; ready=false;
+   player->noscore|=NOSCORE_JUMPING;
+   if(kind==1) {
+    struct monster_group_info info={0};
+    struct monster_race *race=&r_info[debug_scene_race];
+    /* Explicit wizard placement may test questors in town. Restore the race
+     * immediately; normal generation keeps its depth restriction. */
+    bool force_depth=rf_has(race->flags,RF_FORCE_DEPTH);
+    rf_off(race->flags,RF_FORCE_DEPTH);
+    bool placed=place_new_monster(cave,debug_scene_grid,race,true,false,info,ORIGIN_DROP_WIZARD);
+    if(force_depth) rf_on(race->flags,RF_FORCE_DEPTH);
+    if(!placed) msg("Could not place that unique.");
+   } else if(kind<=4) square_set_feat(cave,debug_scene_grid,kind==2?FEAT_LESS:kind==3?FEAT_MORE:FEAT_LAVA);
+   else { player->word_recall=kind==5?20:0; if(kind==5 && player->recall_depth<1) player->recall_depth=1; }
+   player->upkeep->update|=PU_UPDATE_VIEW|PU_MONSTERS;
+   player->upkeep->redraw|=PR_MAP|PR_MONLIST|PR_STATUS;
+   handle_stuff(player);
   }
   if(debug_glow_items) { debug_glow_items=false; ready=false; deluxe_spawn_glow_items(); }
   if(debug_experience) {

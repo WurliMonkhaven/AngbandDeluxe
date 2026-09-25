@@ -127,6 +127,19 @@ def main():
         landed = delivered["panel_rects"]["2"]
         assert all(abs(hint[k] - landed[k]) < 2 for k in ("x", "y", "w", "h")), "Preview must match the delivered panel bounds"
         assert canonical(preview["root"]) == canonical(original["root"]), "Hovering a preview must not change the layout"
+    inventory=normal["panel_rects"]["3"]
+    boundary=[inventory["x"]+inventory["w"]*.5,inventory["y"]-3]
+    no_exchange=run("default-inventory-no-flexible-space",layout_edit=False,layout_dividers_locked=False,
+        input=drag(boundary,[boundary[0],boundary[1]+65]))
+    assert abs(no_exchange["panel_rects"]["3"]["h"]-inventory["h"])<1, "Fixed stack has no spare height to exchange with inventory"
+    # Content-fitted panels must stay scrollbar-free at fractional UI scales.
+    for scale in (1, 1.25, 1.5):
+        scaled = run("tracker-rounding-"+str(scale), size=(1920, 1080), layout_edit=False, scale=scale)
+        assert not scaled["panel_rects"]["12"]["scrollbar"], "Fitted tracked creature must not gain a rounding scrollbar"
+    tracked_state = copy.deepcopy(base["state"])
+    tracked_state["player"]["tracked_creature"] = {"visible":True,"name":"Morgoth, Lord of Darkness","hp":20000,"max_hp":20000}
+    tracked = run("tracker-populated", size=(1920,1080), layout_edit=False, scale=1.25, state=tracked_state)
+    assert not tracked["panel_rects"]["12"]["scrollbar"], "Populated tracked creature must also fit without scrolling"
     # Compact tabs fit the selected content, including their tab strip.
     def pane(tabs, active=None):
         return {"axis": 0, "tabs": tabs, "active": tabs[0] if active is None else active}
