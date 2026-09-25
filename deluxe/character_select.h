@@ -36,17 +36,44 @@ struct CharacterSelect {
   draw->AddText(ImGui::GetFont(),size,ImVec2(c.x-text.x*.5f,c.y-text.y*.5f),ink,"@");
   ImGui::Dummy(ImVec2(width,height));
  }
+ static int roster_actions(bool enabled) {
+  const float f=ImGui::GetFontSize(),gap=ImGui::GetStyle().ItemSpacing.x;
+  const float width=std::max(1.f,(ImGui::GetContentRegionAvail().x-gap)*.5f),height=f*6;
+  int action=0;
+  for(int i=0;i<2;++i) {
+   if(i) ImGui::SameLine();
+   ImGui::BeginDisabled(i==1 && !enabled);
+   const auto p=ImGui::GetCursorScreenPos();
+   if(ImGui::Button(i?"##New character":"##Graveyard",{width,height})) action=i?4:5;
+   auto *d=ImGui::GetWindowDrawList();
+   const auto ink=ImGui::GetColorU32(i?DeluxeTheme::green():ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+   const ImVec2 c(p.x+width*.5f,p.y+f*2.25f);
+   const float stroke=std::max(2.f,f*.13f);
+   if(i) {
+    d->AddLine({c.x-f*.8f,c.y},{c.x+f*.8f,c.y},ink,stroke*1.5f);
+    d->AddLine({c.x,c.y-f*.8f},{c.x,c.y+f*.8f},ink,stroke*1.5f);
+   } else {
+    // Draw the headstone directly so it works with every selectable font.
+    const float r=f*.75f,top=c.y-f*.4f,bottom=c.y+f*.95f;
+    d->PathLineTo({c.x-r,bottom}); d->PathLineTo({c.x-r,top});
+    d->PathArcTo({c.x,top},r,3.14159265f,6.2831853f,20);
+    d->PathLineTo({c.x+r,bottom}); d->PathStroke(ink,ImDrawFlags_Closed,stroke);
+    d->AddLine({c.x-f,c.y+f*1.05f},{c.x+f,c.y+f*1.05f},ink,stroke);
+    d->AddLine({c.x-f*.27f,c.y-f*.08f},{c.x+f*.27f,c.y-f*.08f},ink,stroke);
+    d->AddLine({c.x,c.y-f*.38f},{c.x,c.y+f*.42f},ink,stroke);
+   }
+   const char *label=i?"New character":"Graveyard";
+   const float text_size=std::min(f,f*std::max(1.f,width-12)/std::max(1.f,ImGui::CalcTextSize(label).x));
+   const auto text=ImGui::GetFont()->CalcTextSizeA(text_size,FLT_MAX,0,label);
+   d->AddText(ImGui::GetFont(),text_size,{p.x+(width-text.x)*.5f,p.y+height-f*1.5f},ImGui::GetColorU32(ImGuiCol_Text),label);
+   ImGui::EndDisabled();
+  }
+  return action;
+ }
  // Continue / Rename / Delete / New / Graveyard
  int draw(const json &saves,bool enabled) {
   const float font=ImGui::GetFontSize();
-  ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Characters"); ImGui::SameLine();
-  float buttons=ImGui::CalcTextSize("Graveyard").x+ImGui::CalcTextSize("New character").x+4*ImGui::GetStyle().FramePadding.x+ImGui::GetStyle().ItemSpacing.x;
-  ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowWidth()-ImGui::GetStyle().WindowPadding.x-buttons));
   int action=0;
-  if(ImGui::Button("Graveyard")) action=5;
-  ImGui::SameLine(); ImGui::BeginDisabled(!enabled);
-  if(ImGui::Button("New character")) action=4;
-  ImGui::EndDisabled(); ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
   const json *chosen=nullptr;
   for(const auto &s:saves) if(s.value("id","")==selected) chosen=&s;
   if(!chosen && !saves.empty()) { selected=saves.front().value("id",""); chosen=&saves.front(); }
@@ -55,6 +82,7 @@ struct CharacterSelect {
    emblem(font*11,ImGui::GetColorU32(DeluxeTheme::green())); ImGui::Spacing();
    ImGui::TextUnformatted("A new name. A new descent.");
    ImGui::TextDisabled("Your adventurers will be waiting here between journeys.");
+   ImGui::Spacing(); action=roster_actions(enabled);
   } else {
    const bool wide=ImGui::GetContentRegionAvail().x>font*52;
    if(ImGui::BeginTable("Roster and profile",wide?2:1,ImGuiTableFlags_SizingStretchProp)) {
@@ -62,7 +90,11 @@ struct CharacterSelect {
     if(wide) ImGui::TableSetupColumn("Profile",ImGuiTableColumnFlags_WidthStretch,.58f);
     ImGui::TableNextColumn();
     ImGui::SetNextItemWidth(-1); ImGui::InputTextWithHint("##Character search","Find a character",search,sizeof(search));
-    ImGui::BeginChild("Character roster",ImVec2(0,wide?0:font*14));
+    int matches_count=0;
+    for(const auto &s:saves) if(matches(s.value("name",s.value("id",""))+" "+s.value("id","")+" "+s.value("identity",s.value("description","")),search)) ++matches_count;
+    const float cards_height=matches_count?matches_count*(font*5.6f+2*ImGui::GetStyle().ItemSpacing.y):ImGui::GetTextLineHeightWithSpacing();
+    const float available=wide?ImGui::GetContentRegionAvail().y-font*6-ImGui::GetStyle().ItemSpacing.y:font*14;
+    ImGui::BeginChild("Character roster",ImVec2(0,std::max(font*2,std::min(cards_height,available))));
     bool found=false;
     for(const auto &s:saves) {
      const auto id=s.value("id",""),name=s.value("name",id),identity=s.value("identity",s.value("description",""));
@@ -83,7 +115,9 @@ struct CharacterSelect {
      draw->PopClipRect(); ImGui::Spacing(); ImGui::PopID();
     }
     if(!found) ImGui::TextDisabled("No matching characters.");
-    ImGui::EndChild(); ImGui::TableNextColumn();
+    ImGui::EndChild();
+    if(int picked=roster_actions(enabled)) action=picked;
+    ImGui::TableNextColumn();
     ImGui::BeginChild("Character profile");
     if(chosen) {
      const auto &s=*chosen; const auto id=s.value("id",""),name=s.value("name",id),identity=s.value("identity","");
