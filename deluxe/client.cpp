@@ -8,6 +8,7 @@
 #include "crt_renderer.h"
 #include "runtime_paths.h"
 #include "font_library.h"
+#include "tileset.h"
 #include "workspace_layout.h"
 #include <iostream>
 #include "dungeon_view.h"
@@ -149,7 +150,7 @@ struct Connection {
  unsigned long next = 0;
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
  bool pickup_travel=false, resting=false, saving=false;
- int camera_sent=-1;
+ int camera_sent=-1, tiles_sent=-1;
  bool return_to_menu = false, restart_ready = false, close_confirmed = false;
  json state = json::object(), prompt = json::object(), pending_prompt = json::object(), commands = json::array(), saves = json::array(), catalog = json::object();
  Connection()=default;
@@ -278,10 +279,10 @@ struct Connection {
    bindings_saved=j.contains("error")?json{{"error",j["error"].value("message","Bindings could not be saved.")}}:j["result"];
    busy=false; return;
   }
-  if(method=="dungeon.camera") {
+  if(method=="dungeon.camera" || method=="dungeon.tiles") {
    busy=false;
    if(j.contains("error")) {
-    if(j["error"].value("code","")=="busy") camera_sent=-1;
+    if(j["error"].value("code","")=="busy") { if(method=="dungeon.tiles") tiles_sent=-1; else camera_sent=-1; }
     else notice(j["error"].value("message","Camera mode could not be changed."));
    }
    return;
@@ -583,6 +584,8 @@ struct UI {
  AudioSettings audio_settings{}, draft_audio_settings{};
  AudioPlayer audio;
  CrtSettings crt_settings{}, draft_crt_settings{};
+ TilesetLibrary tiles;
+ int tileset=0,draft_tileset=0;
  FontLibrary *font_library=nullptr;
  FontSettings font_settings,draft_fonts;
  ThemeSettings theme_settings,draft_theme;
@@ -626,6 +629,7 @@ struct UI {
  std::vector<json> keys;
  void load_settings() {
   try { std::ifstream in(settings_path); if (!in) return; json j; in >> j;
+   tileset=std::clamp(j.value("tileset",0),0,6);
    camera_settings.load(j.value("camera",json::object()));
    font_settings.load(j.value("fonts",json::object()));
    theme_settings.load(j.value("theme",json::object()));
@@ -657,10 +661,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr,const ThemeSettings *theme=nullptr,const bool *glow=nullptr,const DungeonCameraSettings *camera=nullptr,const PresenceSettings *presence_options=nullptr) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr,const ThemeSettings *theme=nullptr,const bool *glow=nullptr,const DungeonCameraSettings *camera=nullptr,const PresenceSettings *presence_options=nullptr,const int *tile_choice=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"presence",(presence_options?*presence_options:presence_settings).serialize()},{"camera",(camera?*camera:camera_settings).serialize()},{"item_glow",glow?*glow:item_glow},{"theme",(theme?*theme:theme_settings).serialize()},{"layout",layout.serialize()},{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"tileset",tile_choice?*tile_choice:tileset},{"presence",(presence_options?*presence_options:presence_settings).serialize()},{"camera",(camera?*camera:camera_settings).serialize()},{"item_glow",glow?*glow:item_glow},{"theme",(theme?*theme:theme_settings).serialize()},{"layout",layout.serialize()},{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -671,6 +675,7 @@ struct UI {
   game_tuning.reset(); saving_tuning=false; c.tuning_result=nullptr; c.tuning_saved=nullptr;
   if(c.negotiated && c.capabilities.value("tuning",0)>0) c.send("tuning.get");
   else { game_tuning.loaded=true; game_tuning.error="Game tuning needs a connected, supported backend."; }
+  draft_tileset=tileset;
   draft_camera=camera_settings;
   draft_fonts=font_settings; draft_theme=theme_settings;
   draft_audio_settings=audio_settings;
@@ -701,12 +706,12 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts,&draft_theme,&draft_item_glow,&draft_camera,&draft_presence)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts,&draft_theme,&draft_item_glow,&draft_camera,&draft_presence,&draft_tileset)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
   if(camera_settings.enabled!=draft_camera.enabled || camera_settings.follow!=draft_camera.follow) dungeon_camera.reset();
-  camera_settings=draft_camera;
+  camera_settings=draft_camera; tileset=draft_tileset;
   font_settings=draft_fonts; theme_settings=draft_theme;
   audio_settings=draft_audio_settings; audio.configure(audio_settings,window_active);
   projectile_animation=draft_projectile_animation;
@@ -810,6 +815,20 @@ struct UI {
    {
     if(settings_page==9) game_tuning.draw();
     if(settings_page==3) {
+     DeluxeTheme::section("Dungeon artwork");
+     ImGui::SetNextItemWidth(-1);
+     if(ImGui::BeginCombo("##Tileset",TilesetLibrary::sets[draft_tileset].name)) {
+      for(int i=0;i<7;++i) if(ImGui::Selectable(TilesetLibrary::sets[i].name,draft_tileset==i)) draft_tileset=i;
+      ImGui::EndCombo();
+     }
+     if(draft_tileset) {
+      if(tiles.load(draft_tileset)) {
+       tiles.preview(draft_tileset);
+       ImGui::TextWrapped("Square tiles replace dungeon lettering. Zoom with the free camera for a closer look.");
+      } else ImGui::TextWrapped("%s",tiles.atlases[draft_tileset].error.c_str());
+     } else ImGui::TextWrapped("Classic lettering, using your chosen dungeon font.");
+     ImGui::TextDisabled("Unmapped artwork falls back to ASCII.");
+     ImGui::Spacing();
      DeluxeTheme::section("Dungeon camera");
      ImGui::Checkbox("Free dungeon camera",&draft_camera.enabled);
      ImGui::TextWrapped("Explore the whole known level at your own scale. Unexplored areas remain hidden.");
@@ -1132,7 +1151,8 @@ struct UI {
   dungeon_surface_pos=start; dungeon_surface_size=viewport;
   // Fit the complete semantic viewport (or fallback terminal) without scrolling.
   auto *dungeon_font=font_library?font_library->get(font_settings.dungeon()):ImGui::GetFont();
-  const float cell_ratio=font_library?font_library->cell_ratio(font_settings.dungeon()):.60f;
+  const bool tiled=grid.semantic && tileset>0 && grid.tileset==tileset && tiles.load(tileset);
+  const float cell_ratio=tiled?1.12f:(font_library?font_library->cell_ratio(font_settings.dungeon()):.60f);
   float pixels=std::min(
    std::max(.01f,viewport.x-2)/(float(columns)*cell_ratio),
    std::max(.01f,viewport.y-2)/(float(std::max(size_t(1),grid.height))*1.12f));
@@ -1161,12 +1181,30 @@ struct UI {
   game_draw_list=draw; game_pos=ImGui::GetWindowPos(); game_size=ImGui::GetWindowSize();
   draw->AddRectFilled(start,ImVec2(start.x+viewport.x,start.y+viewport.y),DeluxeTheme::dungeon_colour(color(0)));
   draw->PushClipRect(start,ImVec2(start.x+viewport.x,start.y+viewport.y),true);
-  if(grid.semantic) presence.draw(draw,c.state,c.catalog,origin,size,cw,ch,double(SDL_GetTicksNS())/1e9,presence_settings);
-  if(grid.semantic && item_glow) ItemGlow::draw(draw,c.state["dungeon"],origin,size,cw,ch,double(SDL_GetTicksNS())/1e9);
   const int x0=std::clamp(int(std::floor((start.x-origin.x)/cw))-1,0,int(grid.width));
   const int y0=std::clamp(int(std::floor((start.y-origin.y)/ch))-1,0,int(grid.height));
   const int x1=std::clamp(int(std::ceil((start.x+viewport.x-origin.x)/cw))+1,0,int(grid.width));
   const int y1=std::clamp(int(std::ceil((start.y+viewport.y-origin.y)/ch))+1,0,int(grid.height));
+  auto tile_layer=[&](int x,int y,int layer,ImVec2 offset) {
+   const auto &v=c.state["dungeon"]; const auto &t=grid.tiles[y*grid.width+x];
+   const ImVec2 at(origin.x+(x+offset.x)*cw,origin.y+(y+offset.y)*ch);
+   if(!tiles.tile(draw,tileset,t[layer*2],t[layer*2+1],at,{cw,ch})) {
+    const auto &a=v["cells"][y][x]; unsigned glyph=a[layer*2];
+    if(glyph && glyph!=' ') draw->AddText(dungeon_font,pixels,at,DeluxeTheme::dungeon_colour(color(a[layer*2+1].get<int>())),utf8(glyph).c_str());
+   }
+  };
+  if(tiled) for(int y=y0;y<y1;++y) for(int x=x0;x<x1;++x) tile_layer(x,y,0,{0,0});
+  if(grid.semantic) presence.draw(draw,c.state,c.catalog,origin,size,cw,ch,double(SDL_GetTicksNS())/1e9,presence_settings);
+  if(grid.semantic && item_glow) ItemGlow::draw(draw,c.state["dungeon"],origin,size,cw,ch,double(SDL_GetTicksNS())/1e9);
+  if(tiled) {
+   for(int layer=1;layer<4;++layer) for(int y=y0;y<y1;++y) for(int x=x0;x<x1;++x) {
+    ImVec2 offset(0,0);
+    const auto &v=c.state["dungeon"]; const auto &a=v["cells"][y][x];
+    if(layer==3 && a[6].get<int>() && !a[11].get<int>() && !a[12].get<int>())
+     offset=motion_feedback.offset(x+v.value("x",0),y+v.value("y",0),double(SDL_GetTicksNS())/1e9);
+    tile_layer(x,y,layer,offset);
+   }
+  } else {
   for(int y=y0;y<y1;++y) for(int x=x0;x<x1;++x) {
    const auto &cell=grid.cells[y*grid.width+x];
    if(cell.glyph && cell.glyph!=' ') {
@@ -1184,6 +1222,7 @@ struct UI {
     }
     draw->AddText(dungeon_font,pixels,{at.x+displacement.x*cw,at.y+displacement.y*ch},DeluxeTheme::dungeon_colour(color(cell.color)),utf8(cell.glyph).c_str());
    }
+  }
   }
   if(grid.semantic) {
    const auto &view=c.state["dungeon"];
@@ -1256,14 +1295,14 @@ struct UI {
    if(dungeon_tooltip.dwell(tooltip_allowed,c.state.value("context",""),x,y,ImGui::GetTime())) dungeon_tooltip.draw(c.state,c.catalog);
    if(glow_placement && (!c.ready() || c.state.value("phase","")!="playing")) glow_placement=0;
    if(glow_placement && hovered) {
-    const char *labels[]={"","artifact","runed weapon","cursed weapon","unique monster","up staircase","down staircase","lava"};
+    const char *labels[]={"","artifact","runed weapon","cursed weapon","unique monster","up staircase","down staircase","lava","double-height monster"};
     outline(x,y,IM_COL32(255,215,95,255),2.f*display_scale);
     ImGui::SetTooltip("Place %s here (%d, %d)\nClick an empty visible floor tile. Right-click or Esc cancels.",labels[glow_placement],x,y);
     if(ImGui::IsMouseClicked(1)) glow_placement=0;
     else if(ImGui::IsMouseClicked(0)) {
      const char *kinds[]={"","artifact","rune","cursed"};
      if(glow_placement<=3) c.send("debug.glow_items",{{"kind",kinds[glow_placement]},{"x",x},{"y",y}});
-     else { const char *scenes[]={"unique","up","down","lava"}; c.send("debug.scene",{{"kind",scenes[glow_placement-4]},{"race",scene_race},{"x",x},{"y",y}}); }
+     else { const char *scenes[]={"unique","up","down","lava","double_height"}; c.send("debug.scene",{{"kind",scenes[glow_placement-4]},{"race",scene_race},{"x",x},{"y",y}}); }
      c.busy=true; glow_placement=0; keys.clear();
     }
    } else if(hovered && !c.state.value("message_pending",false)) {
@@ -1838,6 +1877,10 @@ struct UI {
   }
  }
  void draw(SDL_Window *window) {
+  if(c.negotiated && !c.busy && c.capabilities.value("presentation.tiles",0)>0 &&
+     c.tiles_sent!=tileset && (c.ready() || !c.state.contains("player"))) {
+   c.send("dungeon.tiles",{{"id",tileset}}); c.tiles_sent=tileset; c.busy=true;
+  }
   if(c.negotiated && !c.busy && c.capabilities.value("presentation.camera",0)>0 &&
      c.camera_sent!=int(camera_settings.enabled) && (c.ready() || !c.state.contains("player"))) {
    c.send("dungeon.camera",{{"enabled",camera_settings.enabled}});
@@ -1943,6 +1986,20 @@ struct UI {
     if(ImGui::MenuItem("Start recall (20 turns)")) { c.send("debug.scene",{{"kind","recall"}}); c.busy=true; }
     if(ImGui::MenuItem("Cancel recall")) { c.send("debug.scene",{{"kind","recall_cancel"}}); c.busy=true; }
     ImGui::EndMenu();
+   }
+   if(ImGui::BeginMenu("Spawn double-height monster",c.ready() && c.state.value("phase","")=="playing" && !c.catalog.value("double_height_monsters",json::array()).empty())) {
+    ImGui::TextDisabled("Tall artwork uses Shockbolt tiles");
+    static char tall_filter[80]{};
+    ImGui::SetNextItemWidth(ImGui::GetFontSize()*24);
+    ImGui::InputTextWithHint("##Tall monster search","Find a monster",tall_filter,sizeof(tall_filter));
+    ImGui::BeginChild("Tall monsters",{ImGui::GetFontSize()*27,ImGui::GetFontSize()*16});
+    for(const auto &race:c.catalog["double_height_monsters"]) {
+     const auto name=race.value("name","");
+     if(matches(name,tall_filter) && ImGui::Selectable(name.c_str())) {
+      scene_race=race.value("id",0); glow_placement=8; keys.clear(); ImGui::CloseCurrentPopup();
+     }
+    }
+    ImGui::EndChild(); ImGui::EndMenu();
    }
    if(ImGui::BeginMenu("Spawn glow test item",c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.glow_items",0)>0)) {
     const char *choices[]={"Artifact","Runed weapon","Cursed weapon"};
@@ -2201,6 +2258,7 @@ int main(int argc,char **argv) {
  char *pref=SDL_GetPrefPath("AngbandDeluxe","AngbandDeluxe");
  std::string user=user_override.empty()?(pref?pref:"deluxe-user"):user_override; SDL_free(pref);
  const std::string backend=paths.backend.string(),data=paths.data.string();
+ ui.tiles.device=gpu; ui.tiles.directory=paths.data/"tiles";
  try { fs::create_directories(user); }
  catch(const fs::filesystem_error &error) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Angband Deluxe",("Cannot open the save/settings folder: "+std::string(error.what())).c_str(),window); return 1;
@@ -2348,7 +2406,7 @@ int main(int argc,char **argv) {
   if(SDL_GetWindowFlags(window)&SDL_WINDOW_MINIMIZED) SDL_Delay(20);
  }
  detached.shutdown();
- ui.audio.close();
+ ui.tiles.shutdown(); ui.audio.close();
  SDL_WaitForGPUIdle(gpu); crt_renderer.shutdown(); ImGui_ImplSDLGPU3_Shutdown(); ImGui_ImplSDL3_Shutdown(); ImGui::DestroyContext();
  connection.close_process();
  SDL_ReleaseWindowFromGPUDevice(gpu,window); SDL_DestroyGPUDevice(gpu); SDL_DestroyWindow(window); SDL_Quit(); return 0;

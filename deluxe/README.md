@@ -121,3 +121,28 @@ Right-click or Escape cancels placement. Start/Cancel recall tests the real
 recall countdown. These are real world changes and mark the run as a developer
 run; spawning respects unique availability, with a dev-only exception to depth
 restrictions so Morgoth can be tested in town.
+
+### Dungeon tiles
+
+Settings → Display → Dungeon artwork selects ASCII (the default), Original,
+Adam Bolt, David Gervais, Nomad, or Shockbolt Dark/Light. The picker previews a
+small scene before Save. The free camera zooms and pans tiled dungeons too.
+Artwork uses square cells; panels and classic fallback screens retain their
+fonts. Dungeon colour inversion applies to ASCII, not to sprite artwork.
+
+The backend exports optional tile layers separately from the existing ASCII
+layers, using Angband's bundled mappings and read-only known-map rendering.
+There are no monster/object identity guesses in the client. Transparent layers,
+flavours, lighting, and Shockbolt's double-height sprites are supported. Missing
+or invalid artwork falls back to ASCII. The two Shockbolt choices share a GPU
+atlas. Graphics preferences never replace the engine's terminal visuals.
+
+Dev tools → Spawn double-height monster provides a searchable list derived from
+Shockbolt's overdraw rows. Choose a creature and click an empty visible floor
+square; Esc/right-click cancels. The creature is real, initially asleep, and the
+run is marked as a developer run. Select either Shockbolt set to see its tall
+artwork. Existing unique/Morgoth tools also remain available.
+
+Original artwork and attribution remain in `lib/tiles` and `docs/copying.rst`;
+Windows packages include both. PNG decoding uses stb_image from the pinned SDL
+source dependency, with its license bundled in release packages.

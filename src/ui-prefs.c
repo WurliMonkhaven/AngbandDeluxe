@@ -1247,6 +1247,33 @@ static bool process_pref_file_named(const char *path, bool quiet, bool user) {
 }
 
 
+/* Read bundled artwork mappings without importing user preferences, commands,
+ * colours, inscriptions or window flags into a read-only presentation pass. */
+static bool tile_pref_file(const char *directory, const char *name, int depth)
+{
+ char path[1024], line[1024];
+ bool ok=true;
+ if(depth>8 || strchr(name,'/') || strchr(name,'\\') || strstr(name,"..")) return false;
+ path_build(path,sizeof(path),directory,name);
+ ang_file *f=file_open(path,MODE_READ,FTYPE_TEXT);
+ if(!f) return false;
+ struct parser *p=init_parse_prefs(false);
+ while(file_getl(f,line,sizeof(line))) {
+  if(prefix(line,"%:")) {
+   struct prefs_data *d=parser_priv(p);
+   if(!d->bypass && !tile_pref_file(directory,line+2,depth+1)) ok=false;
+  } else if(prefix(line,"?:") || prefix(line,"monster:") || prefix(line,"object:") ||
+    prefix(line,"feat:") || prefix(line,"trap:") || prefix(line,"flavor:")) {
+   if(parser_parse(p,line)!=PARSE_ERROR_NONE) ok=false;
+  }
+ }
+ file_close(f); mem_free(parser_priv(p)); parser_destroy(p); return ok;
+}
+bool process_tile_pref_file(const char *directory, const char *name)
+{
+ return tile_pref_file(directory,name,0);
+}
+
 /**
  * Process the user pref file with a given name and search paths.
  *

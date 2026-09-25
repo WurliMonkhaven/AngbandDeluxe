@@ -270,6 +270,59 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(Path(str(path)+'.bak').read_text().strip(),'{invalid json')
         e.birth()
 
+    def test_tileset_presentation(self):
+        e=self.engine; e.hello(); e.birth()
+        before=e.call('state.get')['result']
+        for invalid in (-1,7,1.5,'5',None):
+            self.assertIn('error',e.call('dungeon.tiles',{'id':invalid}))
+        for mode in range(1,7):
+            self.assertIn('result',e.call('dungeon.tiles',{'id':mode}))
+            state=e.call('state.get')['result']; view=state['dungeon']
+            self.assertEqual(view.get('tileset'),mode, e.errors)
+            self.assertEqual(len(view['tiles']),view['height'])
+            self.assertEqual(state['terminal'],before['terminal'])
+            self.assertEqual(view['cells'],before['dungeon']['cells'])
+            for key in ('turn','player','map'):
+                self.assertEqual(state[key],before[key],key)
+            py=state['player']['y']-view['y']; px=state['player']['x']-view['x']
+            self.assertTrue(view['tiles'][py][px][7]&128)
+            for row in view['tiles']:
+                self.assertEqual(len(row),view['width'])
+                self.assertTrue(all(len(cell)==8 for cell in row))
+        self.assertIn('result',e.call('dungeon.camera',{'enabled':True}))
+        view=e.call('state.get')['result']['dungeon']
+        for y,row in enumerate(view['cells']):
+            for x,cell in enumerate(row):
+                tiles=view['tiles'][y][x]
+                # No actor or item artwork can disclose a hidden entity.
+                if not cell[6]: self.assertEqual(tiles[6],0)
+                if not cell[4]: self.assertEqual(tiles[4],0)
+        self.assertIn('result',e.call('dungeon.tiles',{'id':0}))
+        self.assertNotIn('tiles',e.call('state.get')['result']['dungeon'])
+
+    def test_double_height_monster_tool(self):
+        e=self.engine; e.hello(); e.birth()
+        catalog=e.call('catalog.get')['result']
+        race=next(r for r in catalog['double_height_monsters'] if r['name']=='ancient red dragon')
+        self.assertIn('result',e.call('dungeon.tiles',{'id':5}))
+        state=e.call('state.get')['result']; e.state=state
+        p=state['player']; view=state['dungeon']
+        occupied={(m['x'],m['y']) for m in state['monsters']}
+        floors={f['id'] for f in catalog['features'] if f['name']=='open floor'}
+        dest=next((x+view['x'],y+view['y']) for y,row in enumerate(view['cells']) for x,c in enumerate(row)
+                  if c[8] in floors and c[10] and not c[4] and not c[6] and
+                  (x+view['x'],y+view['y']) not in occupied and abs(x+view['x']-p['x'])<=3 and abs(y+view['y']-p['y'])<=3)
+        self.assertIn('error',e.call('debug.scene',{'kind':'double_height','race':race['id'],'x':p['x'],'y':p['y']}))
+        self.assertIn('error',e.call('debug.scene',{'kind':'double_height','race':-1,'x':dest[0],'y':dest[1]}))
+        old=state['revision']
+        self.assertIn('result',e.call('debug.scene',{'kind':'double_height','race':race['id'],'x':dest[0],'y':dest[1]}))
+        e.next_state(old)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertTrue(any(m['name']==race['name'] for m in e.state['monsters']))
+        view=e.state['dungeon']; tile=view['tiles'][dest[1]-view['y']][dest[0]-view['x']]
+        self.assertTrue(27<=tile[7]&127<=31)
+        self.assertEqual(e.state['turn'],state['turn'])
+
     def test_free_dungeon_camera(self):
         e=self.engine
         e.hello(); e.birth()
@@ -365,6 +418,9 @@ class BackendTests(unittest.TestCase):
                 for enabled in (True,False,True,False,True):
                     self.assertIn('result',branch.call('dungeon.camera',{'enabled':enabled}))
                     branch.state=branch.call('state.get')['result']
+                for mode in (1,5,6,2,0,5):
+                    self.assertIn('result',branch.call('dungeon.tiles',{'id':mode}))
+                branch.state=branch.call('state.get')['result']
                 self.assertTrue(any(c[11] for row in branch.state['dungeon']['cells'] for c in row))
             for _ in range(8):
                 branch.key(ord(','))

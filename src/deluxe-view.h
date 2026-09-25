@@ -103,6 +103,7 @@ static void deluxe_capture_view(cJSON *state_record)
   }
   cJSON_AddItemToArray(rows,row);
  }
+ deluxe_capture_tiles(view,ox,oy,width,height);
  cJSON_AddItemToObject(view,"items",observed_items);
  cJSON_AddItemToObject(view,"cells",rows); cJSON_AddItemToObject(state_record,"dungeon",view);
  if (target_ui_current) {

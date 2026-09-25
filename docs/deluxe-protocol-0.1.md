@@ -403,3 +403,23 @@ need no coordinates and set the real countdown to 20 or 0. All operations requir
 normal live play, mark the run as a developer run, and execute at an engine input
 boundary without consuming a turn. Normal monster-generation depth constraints
 remain unchanged.
+
+#### Tile presentation
+
+`presentation.tiles: 1` adds `dungeon.tiles { id }`, where 0 means ASCII and
+1–6 match `lib/tiles/list.txt`. This presentation-only request is accepted at the
+launcher or a normal command boundary, consumes no turns, and republishes the
+view during play. Invalid IDs and fractional values are rejected.
+
+When enabled, `dungeon.tileset` identifies the active mapping and `dungeon.tiles`
+is a height × width array of eight integers per cell: terrain glyph/attribute,
+trap glyph/attribute, object glyph/attribute, actor glyph/attribute. High-bit
+pairs encode atlas column/row (`& 127`); other pairs use the ASCII fallback.
+Existing `dungeon.cells` and terminal fields are unchanged. Tile generation
+respects knowledge, lighting, camouflage and hallucination, and never draws
+from gameplay RNG. The same frame budgets and view coordinates apply.
+
+The developer catalogue includes `double_height_monsters` (id/name entries).
+`debug.scene {kind:"double_height", race, x, y}` validates a mapped tall race and
+an empty visible floor square, then places an asleep monster through normal
+wizard placement. It marks the run as a developer run.

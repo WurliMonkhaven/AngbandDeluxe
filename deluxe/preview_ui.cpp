@@ -30,6 +30,7 @@ int main(int argc,char **argv) {
   if(fixture.contains("blast")) c.blast=fixture["blast"];
   if(fixture.value("saving_preview",false)) { c.saving=true; c.close_requested=true; c.busy=true; }
   UI ui{c}; ui.font_library=&fonts; ui.font_settings.load(fixture.value("fonts",json::object())); ui.base_style=ImGui::GetStyle();
+  ui.tiles.device=gpu; ui.tiles.directory=std::filesystem::path("lib")/"tiles"; ui.tileset=fixture.value("tileset",0);
   ui.camera_settings.load(fixture.value("camera",json::object()));
   if(fixture.contains("tuning")) c.tuning_result=fixture["tuning"];
   ui.settings_page=fixture.value("settings_page",0);
@@ -132,7 +133,7 @@ int main(int argc,char **argv) {
   auto *surface=SDL_CreateSurfaceFrom(w,h,SDL_PIXELFORMAT_RGBA32,bytes,w*4);
   if(!surface || !SDL_SaveBMP(surface,argv[2])) throw std::runtime_error(SDL_GetError());
   SDL_DestroySurface(surface); SDL_UnmapGPUTransferBuffer(gpu,download);
-  SDL_WaitForGPUIdle(gpu); renderer.shutdown(); SDL_ReleaseGPUTexture(gpu,target); SDL_ReleaseGPUTransferBuffer(gpu,download);
+  ui.tiles.shutdown(); SDL_WaitForGPUIdle(gpu); renderer.shutdown(); SDL_ReleaseGPUTexture(gpu,target); SDL_ReleaseGPUTransferBuffer(gpu,download);
   ImGui_ImplSDLGPU3_Shutdown(); ImGui::DestroyContext(); SDL_DestroyGPUDevice(gpu); SDL_Quit();
   return 0;
  } catch(const std::exception &e) { std::cerr<<e.what()<<"\n"; return 1; }

@@ -1,6 +1,7 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include <vector>
+#include <array>
 #include <algorithm>
 
 // A separate semantic presentation stream, not a crop or interpretation of
@@ -23,12 +24,14 @@ inline const nlohmann::json *dungeon_view(const nlohmann::json &state) {
 // keeps all layers; opaque text rendering only needs the topmost present glyph.
 struct RenderGrid {
  struct Cell { unsigned glyph=0; int color=0; };
+ int tileset=0;
+ std::vector<std::array<int,8>> tiles;
  bool semantic=false;
  size_t width=0, height=0;
  std::vector<Cell> cells;
  void update(const nlohmann::json &state) {
   const auto *view=dungeon_view(state);
-  semantic=view!=nullptr; width=height=0; cells.clear();
+  semantic=view!=nullptr; width=height=0; cells.clear(); tileset=0; tiles.clear();
   if(!semantic && !state.contains("terminal")) return;
   const auto &rows=semantic?view->at("cells"):state.at("terminal");
   height=rows.size();
@@ -42,6 +45,25 @@ struct RenderGrid {
     if(glyph) cell={glyph,source.at(layer*2+1).get<int>()};
    }
   }
+  if(semantic && view->contains("tiles") && view->value("tileset",0)>0 && view->value("tileset",0)<=6) {
+   const auto &rows=view->at("tiles"); bool valid=rows.is_array() && rows.size()==height;
+   if(valid) for(const auto &row:rows) {
+    if(!row.is_array() || row.size()!=width) { valid=false; break; }
+    for(const auto &cell:row) {
+     if(!cell.is_array() || cell.size()!=8) { valid=false; break; }
+     std::array<int,8> layer{};
+     for(int i=0;i<8;++i) {
+      if(!cell[i].is_number_integer() || cell[i].get<int64_t>()<0 || cell[i].get<int64_t>()>0x10ffff) { valid=false; break; }
+      layer[i]=cell[i].get<int>();
+     }
+     if(!valid) break;
+     tiles.push_back(layer);
+    }
+    if(!valid) break;
+   }
+   if(valid) tileset=view->at("tileset").get<int>(); else tiles.clear();
+  }
+
  }
 };
 

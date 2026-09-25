@@ -21,7 +21,7 @@ def package(build, output):
         shutil.copy2(game/file, stage/file)
     for folder in ("audio", "fonts"):
         shutil.copytree(game/folder, stage/folder)
-    for folder in ("gamedata", "customize", "help", "screens"):
+    for folder in ("gamedata", "customize", "help", "screens", "tiles"):
         shutil.copytree(ROOT/"lib"/folder, stage/"data"/folder,
                         ignore=shutil.ignore_patterns("Makefile*", "*.am", "*.in"))
     # App-local release runtimes: a clean PC does not need Visual Studio.
@@ -40,6 +40,7 @@ def package(build, output):
                          ("cjson-src/LICENSE", "cJSON.txt")):
         shutil.copy2(deps/source, licenses/license_name)
     shutil.copy2(ROOT/"docs"/"copying.rst", licenses/"Angband-copying.rst")
+    shutil.copy2(deps/"sdl3-src"/"src"/"video"/"stb_image.h", licenses/"stb_image.h")
     (licenses/"Cousine-copyright.txt").write_text(
         "Cousine-Regular.ttf by Steve Matteson. Digitized data copyright (c) 2010 Google Corporation.\n"
         "Licensed under the SIL Open Font License 1.1; see Cousine-OFL.txt.\n")

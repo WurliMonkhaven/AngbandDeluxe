@@ -51,6 +51,8 @@
 #include "ui-keymap.h"
 #include "ui-knowledge.h"
 #include "ui-map.h"
+#include "ui-prefs.h"
+#include "grafmode.h"
 #include "ui-menu.h"
 #include "ui-spell.h"
 #include "ui-target.h"
@@ -470,6 +472,7 @@ static void deluxe_spawn_glow_items(void)
 #include "deluxe-status.h"
 #include "deluxe-knowledge.h"
 static int deluxe_blast_radius(void);
+#include "deluxe-tiles.h"
 #include "deluxe-view.h"
 #include "deluxe-blast.h"
 #include "deluxe-projectiles.h"
@@ -770,13 +773,24 @@ static void pump(void)
   negotiated = true;
   native_inventory=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_inventory"));
   native_equipment=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_equipment"));
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"tuning\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.scene\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"presentation.camera\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"tuning\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.scene\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"presentation.tiles\":1,\"presentation.camera\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   cJSON_SetNumberValue(cJSON_GetObjectItem(out,"max_frame_bytes"),(double)frame_limit);
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
  if(streq(method,"tuning.get") || streq(method,"tuning.set")) tuning_request(id,method,p);
  else if (streq(method, "commands.list")) response(id, command_list());
+ else if (streq(method,"dungeon.tiles")) {
+  cJSON *choice=cJSON_GetObjectItem(p,"id");
+  int mode=num(p,"id",-1);
+  if(!cJSON_IsNumber(choice) || choice->valuedouble!=mode || mode<0 || mode>6 || !get_graphics_mode(mode)) error(id,"invalid_argument","Unknown tileset.");
+  else if(character_generated && (!ready || active_prompt || !streq(phase,"playing"))) error(id,"busy","Change tiles during normal play.");
+  else {
+   deluxe_tiles_id=mode; deluxe_tiles_failed=false;
+   if(character_generated) publish();
+   response(id,cJSON_CreateObject());
+  }
+ }
  else if (streq(method, "dungeon.camera")) {
   if(!cJSON_IsBool(cJSON_GetObjectItem(p,"enabled"))) error(id,"invalid_argument","Expected an enabled flag.");
   else if(cJSON_IsTrue(cJSON_GetObjectItem(p,"enabled")) && frame_limit<CAMERA_FRAME_LIMIT) error(id,"invalid_argument","Free camera requires a 4 MiB frame budget.");
@@ -861,7 +875,12 @@ static void pump(void)
   if(initialized) for(i=1;i<z_info->r_max;++i) if(r_info[i].name && rf_has(r_info[i].flags,RF_UNIQUE)) {
    cJSON *entry=cJSON_CreateObject(); number(entry,"id",i); string(entry,"name",r_info[i].name); cJSON_AddItemToArray(uniques,entry);
   }
-  cJSON_AddItemToObject(out,"uniques",uniques); response(id, out);
+  cJSON_AddItemToObject(out,"uniques",uniques);
+  cJSON *tall=cJSON_CreateArray();
+  if(initialized) for(i=1;i<z_info->r_max;++i) if(r_info[i].name && deluxe_is_tall_race(i)) {
+   cJSON *entry=cJSON_CreateObject(); number(entry,"id",i); string(entry,"name",r_info[i].name); cJSON_AddItemToArray(tall,entry);
+  }
+  cJSON_AddItemToObject(out,"double_height_monsters",tall); response(id, out);
  } else if (streq(method,"birth.action") || streq(method,"birth.cancel")) {
   if(streq(method,"birth.cancel")) cJSON_AddStringToObject(p,"action","cancel");
   deluxe_birth_action(id,p);
@@ -1162,17 +1181,20 @@ static void pump(void)
   }
  } else if(streq(method,"debug.scene")) {
   const char *kind=str(p,"kind");
-  int action=streq(kind,"unique")?1:streq(kind,"up")?2:streq(kind,"down")?3:streq(kind,"lava")?4:streq(kind,"recall")?5:streq(kind,"recall_cancel")?6:0;
+  int action=streq(kind,"unique")?1:streq(kind,"up")?2:streq(kind,"down")?3:streq(kind,"lava")?4:streq(kind,"recall")?5:streq(kind,"recall_cancel")?6:streq(kind,"double_height")?7:0;
   struct loc grid=loc(num(p,"x",-1),num(p,"y",-1));
   const cJSON *jx=cJSON_GetObjectItem(p,"x"),*jy=cJSON_GetObjectItem(p,"y"),*jr=cJSON_GetObjectItem(p,"race");
   int race=num(p,"race",0);
   if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing")) error(id,"busy","Return to normal play before using scene test tools.");
   else if(!action) error(id,"invalid_argument","Unknown scene test.");
-  else if(action<=4 && (!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) || jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint ||
+  else if((action<=4 || action==7) && (!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) || jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint ||
    !square_in_bounds_fully(cave,grid) || !square_isseen(cave,grid) || !square_isfloor(cave,grid) || square_object(cave,grid) || square_monster(cave,grid) || square_isplayer(cave,grid)))
    error(id,"invalid_argument","Choose an empty, visible floor tile.");
   else if(action==1 && (!cJSON_IsNumber(jr) || jr->valuedouble!=race || race<1 || race>=z_info->r_max || !r_info[race].name || !rf_has(r_info[race].flags,RF_UNIQUE) || r_info[race].cur_num || !r_info[race].max_num))
    error(id,"invalid_argument","Choose a living unique that is not already on this level.");
+  else if(action==7 && (!cJSON_IsNumber(jr) || jr->valuedouble!=race || !deluxe_is_tall_race(race) ||
+   (rf_has(r_info[race].flags,RF_UNIQUE) && (r_info[race].cur_num || !r_info[race].max_num))))
+   error(id,"invalid_argument","Choose an available double-height monster.");
   else { debug_scene_kind=action; debug_scene_race=race; debug_scene_grid=grid; ready=false; response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0); }
  } else if (streq(method, "debug.glow_items")) {
   const char *type=str(p,"kind");
@@ -1346,7 +1368,7 @@ static errr get_command(cmd_context context)
   if(debug_scene_kind) {
    int kind=debug_scene_kind; debug_scene_kind=0; ready=false;
    player->noscore|=NOSCORE_JUMPING;
-   if(kind==1) {
+   if(kind==1 || kind==7) {
     struct monster_group_info info={0};
     struct monster_race *race=&r_info[debug_scene_race];
     /* Explicit wizard placement may test questors in town. Restore the race
@@ -1355,7 +1377,7 @@ static errr get_command(cmd_context context)
     rf_off(race->flags,RF_FORCE_DEPTH);
     bool placed=place_new_monster(cave,debug_scene_grid,race,true,false,info,ORIGIN_DROP_WIZARD);
     if(force_depth) rf_on(race->flags,RF_FORCE_DEPTH);
-    if(!placed) msg("Could not place that unique.");
+    if(!placed) msg("Could not place that monster.");
    } else if(kind<=4) square_set_feat(cave,debug_scene_grid,kind==2?FEAT_LESS:kind==3?FEAT_MORE:FEAT_LAVA);
    else { player->word_recall=kind==5?20:0; if(kind==5 && player->recall_depth<1) player->recall_depth=1; }
    player->upkeep->update|=PU_UPDATE_VIEW|PU_MONSTERS;
@@ -1414,6 +1436,7 @@ int main(int argc, char **argv)
  }
  plog_aux = log_hook; ANGBAND_SYS = "deluxe";
  init_file_paths(data, data, user); create_needed_dirs();
+ init_graphics_modes();
  term_init(&terminal, SCREEN_W, SCREEN_H, 256);
  terminal.xtra_hook = xtra; terminal.text_hook = text_hook;
  terminal.wipe_hook = wipe_hook; terminal.curs_hook = cursor_hook;
@@ -1453,6 +1476,7 @@ int main(int argc, char **argv)
  play_game((enum game_mode_type)launch_mode);
  phase = "finished"; ready = false; publish(); complete();
  sound_event_hook=NULL; target_selected_hook=NULL;
+ deluxe_tiles_free(); mem_free(deluxe_tall_races); close_graphics_modes();
  textui_cleanup(); cleanup_angband();
  deluxe_reset_view();
  return 0;

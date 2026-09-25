@@ -248,6 +248,14 @@ int main(int argc,char **argv) {
   RenderGrid decoded;
   decoded.update(view_state);
   check(decoded.semantic && decoded.width==1 && decoded.height==1 && decoded.cells[0].glyph==64,"Actor must cover terrain");
+  view_state["dungeon"]["tileset"]=5;
+  view_state["dungeon"]["tiles"]=json::array({json::array({json::array({200,154,0,0,0,0,135,131})})});
+  decoded.update(view_state);
+  check(decoded.tileset==5 && decoded.tiles.size()==1 && decoded.tiles[0][7]==131,"Tile layers must decode separately from ASCII");
+  view_state["dungeon"]["tiles"][0][0][7]="bad";
+  decoded.update(view_state);
+  check(decoded.tileset==0 && decoded.tiles.empty() && decoded.cells[0].glyph==64,"Invalid tiles must fall back to valid ASCII");
+  view_state["dungeon"].erase("tiles");
   view_state["dungeon"]["cells"][0][0][6]=32;
   decoded.update(view_state);
   check(decoded.cells[0].glyph==32,"Opaque blank overlay must hide terrain");
@@ -500,6 +508,7 @@ int main(int argc,char **argv) {
   check(!ui.click_exits_look,"Legacy settings must default click exits look off");
   check(!ui.quick_targeting,"Quick targeting defaults off");
   check(!ui.quickbar_enabled,"Quickbar defaults off");
+  ui.draft_tileset=5; check(ui.tileset==0,"Tile draft must not replace live artwork");
   ui.draft_quickbar_enabled=true;
   check(!ui.quickbar_enabled,"Quickbar draft must not apply");
   ui.draft_quick_targeting=true;
@@ -519,6 +528,7 @@ int main(int argc,char **argv) {
   check(!ui.theme_settings.custom,"Theme drafts must not change live settings");
   check(ui.font_settings.interface_font=="Nouveau_IBM.ttf","Font preview must not change the live interface");
   ui.begin_settings(); // Reopening after Cancel discards the draft.
+  check(ui.draft_tileset==0,"Cancel must discard the tile choice");
   check(ui.draft_fonts.interface_font=="Nouveau_IBM.ttf","Cancel must discard font choices");
   check(!ui.draft_theme.custom,"Cancel must discard theme edits");
   check(ui.draft_audio_settings.enabled && ui.draft_audio_settings.master==.8f,"Cancel must discard audio edits");
@@ -543,8 +553,10 @@ int main(int argc,char **argv) {
   ui.draft_audio_settings.master=.43f; ui.draft_audio_settings.gameplay=.25f;
   ui.draft_fonts.interface_font="Hack-Regular.ttf"; ui.draft_fonts.dungeon_font="Flexi_IBM_VGA_True.ttf";
   ui.draft_theme.preset(3); ui.draft_theme.rounding=11; ui.draft_theme.invert_dungeon=true; ui.draft_theme.decorations=false;
+  ui.draft_tileset=6;
   check(ui.apply_settings(nullptr),"Save settings");
   UI loaded{connection}; loaded.settings_path=path.string(); loaded.load_settings();
+  check(loaded.tileset==6 && ui.tileset==6,"Tile selection must apply and persist");
   check(loaded.font_settings.interface_font=="Hack-Regular.ttf" && loaded.font_settings.dungeon()=="Flexi_IBM_VGA_True.ttf","Both font choices persist");
   check(loaded.theme_settings.serialize()==ui.draft_theme.serialize(),"Theme colours and styling persist");
   check(!loaded.scene_animation,"Scene transitions setting persists");
