@@ -87,3 +87,21 @@ Optional free dungeon camera: Settings > Display > Free dungeon camera.
 Middle-drag pans, the wheel (or +/-) zooms, and Return to player recenters.
 Keep player centered controls following; panning pauses it until Return to player.
 Floors reset the camera. Fog of war and gameplay rules are unchanged.
+
+## Game tuning
+
+Settings → Game tuning provides grouped controls for `constants.txt`, including
+search, a modified-only filter, per-setting reset, and Restore all defaults.
+Advanced combat includes editable critical-hit formulas and tier tables.
+Hover a setting for its description, range, and when it applies. A few tightly
+coupled engine limits are shown read-only.
+
+Save and Close writes `tuning-overrides.json` in the backend user directory;
+the shipped `lib/gamedata/constants.txt` stays untouched. Changes take effect
+the next time a character is opened, never in the middle of a running game.
+Settings marked **New characters** control storage capacities or world dimensions.
+Each save retains these in a companion `tuning-<save name>.json` in that same user
+directory. Keep this companion when moving a tuned save between installations.
+Older saves without a companion use the installed stock capacities. Rename and
+delete through Deluxe also handle the companion. Replaced tuning files retain
+a `.bak` backup, and invalid values are rejected before saving.

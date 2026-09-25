@@ -50,6 +50,21 @@ int main(int argc,char **argv) {
    camera.zoom_at(100,0,0,800,600,10,20,true); check(camera.zoom==4,"Maximum zoom is bounded");
    camera.zoom_at(-100,0,0,800,600,10,20,true); check(camera.zoom==.35f,"Minimum zoom is bounded");
   }
+  {
+   GameTuning editor;
+   json spec={{"id","player:start-gold"},{"group","player"},{"label","Starting wealth"},{"description","Starting gold"},{"category","Player & inventory"},{"default",600},{"minimum",0},{"maximum",60000},{"tier",false}};
+   json catalog={{"entries",json::array({spec})},{"values",{{"player:start-gold",600}}},{"revision","1"}};
+   editor.load(catalog); check(!editor.changed() && editor.modified_count()==0,"Loading tuning leaves a clean draft");
+   editor.values["player:start-gold"]=1200; check(editor.changed() && editor.modified_count()==1,"Tuning edits remain draft changes");
+   editor.modified_only=true; check(editor.visible(spec),"Modified filter includes custom values");
+   editor.restore(); check(editor.values["player:start-gold"]==600 && !editor.visible(spec),"Reset restores defaults and updates filtering");
+   editor.load(catalog); check(!editor.changed(),"Reloading discards unsaved tuning");
+   editor.warning="Bad file"; editor.restore(); check(editor.changed(),"Explicit reset can repair a corrupt all-default file");
+   Connection tuning_connection; tuning_connection.connected=true; UI tuning_ui{tuning_connection};
+   tuning_ui.game_tuning.load(catalog); tuning_ui.game_tuning.values["player:start-gold"]=900;
+   check(!tuning_ui.save_next_settings(nullptr) && tuning_ui.saving_tuning && tuning_ui.settings_saving,"Settings must wait for tuning validation before closing");
+   check(tuning_connection.outgoing.find("tuning.set")!=std::string::npos && !tuning_connection.busy,"Writing next-launch preferences must not hold the gameplay command lock");
+  }
   for(int i=0;i<5;++i) {
    ThemeSettings theme; theme.preset(i); theme.invert_dungeon=true; ThemeSettings loaded; loaded.load(theme.serialize());
    check(loaded.serialize()==theme.serialize(),"Theme presets must round-trip exactly");

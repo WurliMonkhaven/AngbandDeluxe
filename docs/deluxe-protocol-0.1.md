@@ -369,3 +369,22 @@ The client's `camera.enabled` and `camera.follow` preferences live under Display
 Middle-drag pauses following; the wheel zooms; Return to player recenters and
 resumes following if enabled. Floor changes recenter automatically. Target
 cursor changes are kept in view. Panning and zooming are entirely client-side.
+
+### Game tuning
+
+The `tuning` capability enables `tuning.get` and `tuning.set`, available both in
+the launcher and during play without acquiring the gameplay command lock.
+`tuning.get` returns `entries` (id, group, label, description, default, bounds,
+category, structural/tier/advanced flags), a complete `values` object and a string
+`revision`. After character initialization, `active_values` reports the values
+used by that engine process. An invalid override file adds a `warning` and displays
+stock defaults so the client can repair it.
+
+`tuning.set` accepts `{revision, values}`. `values` is the entire desired set of
+overrides; omitted IDs revert to installed defaults. A stale revision is rejected.
+Values, critical tier ordering, and cross-setting constraints are validated before
+an atomic replacement with backup. The response is an updated catalog. This does
+not change the active game, state revision, or item handles. The backend applies
+saved tuning on its next initialization. Structural settings are captured per save
+and are only chosen afresh for new characters. The editor does not add or remove
+critical tier rows.

@@ -979,7 +979,25 @@ static struct parser *init_parse_constants(void) {
 	return p;
 }
 
+const char *custom_constants_text;
+static errr parse_constants_text(struct parser *p, const char *text)
+{
+ char line[2048];
+ while (*text) {
+  size_t n=0;
+  while (*text && *text!='\n') {
+   if(n+1>=sizeof(line)) return PARSE_ERROR_INVALID_VALUE;
+   line[n++]=*text++;
+  }
+  if(*text=='\n') ++text;
+  line[n]=0;
+  enum parser_error error=parser_parse(p,line);
+  if(error) return error;
+ }
+ return PARSE_ERROR_NONE;
+}
 static errr run_parse_constants(struct parser *p) {
+	if(custom_constants_text) return parse_constants_text(p,custom_constants_text);
 	return parse_file_quit_not_found(p, "constants");
 }
 
@@ -1043,6 +1061,20 @@ static void cleanup_o_critical_levels(struct o_critical_level *head)
 		head = head->next;
 		mem_free(target);
 	}
+}
+
+bool validate_constants_text(const char *text)
+{
+ struct parser *p=init_parse_constants();
+ struct angband_constants *z=parser_priv(p);
+ bool valid=parse_constants_text(p,text)==PARSE_ERROR_NONE;
+ valid=valid && !check_critical_levels(z->m_crit_level_head) && !check_critical_levels(z->r_crit_level_head);
+ cleanup_critical_levels(z->m_crit_level_head);
+ cleanup_critical_levels(z->r_crit_level_head);
+ cleanup_o_critical_levels(z->o_m_crit_level_head);
+ cleanup_o_critical_levels(z->o_r_crit_level_head);
+ mem_free(z); parser_destroy(p);
+ return valid;
 }
 
 static void cleanup_constants(void)

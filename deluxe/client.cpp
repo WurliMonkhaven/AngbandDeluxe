@@ -69,6 +69,7 @@ static bool matches(std::string text, std::string term) {
 }
 #include "ui_theme.h"
 #include "engine_options.h"
+#include "game_tuning.h"
 #include "keybinding_editor.h"
 #include "audio_player.h"
 #include "inventory_changes.h"
@@ -126,6 +127,7 @@ struct Connection {
  json run_report=nullptr;
  bool postgame_finished=false;
  json options_result=nullptr,options_saved=nullptr;
+ json tuning_result=nullptr,tuning_saved=nullptr;
  json bindings_result=nullptr,bindings_saved=nullptr;
  std::string bindings_request;
  std::string options_request;
@@ -289,6 +291,11 @@ struct Connection {
     journal_data=j.contains("error")?json{{"error",j["error"].value("message","Journal unavailable.")}}:j["result"];
     journal_request.clear();
    }
+   return;
+  }
+  if(method=="tuning.get" || method=="tuning.set") {
+   auto &destination=method=="tuning.get"?tuning_result:tuning_saved;
+   destination=j.contains("error")?json{{"error",j["error"].value("message","Game tuning unavailable.")}}:j["result"];
    return;
   }
   if(method=="options.get") {
@@ -581,6 +588,8 @@ struct UI {
  float draft_scale=1.f;
  std::string settings_error;
  EngineOptions engine_options;
+ GameTuning game_tuning;
+ bool saving_tuning=false;
  KeybindingEditor keybinding_editor;
  bool saving_bindings=false, settings_open=false;
  bool settings_saving=false;
@@ -656,6 +665,9 @@ struct UI {
   if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look,quick_targeting,quickbar_enabled)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
+  game_tuning.reset(); saving_tuning=false; c.tuning_result=nullptr; c.tuning_saved=nullptr;
+  if(c.negotiated && c.capabilities.value("tuning",0)>0) c.send("tuning.get");
+  else { game_tuning.loaded=true; game_tuning.error="Game tuning needs a connected, supported backend."; }
   draft_camera=camera_settings;
   draft_fonts=font_settings; draft_theme=theme_settings;
   draft_audio_settings=audio_settings;
@@ -711,6 +723,28 @@ struct UI {
   crt_strength=draft_crt_strength; crt_settings=draft_crt_settings;
   return true;
  }
+ bool save_next_settings(SDL_Window *window) {
+  if(keybinding_editor.command>=0) { settings_error="Finish or cancel the pending key capture first."; return false; }
+  if((keybinding_editor.changed() || !engine_options.changes().empty()) && (!c.ready() || c.state.value("phase","")!="playing")) {
+   settings_error="Return to normal play before changing keybindings or Angband options."; return false;
+  }
+  settings_error.clear();
+  if(game_tuning.changed()) {
+   if(!c.connected) { settings_error="Reconnect the backend before saving game tuning."; return false; }
+   c.tuning_saved=nullptr; c.send("tuning.set",{{"revision",game_tuning.revision},{"values",game_tuning.values}});
+   settings_saving=saving_tuning=true; return false;
+  }
+  if(keybinding_editor.changed()) {
+   c.bindings_saved=nullptr; c.options_saved=nullptr;
+   c.send("keybindings.set",{{"revision",keybinding_editor.revision},{"bindings",keybinding_editor.bindings}});
+   c.busy=true; settings_saving=saving_bindings=true; return false;
+  }
+  if(!engine_options.changes().empty()) {
+   c.options_saved=nullptr; c.send("options.set",{{"context",engine_options.context},{"values",engine_options.changes()}});
+   c.busy=true; settings_saving=true; return false;
+  }
+  return apply_settings(window);
+ }
  void settings_window(SDL_Window *window) {
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x+vp->WorkSize.x*.5f,vp->WorkPos.y+vp->WorkSize.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
@@ -720,38 +754,35 @@ struct UI {
   if(settings_open) {
    if(!engine_options.loaded && !c.options_result.is_null()) engine_options.load(c.options_result);
    if(!keybinding_editor.loaded && !c.bindings_result.is_null()) keybinding_editor.load(c.bindings_result);
-   if(saving_bindings && (!c.bindings_saved.is_null() || !c.connected)) {
-    saving_bindings=false; settings_saving=false;
-    if(!c.connected) settings_error="Backend disconnected. Keybindings could not be confirmed.";
-    else if(c.bindings_saved.contains("error")) settings_error=c.bindings_saved.value("error","");
-    else {
-     keybinding_editor.load(c.bindings_saved);
-     if(!engine_options.changes().empty()) {
-      c.options_saved=nullptr; c.send("options.set",{{"context",engine_options.context},{"values",engine_options.changes()}}); c.busy=true; settings_saving=true;
-     } else if(apply_settings(window)) ImGui::CloseCurrentPopup();
-     else settings_error="Bindings saved, but Deluxe settings could not be saved. Please retry Save and Close.";
-    }
+   if(!game_tuning.loaded && !c.tuning_result.is_null()) game_tuning.load(c.tuning_result);
+   if(settings_saving && !c.connected) {
+    settings_saving=saving_bindings=saving_tuning=false; settings_error="Backend disconnected. Changes could not be confirmed.";
    }
-   if(settings_saving && !saving_bindings && (!c.options_saved.is_null() || !c.connected)) {
+   if(saving_tuning && !c.tuning_saved.is_null()) {
+    settings_saving=saving_tuning=false;
+    if(c.tuning_saved.contains("error")) settings_error=c.tuning_saved.value("error","");
+    else { game_tuning.load(c.tuning_saved); if(save_next_settings(window)) ImGui::CloseCurrentPopup(); }
+   }
+   else if(saving_bindings && !c.bindings_saved.is_null()) {
+    settings_saving=saving_bindings=false;
+    if(c.bindings_saved.contains("error")) settings_error=c.bindings_saved.value("error","");
+    else { keybinding_editor.load(c.bindings_saved); if(save_next_settings(window)) ImGui::CloseCurrentPopup(); }
+   }
+   else if(settings_saving && !saving_tuning && !saving_bindings && !c.options_saved.is_null()) {
     settings_saving=false;
-    if(!c.connected) settings_error="Backend disconnected. Angband options could not be confirmed.";
-    else if(c.options_saved.contains("error")) settings_error=c.options_saved.value("error","");
-    else {
-     engine_options.original=engine_options.values;
-     if(apply_settings(window)) ImGui::CloseCurrentPopup();
-     else settings_error="Angband options applied, but Deluxe settings could not be saved. Please retry Save and Close.";
-    }
+    if(c.options_saved.contains("error")) settings_error=c.options_saved.value("error","");
+    else { engine_options.original=engine_options.values; if(save_next_settings(window)) ImGui::CloseCurrentPopup(); }
    }
    ImGui::BeginDisabled(settings_saving);
    const float footer=ImGui::GetFrameHeightWithSpacing()+ImGui::GetStyle().ItemSpacing.y+
     (settings_error.empty()?0:ImGui::CalcTextSize(settings_error.c_str(),nullptr,false,ImGui::GetContentRegionAvail().x).y+ImGui::GetStyle().ItemSpacing.y);
-   const char *pages[]={"Interaction","Keyboard","Game rules","Display","Theme","Fonts","CRT effects","Animations","Audio"};
-   const char *descriptions[]={"Mouse controls and shortcuts for everyday adventuring.","Make the keyboard feel like home.","Angband preferences for the current character.","Window mode, interface size and dungeon camera.","Colour, contrast and the character of your interface.","Choose the lettering for your interface and dungeon.","Build your own tube: from a gentle glow to a full retro display.","Choose how the dungeon moves and reacts.","Clicks, buzzes and sounds from the dungeon."};
+   const char *pages[]={"Interaction","Keyboard","Game rules","Display","Theme","Fonts","CRT effects","Animations","Audio","Game tuning"};
+   const char *descriptions[]={"Mouse controls and shortcuts for everyday adventuring.","Make the keyboard feel like home.","Angband preferences for the current character.","Window mode, interface size and dungeon camera.","Colour, contrast and the character of your interface.","Choose the lettering for your interface and dungeon.","Build your own tube: from a gentle glow to a full retro display.","Choose how the dungeon moves and reacts.","Clicks, buzzes and sounds from the dungeon.","Shape your game with custom constants. Stock files remain untouched."};
    ImGui::BeginChild("Settings body",ImVec2(0,-footer),ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar);
    const bool sidebar=ImGui::GetContentRegionAvail().x>ImGui::GetFontSize()*40;
    if(sidebar) {
     ImGui::BeginChild("Settings navigation",ImVec2(ImGui::GetFontSize()*12,0),ImGuiChildFlags_Borders);
-    for(int i=0;i<9;++i) {
+    for(int i:{0,1,2,9,3,4,5,6,7,8}) {
      if(i==0 || i==3 || i==8) {
       if(i) ImGui::Spacing();
       ImGui::TextDisabled("%s",i==0?"PLAY":i==3?"PRESENTATION":"SOUND"); ImGui::Separator();
@@ -766,7 +797,7 @@ struct UI {
     ImGui::PopStyleColor();
     ImGui::EndChild(); ImGui::SameLine();
    } else {
-    ImGui::SetNextItemWidth(-1); ImGui::Combo("##Settings page",&settings_page,pages,9);
+    ImGui::SetNextItemWidth(-1); ImGui::Combo("##Settings page",&settings_page,pages,10);
    }
    ImGui::PushID(settings_page);
    ImGui::BeginChild("Settings contents",ImVec2(0,0));
@@ -774,6 +805,7 @@ struct UI {
    ImGui::TextWrapped("%s",descriptions[settings_page]); ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
    bool editing_bindings=false;
    {
+    if(settings_page==9) game_tuning.draw();
     if(settings_page==3) {
      DeluxeTheme::section("Dungeon camera");
      ImGui::Checkbox("Free dungeon camera",&draft_camera.enabled);
@@ -928,24 +960,7 @@ struct UI {
    ImGui::SameLine();
    const float button_width=ImGui::CalcTextSize("Save and Close").x+2*ImGui::GetStyle().FramePadding.x;
    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(),ImGui::GetWindowWidth()-ImGui::GetStyle().WindowPadding.x-button_width));
-   if(ImGui::Button("Save and Close")) {
-    if(keybinding_editor.command>=0) settings_error="Finish or cancel the pending key capture first.";
-    else if(keybinding_editor.changed()) {
-     if(!c.ready() || c.state.value("phase","")!="playing") settings_error="Return to normal play before changing keybindings.";
-     else {
-      c.bindings_saved=nullptr; c.options_saved=nullptr; settings_error.clear();
-      c.send("keybindings.set",{{"revision",keybinding_editor.revision},{"bindings",keybinding_editor.bindings}});
-      c.busy=true; settings_saving=saving_bindings=true;
-     }
-    } else if(!engine_options.changes().empty()) {
-     if(!c.ready() || c.state.value("phase","")!="playing") settings_error="Return to normal play before changing Angband options.";
-     else {
-      c.options_saved=nullptr; settings_error.clear();
-      c.send("options.set",{{"context",engine_options.context},{"values",engine_options.changes()}});
-      c.busy=true; settings_saving=true;
-     }
-    } else if(apply_settings(window)) ImGui::CloseCurrentPopup();
-   }
+   if(ImGui::Button("Save and Close") && save_next_settings(window)) ImGui::CloseCurrentPopup();
    ImGui::EndDisabled();
    ImGui::EndPopup();
   }

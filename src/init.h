@@ -273,6 +273,9 @@ extern struct file_parser world_parser;
 errr grab_effect_data(struct parser *p, struct effect *effect);
 extern void init_file_paths(const char *config, const char *lib, const char *data);
 extern void init_game_constants(void);
+/* Optional frontend constants source. Must remain alive through initialization. */
+extern const char *custom_constants_text;
+extern bool validate_constants_text(const char *text);
 extern void init_arrays(void);
 extern void create_needed_dirs(void);
 extern bool init_angband(void);

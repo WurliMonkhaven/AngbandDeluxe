@@ -195,6 +195,81 @@ class BackendTests(unittest.TestCase):
         cell = view["cells"][player["y"]-view["y"]][player["x"]-view["x"]]
         self.assertTrue(cell[12])
 
+    def test_game_tuning_validation(self):
+        e=self.engine; e.hello()
+        data=e.call('tuning.get')['result']
+        self.assertEqual(len(data['entries']),101)
+        self.assertEqual(data['values']['carry-cap:pack-size'],23)
+        for change in ({'player:start-gold':-1},{'player:start-gold':70000},{'mon-gen:chance':0},
+                       {'player:max-sight':80},{'unknown:constant':1},{'world:move-energy':50},
+                       {'world:feeling-need':101},{'obj-make:default-lamp':16000},
+                       {'melee-critical:chance-range':150}, {'o-melee-critical:power-toh-scale-denominator':0},
+                       {'melee-critical-level:0':[800,2,5,'HIT_GOOD']},
+                       {'ranged-critical-level:0':[400,2,5,'BOGUS']}, {'carry-cap:pack-size':4.5}):
+            result=e.call('tuning.set',{'revision':data['revision'],'values':change})
+            self.assertIn('error',result,change)
+            self.assertEqual(e.call('tuning.get')['result']['values'],data['values'])
+        result=e.call('tuning.set',{'revision':data['revision'],'values':{'player:start-gold':1200,'carry-cap:pack-size':26}})
+        self.assertIn('result',result)
+        changed=result['result']; self.assertEqual(changed['values']['player:start-gold'],1200)
+        self.assertIn('error',e.call('tuning.set',{'revision':data['revision'],'values':{}}))
+        e.birth()
+        self.assertEqual(e.call('tuning.get')['result']['active_values']['carry-cap:pack-size'],26)
+        before=e.call('state.get')['result']
+        result=e.call('tuning.set',{'revision':changed['revision'],'values':{'player:start-gold':700,'carry-cap:pack-size':15,'player:food-value':200}})
+        self.assertIn('result',result)
+        self.assertEqual(e.call('state.get')['result'],before,'Saving tuning cannot mutate a running game')
+        self.assertEqual(result['result']['active_values']['player:food-value'],100)
+        e.call('session.close'); e.process.wait(timeout=10); e.stop()
+        self.engine=e=Engine(self.temp.name); e.hello(); e.call('session.load',{'save':'ProtocolTest'}); e.next_state(None)
+        while e.state['readiness']!='ready':e.key('enter')
+        active=e.call('tuning.get')['result']['active_values']
+        self.assertEqual(active['carry-cap:pack-size'],26,'Existing save retains its original storage capacity')
+        self.assertEqual(active['player:food-value'],200,'Other constants apply on next backend initialization')
+        e.call('session.close'); e.process.wait(timeout=10); e.stop()
+        self.engine=e=Engine(self.temp.name); e.hello()
+        self.assertIn('result',e.call('saves.rename',{'save':'ProtocolTest','name':'TunedHero'}))
+        user=Path(self.temp.name)/'user'
+        self.assertTrue((user/'tuning-TunedHero.json').exists())
+        self.assertFalse((user/'tuning-ProtocolTest.json').exists())
+        self.assertIn('result',e.call('saves.delete',{'save':'TunedHero'}))
+        self.assertFalse((user/'tuning-TunedHero.json').exists())
+        e.birth(name='FreshTuned')
+        self.assertEqual(e.call('tuning.get')['result']['active_values']['carry-cap:pack-size'],15)
+
+    def test_game_tuning_world_sizes(self):
+        e=self.engine; e.hello()
+        data=e.call('tuning.get')['result']
+        changes={'world:town-wid':77,'world:dungeon-hgt':77,'world:dungeon-wid':220,
+                 'melee-critical-level:0':[350,2,6,'HIT_GOOD']}
+        self.assertIn('result',e.call('tuning.set',{'revision':data['revision'],'values':changes}))
+        e.birth()
+        self.assertEqual(len(e.state['map']['known'][0]),77)
+        e.key(ord('>'))
+        while e.state['readiness']!='ready': e.key('enter')
+        active=e.call('tuning.get')['result']
+        self.assertEqual(active['active_values']['world:dungeon-wid'],220)
+        self.assertEqual(active['active_values']['melee-critical-level:0'],changes['melee-critical-level:0'])
+        self.assertIn('result',e.call('tuning.set',{'revision':active['revision'],'values':{}}))
+        e.call('session.close'); e.process.wait(timeout=10); e.stop()
+        self.engine=e=Engine(self.temp.name); e.hello(); e.call('session.load',{'save':'ProtocolTest'}); e.next_state(None)
+        while e.state['readiness']!='ready': e.key('enter')
+        active=e.call('tuning.get')['result']['active_values']
+        self.assertEqual(active['world:dungeon-wid'],220)
+        self.assertEqual(active['world:town-wid'],77)
+
+    def test_game_tuning_invalid_file_recovery(self):
+        e=self.engine; e.hello()
+        user=Path(self.temp.name)/'user'; path=user/'tuning-overrides.json'
+        path.write_text('{invalid json',encoding='utf-8')
+        data=e.call('tuning.get')['result']; self.assertIn('warning',data)
+        self.assertIn('error',e.call('session.new',{'save':'BlockedTuning'}))
+        fixed=e.call('tuning.set',{'revision':data['revision'],'values':{}})
+        self.assertIn('result',fixed); self.assertNotIn('warning',fixed['result'])
+        self.assertEqual(json.loads(path.read_text()),{})
+        self.assertEqual(Path(str(path)+'.bak').read_text().strip(),'{invalid json')
+        e.birth()
+
     def test_free_dungeon_camera(self):
         e=self.engine
         e.hello(); e.birth()
