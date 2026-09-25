@@ -1183,3 +1183,20 @@ an introduction and grouped controls. CRT presets precede collapsible tube
 settings and effect families. Font selection retains its independent preview.
 Cancel and Save and Close remain fixed in the footer, with save errors visible
 above them. Draft preferences and backend save semantics are unchanged.
+
+### Independent tracked-creature panel
+
+Tracked creature is a separate layout panel, showing the current tracked name
+and HP, or an out-of-sight/empty state. It can be hidden, docked, floated or
+detached independently of Character. Layout version 3 appends its stable panel
+ID and migrates older arrangements by splitting it below Character. Version 3
+arrangements preserve intentionally hidden trackers. Named layouts migrate when
+restored; other panel IDs and detached geometry remain unchanged.
+
+Layout offers a persisted Show panel headings toggle. It removes decorative
+workspace titles while retaining character identity and functional controls.
+The tracked-creature fitted height and its detached window shrink with it.
+Unavailable split handles show a muted lock marker during customization and
+a hover explanation distinguishing fixed heights, minimum sizes and locking.
+
+Panel headings can be toggled independently under Layout > Panel headings for Character, Messages, Dungeon details and Tracked creature. Existing global preferences migrate to all four panels. Divider lock markers are three times larger and scale with the interface font.

@@ -78,7 +78,7 @@ struct CharacterOverview {
   DeluxeTheme::section(label);
   ImGui::Dummy(ImVec2(0,ImGui::GetFontSize()*.1f));
  }
- static bool draw(const json &p,bool can_open,bool *open_spells=nullptr,const LevelFeedback *level_up=nullptr,double now=0) {
+ static bool draw(const json &p,bool can_open,bool *open_spells=nullptr,const LevelFeedback *level_up=nullptr,double now=0,bool headings=true) {
   bool open=false;
   std::string identity=p.value("name","");
   if(!identity.empty()) identity+=" · ";
@@ -91,7 +91,8 @@ struct CharacterOverview {
    ImGui::TableNextRow(); ImGui::TableNextColumn();
    const bool compact=ImGui::CalcTextSize(identity.c_str()).x+ImGui::GetFontSize()*1.3f>ImGui::GetContentRegionAvail().x;
    auto name=p.value("name",""); if(name.empty()) name="Adventurer";
-   DeluxeTheme::section(compact?name.c_str():identity.c_str(),false);
+   if(headings) DeluxeTheme::section(compact?name.c_str():identity.c_str(),false);
+   else { ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted(compact?name.c_str():identity.c_str()); }
    if(ImGui::IsItemHovered()) {
     ImGui::BeginTooltip(); ImGui::PushTextWrapPos(ImGui::GetFontSize()*28.f);
     ImGui::TextUnformatted(name.c_str()); ImGui::Separator();
@@ -157,19 +158,31 @@ struct CharacterOverview {
   }
   if(p.value("extra_moves",0)) ImGui::Text("Extra moves: %+d",p.value("extra_moves",0));
   StatusEffects::draw(p,open_spells,level_up?level_up->intensity(now):0);
-  if(p.contains("tracked_creature")) {
-   const auto &m=p["tracked_creature"];
-   section("Tracked creature");
-   if(m.value("visible",false)) {
-    ImGui::TextWrapped("%s",display_label(m.value("name","")).c_str());
-    meter("HP",std::to_string(std::max(0,m.value("hp",0)))+" / "+std::to_string(m.value("max_hp",0)),
-     resource_fraction(m.value("hp",0),m.value("max_hp",0)),ImVec4(.56f,.37f,.12f,1));
-   } else ImGui::TextDisabled("Out of sight");
-  }
   return open;
  }
- static void dungeon(const json &p) {
-  DeluxeTheme::section("Dungeon");
+ static float tracked_height(bool headings=true) {
+  return (headings?ImGui::GetFontSize()*1.6f+ImGui::GetStyle().ItemSpacing.y:0)+ImGui::GetTextLineHeightWithSpacing()+ImGui::GetFrameHeight();
+ }
+ static void tracked(const json &p,bool headings=true) {
+  if(headings) DeluxeTheme::section("Tracked creature",false);
+  if(p.contains("tracked_creature")) {
+   const auto &m=p["tracked_creature"];
+   if(m.value("visible",false)) {
+    const auto name=display_label(m.value("name",""));
+    ImGui::TextUnformatted(name.c_str());
+    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",name.c_str());
+    meter("HP",std::to_string(std::max(0,m.value("hp",0)))+" / "+std::to_string(m.value("max_hp",0)),
+     resource_fraction(m.value("hp",0),m.value("max_hp",0)),ImVec4(.56f,.37f,.12f,1));
+    return;
+   }
+   ImGui::TextDisabled("Out of sight");
+  } else ImGui::TextDisabled("No creature tracked");
+  ImGui::BeginDisabled();
+  ImGui::ProgressBar(0,ImVec2(-1,ImGui::GetFrameHeight()),"HP  -- / --");
+  ImGui::EndDisabled();
+ }
+ static void dungeon(const json &p,bool headings=true) {
+  if(headings) DeluxeTheme::section("Dungeon");
   const char *dungeon_labels[]={"Depth","Light","Feel",""};
   const std::string dungeon_values[]={std::to_string(p.value("depth",0)),std::to_string(p.value("light",0)),p.value("feeling","—"),display_label(p.value("floor",""))};
   const std::string dungeon_tips[]={"Depth: "+std::to_string(p.value("depth_feet",p.value("depth",0)*50))+" feet","",p.value("feeling_description",""),""};

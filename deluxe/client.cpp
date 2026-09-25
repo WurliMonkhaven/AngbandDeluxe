@@ -1262,7 +1262,7 @@ struct UI {
   ImGui::EndChild(); ImGui::PopStyleVar(); ImGui::PopStyleColor();
  }
  void character() {
-  if(c.state.contains("player") && CharacterOverview::draw(c.state["player"],c.can_view_character(),c.capabilities.value("spells",0)>0 && c.state["player"].value("spellcasting",false)?&select_spells_tab:nullptr,level_animation?&c.level_feedback:nullptr,double(SDL_GetTicksNS())/1e9)) execute("core.character");
+  if(c.state.contains("player") && CharacterOverview::draw(c.state["player"],c.can_view_character(),c.capabilities.value("spells",0)>0 && c.state["player"].value("spellcasting",false)?&select_spells_tab:nullptr,level_animation?&c.level_feedback:nullptr,double(SDL_GetTicksNS())/1e9,layout.heading(WorkspaceLayout::Character))) execute("core.character");
  }
  void tile_details(int x,int y,bool full) {
   ImGui::Text("Tile %d, %d",x,y);
@@ -1667,7 +1667,7 @@ struct UI {
  void messages_panel() {
    DeluxeTheme::panel();
    ImGui::Indent(ImGui::GetFontSize()*.65f);
-   ImGui::AlignTextToFramePadding(); ImGui::TextColored(DeluxeTheme::green(),"Messages"); ImGui::SameLine();
+   if(layout.heading(WorkspaceLayout::Messages)) { ImGui::AlignTextToFramePadding(); ImGui::TextColored(DeluxeTheme::green(),"Messages"); ImGui::SameLine(); }
    if(c.state.value("message_pending",false)) { ImGui::TextColored(ImVec4(1,.73f,.3f,1),"WAITING"); ImGui::SameLine(); }
    const float icon=ImGui::GetFrameHeight();
    const auto icon_pos=ImGui::GetCursorScreenPos();
@@ -1722,7 +1722,8 @@ struct UI {
   switch(panel) {
    case WorkspaceLayout::Dungeon: grid(std::max(1.f,ImGui::GetContentRegionAvail().y)); break;
    case WorkspaceLayout::Character: character(); break;
-   case WorkspaceLayout::DungeonDetails: if(c.state.contains("player")) CharacterOverview::dungeon(c.state["player"]); break;
+   case WorkspaceLayout::TrackedCreature: if(c.state.contains("player")) CharacterOverview::tracked(c.state["player"],layout.heading(WorkspaceLayout::TrackedCreature)); break;
+   case WorkspaceLayout::DungeonDetails: if(c.state.contains("player")) CharacterOverview::dungeon(c.state["player"],layout.heading(WorkspaceLayout::DungeonDetails)); break;
    case WorkspaceLayout::Messages: messages_panel(); break;
    case WorkspaceLayout::Inventory: items(); break;
    case WorkspaceLayout::Spells: if(spell_panel.draw(c,quickbar_enabled?&quickbar:nullptr)) focus_game(); break;
@@ -1935,6 +1936,7 @@ struct UI {
    if(targeting_active && !targeting_was_active) layout.reveal(WorkspaceLayout::Target,false);
    if(select_spells_tab) { layout.reveal(WorkspaceLayout::Spells); select_spells_tab=false; }
    if(select_creatures_tab) { layout.reveal(WorkspaceLayout::Creatures); select_creatures_tab=false; }
+   layout.tracker_content_height=CharacterOverview::tracked_height(layout.heading(WorkspaceLayout::TrackedCreature));
    layout.quickbar_content_height=Quickbar::height()-ImGui::GetStyle().ItemSpacing.y;
    const bool editing_before_draw=layout.editing;
    layout.draw([&](int panel) { return workspace_panel_available(panel) && !(layout.native_windows_available && layout.detached[panel].open);

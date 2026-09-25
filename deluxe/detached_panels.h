@@ -122,6 +122,20 @@ struct DetachedPanels {
     float x,y; SDL_GetMouseState(&x,&y); const auto point=mouse_position(ui,w,{x,y}); ImGui::GetIO().AddMousePosEvent(point.x,point.y);
    }
    ImGui::NewFrame();
+   if(p==WorkspaceLayout::TrackedCreature) {
+    const auto &style=ImGui::GetStyle();
+    const float pixels=CharacterOverview::tracked_height(ui.layout.heading(WorkspaceLayout::TrackedCreature))+4*style.WindowPadding.y+ImGui::GetFrameHeightWithSpacing()+1+style.ItemSpacing.y;
+    int ww,hh; SDL_GetWindowSize(w.window,&ww,&hh);
+    const int fitted=std::max(1,int(std::ceil(pixels*hh/std::max(1.f,ImGui::GetIO().DisplaySize.y))));
+    int min_height,max_height;
+    SDL_GetWindowMinimumSize(w.window,nullptr,&min_height); SDL_GetWindowMaximumSize(w.window,nullptr,&max_height);
+    if(min_height!=fitted || max_height!=fitted) {
+     SDL_SetWindowMaximumSize(w.window,0,0);
+     SDL_SetWindowMinimumSize(w.window,280,fitted);
+     SDL_SetWindowMaximumSize(w.window,0,fitted);
+    }
+    if(hh!=fitted) SDL_SetWindowSize(w.window,ww,fitted);
+   }
    ImGui::SetNextWindowPos({0,0}); ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
    ImGui::Begin("Detached panel",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoSavedSettings);
    if(ImGui::SmallButton("Return to main window")) ui.layout.detach(p,false);

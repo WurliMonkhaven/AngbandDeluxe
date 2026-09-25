@@ -38,6 +38,8 @@ int main(int argc,char **argv) {
   c.capabilities=fixture.value("capabilities",json::object());
   if(fixture.contains("layout_preset")) ui.layout.preset(fixture["layout_preset"].get<int>());
   if(fixture.contains("layout")) ui.layout.load(fixture["layout"]);
+  ui.layout.panel_headings.fill(fixture.value("layout_show_headings",true));
+  if(fixture.contains("panel_headings")) for(int p=0;p<WorkspaceLayout::Count && p<int(fixture["panel_headings"].size());++p) ui.layout.panel_headings[p]=fixture["panel_headings"][p].get<bool>();
   ui.layout.dividers_locked=fixture.value("layout_dividers_locked",true);
   ui.layout.floating_locked=fixture.value("layout_floating_locked",false);
   if(fixture.value("layout_edit",false)) { ui.layout.before=ui.layout.arrangement(); ui.layout.editing=true; }

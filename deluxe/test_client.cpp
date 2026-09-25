@@ -382,6 +382,20 @@ int main(int argc,char **argv) {
    check(restored.restore(legacy) && restored.contains(WorkspaceLayout::DungeonDetails),"Legacy layout gains independent dungeon details");
    restored.toggle(WorkspaceLayout::DungeonDetails);
    check(old.restore(restored.arrangement()) && !old.contains(WorkspaceLayout::DungeonDetails),"New layout preserves hidden dungeon details");
+   {
+    WorkspaceLayout previous; previous.move({WorkspaceLayout::TrackedCreature,0,6});
+    auto v2=previous.arrangement(); v2["version"]=2;
+    WorkspaceLayout migrated;
+    check(migrated.restore(v2) && migrated.contains(WorkspaceLayout::TrackedCreature),"Old layouts gain a separate creature tracker");
+    migrated.move({WorkspaceLayout::TrackedCreature,0,6});
+    check(previous.restore(migrated.arrangement()) && !previous.contains(WorkspaceLayout::TrackedCreature),"Hidden tracker stays hidden after reload");
+    migrated.detach(WorkspaceLayout::TrackedCreature,true);
+    check(previous.restore(migrated.arrangement()) && previous.detached[WorkspaceLayout::TrackedCreature].open,"Detached tracker persists");
+   }
+   old.panel_headings[WorkspaceLayout::TrackedCreature]=false; restored.load(old.serialize());
+   check(!restored.heading(WorkspaceLayout::TrackedCreature) && restored.heading(WorkspaceLayout::Character),"Independent panel headings persist");
+   WorkspaceLayout legacy_headings; legacy_headings.load({{"version",3},{"show_headings",false}});
+   check(!legacy_headings.heading(WorkspaceLayout::TrackedCreature) && !legacy_headings.heading(WorkspaceLayout::Messages),"Legacy global heading preference migrates");
    old.dividers_locked=false; restored.load(old.serialize());
    check(!restored.dividers_locked,"Divider unlock preference persists");
    check(!old.floating_locked,"Floating panels are movable by default");
@@ -526,6 +540,7 @@ int main(int argc,char **argv) {
   {
    UI final_ui{postgame}; final_ui.run_history.current=archived;
    ImGui::NewFrame(); ImGui::Begin("Old gameplay popup"); ImGui::OpenPopup("Stale menu"); ImGui::End();
+   check(CharacterOverview::tracked_height(false)<CharacterOverview::tracked_height(true),"Hiding tracker heading reclaims height");
    final_ui.draw(nullptr);
    check(!ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel),"Death screen must dismiss stale gameplay popups");
    ImGui::Render();

@@ -53,7 +53,7 @@ def main():
     docked = run("dock-right", input=drag([60, 790], [1260, 168]))
     assert canonical(docked["root"]) != canonical(original["root"])
     assert leaf(docked["root"], 2) and not docked["floating"]
-    stacked = run("stack-tabs", input=drag([60, 790], [1140, 582]))
+    stacked = run("stack-tabs", input=drag([60, 790], [1140, 741]))
     assert 2 in leaf(stacked["root"], 3)["tabs"], "Message drop should stack with Inventory"
     moved = run("move-float", layout_float=True, input=drag([500, 251], [650, 325]))
     assert moved["floating"][0]["x"] > .20 and moved["floating"][0]["y"] > .20
@@ -67,7 +67,7 @@ def main():
                     [{"frame": 8, "mouse": [242, 53]}, {"frame": 9, "down": True}, {"frame": 10, "down": False}])
     assert canonical(cancelled["root"]) == canonical(original["root"]), "Cancel must restore geometry"
     switched = run("switch-tab", layout_edit=False, input=[
-        {"frame": 2, "mouse": [1260, 503]}, {"frame": 3, "down": True}, {"frame": 4, "down": False}])
+        {"frame": 2, "mouse": [1260, 638]}, {"frame": 3, "down": True}, {"frame": 4, "down": False}])
     assert leaf(switched["root"], 3)["active"] == 5, "Locked tabs must remain selectable"
     unlocked = run("unlocked", layout_edit=False, layout_dividers_locked=False,
                    input=drag([1098, 400], [980, 400]))

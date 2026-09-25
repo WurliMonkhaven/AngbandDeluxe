@@ -12,8 +12,8 @@
 // Layout owns geometry and panel IDs only. Gameplay and inspection state stay in UI.
 struct WorkspaceLayout {
  using Json=nlohmann::json;
- enum Panel { Dungeon,Character,Messages,Inventory,Spells,Creatures,Map,Commands,More,Target,Quickbar,DungeonDetails,Count };
- inline static constexpr const char *names[]={"Dungeon","Character","Messages","Inventory","Spells","Creatures","Map","Commands","More","Look / Target","Quickbar","Dungeon details"};
+ enum Panel { Dungeon,Character,Messages,Inventory,Spells,Creatures,Map,Commands,More,Target,Quickbar,DungeonDetails,TrackedCreature,Count };
+ inline static constexpr const char *names[]={"Dungeon","Character","Messages","Inventory","Spells","Creatures","Map","Commands","More","Look / Target","Quickbar","Dungeon details","Tracked creature"};
  struct Node {
   int id=0,axis=0; float ratio=.5f; // axis: 0 tabs, 1 left/right, 2 top/bottom
   std::vector<int> tabs; int active=-1;
@@ -23,18 +23,22 @@ struct WorkspaceLayout {
  struct Detached { bool open=false; int x=0,y=0,w=560,h=640; bool placed=false; };
  std::array<Detached,Count> detached{};
  bool native_windows_available=false;
- static bool detachable(int p) { return p==Inventory || p==Messages || p==Map || p==Character || p==DungeonDetails; }
+ static bool detachable(int p) { return p==Inventory || p==Messages || p==Map || p==Character || p==DungeonDetails || p==TrackedCreature; }
  void detach(int p,bool open) { if(!detachable(p)) return; if(open || contains(p)) reveal(p); detached[p].open=open; dirty=true; }
  Node root; std::vector<Floating> floating;
  Json saved=Json::object(),before;
  bool editing=false,dirty=false,dividers_locked=true,floating_locked=false; int next_id=1;
+ std::array<bool,Count> panel_headings=[] { std::array<bool,Count> values{}; values.fill(true); return values; }();
+ static bool has_heading(int p) { return p==Character || p==Messages || p==DungeonDetails || p==TrackedCreature; }
+ bool heading(int p) const { return panel_headings[p]; }
+ float tracker_content_height=0;
  float quickbar_content_height=0; // Supplied by the quickbar renderer, in current UI pixels.
  char save_name[65]{};
  struct Move { int panel=-1,target=0,edge=0; }; // 0 tabs, 1 left, 2 right, 3 top, 4 bottom, 5 float, 6 hide
  Move pending;
  Node leaf(std::initializer_list<int> tabs) { Node n; n.id=next_id++; n.tabs=tabs; if(!n.tabs.empty()) n.active=n.tabs[0]; return n; }
  Node split(int axis,float ratio,Node a,Node b) { Node n; n.id=next_id++; n.axis=axis; n.ratio=ratio; n.children={std::move(a),std::move(b)}; return n; }
- Node overview() { return split(2,.70f,leaf({Character}),leaf({DungeonDetails})); }
+ Node overview() { return split(2,.54f,leaf({Character}),split(2,.56f,leaf({DungeonDetails}),leaf({TrackedCreature}))); }
  WorkspaceLayout() { preset(0); dirty=false; }
  void preset(int index) {
   next_id=1; floating.clear(); detached={};
@@ -47,12 +51,12 @@ struct WorkspaceLayout {
    auto bottom=split(1,.58f,leaf({Messages}),leaf({Map}));
    auto play=split(2,.70f,split(2,.88f,leaf({Dungeon}),leaf({Quickbar})),std::move(bottom));
    auto inventory=leaf({Inventory,Creatures,Commands,More,Target});
-   auto side=split(2,.44f,overview(),split(2,.55f,std::move(inventory),leaf({Spells})));
+   auto side=split(2,.56f,overview(),split(2,.55f,std::move(inventory),leaf({Spells})));
    root=split(1,.68f,std::move(play),std::move(side));
   } else {
    auto tools=leaf({Inventory,Spells,Creatures,Map,Commands,More,Target});
    auto play=split(2,.75f,split(2,.88f,leaf({Dungeon}),leaf({Quickbar})),leaf({Messages}));
-   auto side=split(2,.46f,overview(),std::move(tools));
+   auto side=split(2,.60f,overview(),std::move(tools));
    root=split(1,.69f,std::move(play),std::move(side));
   }
   dirty=true;
@@ -63,13 +67,13 @@ struct WorkspaceLayout {
   return j;
  }
  Json arrangement() const {
-  Json j={{"version",2},{"root",encode(root)},{"floating",Json::array()}};
+  Json j={{"version",3},{"root",encode(root)},{"floating",Json::array()}};
   for(const auto &f:floating) j["floating"].push_back({{"node",encode(f.node)},{"x",f.x},{"y",f.y},{"w",f.w},{"h",f.h}});
   j["detached"]=Json::array();
   for(int p=0;p<Count;++p) if(detached[p].placed || detached[p].open) { const auto &d=detached[p]; j["detached"].push_back({{"panel",p},{"open",d.open},{"placed",d.placed},{"x",d.x},{"y",d.y},{"w",d.w},{"h",d.h}}); }
   return j;
  }
- Json serialize() const { return {{"version",2},{"dividers_locked",dividers_locked},{"floating_locked",floating_locked},{"current",editing?before:arrangement()},{"saved",saved}}; }
+ Json serialize() const { return {{"version",3},{"panel_headings",panel_headings},{"dividers_locked",dividers_locked},{"floating_locked",floating_locked},{"current",editing?before:arrangement()},{"saved",saved}}; }
  // Bounded parser rejects duplicates, invalid panels and unreasonable trees.
  bool restore(const Json &j) {
   try {
@@ -124,11 +128,27 @@ struct WorkspaceLayout {
     };
     if(!migrate(root)) for(auto &f:floating) if(migrate(f.node)) break;
    }
+   // Split out the formerly embedded tracker once. Version 3 preserves hiding.
+   if(j.value("version",1)<3 && !contains(TrackedCreature)) {
+    std::function<bool(Node&)> migrate_tracker=[&](Node &n) {
+     if(!n.axis && contains(n,Character)) {
+      Node old=std::move(n); n=split(2,.75f,std::move(old),leaf({TrackedCreature})); return true;
+     }
+     for(auto &child:n.children) if(migrate_tracker(child)) return true;
+     return false;
+    };
+    if(!migrate_tracker(root)) for(auto &f:floating) if(migrate_tracker(f.node)) break;
+   }
    return true;
   } catch(...) { return false; }
  }
  void load(const Json &j) {
-  if(!j.is_object() || j.value("version",0)<1 || j.value("version",0)>2) return;
+  if(!j.is_object() || j.value("version",0)<1 || j.value("version",0)>3) return;
+  panel_headings.fill(j.contains("show_headings") && j["show_headings"].is_boolean()?j["show_headings"].get<bool>():true);
+  if(j.contains("panel_headings") && j["panel_headings"].is_array()) {
+   const auto &values=j["panel_headings"];
+   for(int p=0;p<Count && p<int(values.size());++p) if(values[p].is_boolean()) panel_headings[p]=values[p].get<bool>();
+  }
   if(j.contains("floating_locked") && j["floating_locked"].is_boolean()) floating_locked=j["floating_locked"].get<bool>();
   if(j.contains("dividers_locked") && j["dividers_locked"].is_boolean()) dividers_locked=j["dividers_locked"].get<bool>();
   if(j.contains("current")) restore(j["current"]);
@@ -202,8 +222,13 @@ struct WorkspaceLayout {
     if(editing) { editing=false; dirty=true; }
     else { before=arrangement(); editing=true; }
    }
+   if(ImGui::BeginMenu("Panel headings")) {
+    for(int p=0;p<Count;++p) if(has_heading(p))
+     if(ImGui::MenuItem(names[p],nullptr,panel_headings[p])) { panel_headings[p]=!panel_headings[p]; dirty=true; }
+    ImGui::EndMenu();
+   }
    if(ImGui::MenuItem("Lock dividers",nullptr,dividers_locked)) { dividers_locked=!dividers_locked; dirty=true; }
-   if(ImGui::IsItemHovered()) ImGui::SetTooltip("Unlock to resize panel dividers during normal play. Customization always allows resizing.");
+   if(ImGui::IsItemHovered()) ImGui::SetTooltip("Unlock to resize panel dividers during normal play. Customization allows resizing where panel minimum sizes and fixed heights permit.");
    if(ImGui::MenuItem("Lock floating panels",nullptr,floating_locked)) { floating_locked=!floating_locked; dirty=true; }
    if(ImGui::IsItemHovered()) ImGui::SetTooltip("Floating panels can be dragged by their title bar during play unless locked. Customization always allows moving them.");
    ImGui::SeparatorText("Starting layouts");
@@ -266,7 +291,7 @@ struct WorkspaceLayout {
    ImGui::EndDragDropTarget();
   }
  }
- // A dedicated quickbar has a natural height, not a share of a split.
+ // Dedicated compact panels have a natural height, not a share of a split.
  // Mixed tab groups remain flexible because their other panels need the space.
  float fitted_height(const Node &n,const Enabled &enabled) const {
   if(!visible(n,enabled)) return 0;
@@ -278,8 +303,10 @@ struct WorkspaceLayout {
   }
   int count=0,panel=-1;
   for(int p:n.tabs) if(enabled(p)) { ++count; panel=p; }
-  if(count!=1 || panel!=Quickbar || quickbar_content_height<=0) return 0;
-  float height=quickbar_content_height+2*ImGui::GetStyle().WindowPadding.y;
+  if(count!=1) return 0;
+  const float content=panel==Quickbar?quickbar_content_height:panel==TrackedCreature?tracker_content_height:0;
+  if(content<=0) return 0;
+  float height=content+2*ImGui::GetStyle().WindowPadding.y;
   if(editing) {
    height+=ImGui::GetFrameHeightWithSpacing();
    if(ImGui::GetDragDropPayload()) height+=ImGui::GetTextLineHeightWithSpacing()+ImGui::GetFrameHeightWithSpacing();
@@ -309,6 +336,7 @@ struct WorkspaceLayout {
    const float gap=6.f,extent=n.axis==1?size.x:size.y,usable=std::max(2.f,extent-gap);
    const auto min_a=minimum(n.children[0],enabled),min_b=minimum(n.children[1],enabled);
    float lower=n.axis==1?min_a.x:min_a.y,upper=n.axis==1?min_b.x:min_b.y;
+   const bool space_limited=lower+upper>=usable-.5f;
    if(lower+upper>usable) { const float fit=usable/(lower+upper); lower*=fit; upper*=fit; }
    upper=std::max(lower,usable-upper);
    const float fixed_a=n.axis==2?fitted_height(n.children[0],enabled):0;
@@ -322,11 +350,23 @@ struct WorkspaceLayout {
    draw_node(n.children[0],pos,as,enabled,draw); draw_node(n.children[1],bp,bs,enabled,draw);
    ImGui::SetCursorScreenPos(handle); ImGui::PushID(n.id);
    ImGui::InvisibleButton("Split",hs);
-   const bool can_resize=!fitted_split && (editing || !dividers_locked);
+   const bool can_resize=!fitted_split && !space_limited && (editing || !dividers_locked);
    if(can_resize && ImGui::IsItemActive()) { n.ratio=std::clamp(((n.axis==1?ImGui::GetIO().MousePos.x-pos.x:ImGui::GetIO().MousePos.y-pos.y))/usable,lower/usable,upper/usable); }
    if(can_resize && ImGui::IsItemDeactivated()) dirty=true;
    if(can_resize && ImGui::IsItemHovered()) ImGui::SetMouseCursor(n.axis==1?ImGuiMouseCursor_ResizeEW:ImGuiMouseCursor_ResizeNS);
    if(editing || (can_resize && (ImGui::IsItemHovered() || ImGui::IsItemActive()))) ImGui::GetWindowDrawList()->AddRectFilled(handle,{handle.x+hs.x,handle.y+hs.y},ImGui::GetColorU32(ImGui::IsItemHovered()?ImGuiCol_SeparatorHovered:ImGuiCol_Separator));
+   if(!can_resize && (editing || ImGui::IsItemHovered())) {
+    const ImVec2 c(handle.x+hs.x*.5f,handle.y+hs.y*.5f);
+    auto *d=ImGui::GetWindowDrawList(); const auto ink=ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const float scale=std::max(1.f,ImGui::GetFontSize()/18.f);
+    d->AddRectFilled({c.x-12*scale,c.y-14*scale},{c.x+12*scale,c.y+11*scale},ImGui::GetColorU32(ImGuiCol_WindowBg),3*scale);
+    d->AddRect({c.x-4.5f*scale,c.y-12*scale},{c.x+4.5f*scale,c.y},ink,3*scale,0,2*scale);
+    d->AddRectFilled({c.x-9*scale,c.y-3*scale},{c.x+9*scale,c.y+9*scale},ink,2*scale);
+    if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",fitted_split?
+     "This divider borders a fixed-height panel (Quickbar or Tracked creature). Its height follows its content; adjust its width instead.":space_limited?
+     "These panels are at their minimum sizes. Enlarge this area, hide a panel, or move one elsewhere to free space.":
+     "Dividers are locked. Unlock them in Layout or enter Customize layout.");
+   }
    ImGui::PopID(); return;
   }
   if(float height=fitted_height(n,enabled); height>0) size.y=std::min(size.y,height);
@@ -361,7 +401,7 @@ struct WorkspaceLayout {
    }
   }
   // Gameplay controls are disabled during editing; layout controls remain active.
-  ImGui::BeginChild("Content",ImVec2(0,0),ImGuiChildFlags_None,n.active==Dungeon||n.active==Map||n.active==Quickbar?ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse:ImGuiWindowFlags_None);
+  ImGui::BeginChild("Content",ImVec2(0,0),ImGuiChildFlags_None,n.active==Dungeon||n.active==Map||n.active==Quickbar||n.active==TrackedCreature?ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse:ImGuiWindowFlags_None);
   ImGui::BeginDisabled(editing); draw(n.active); ImGui::EndDisabled();
   ImGui::EndChild(); ImGui::EndChild(); ImGui::PopID();
  }
