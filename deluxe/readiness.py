@@ -16,6 +16,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--package", action="store_true")
+    parser.add_argument("--ui-fixture", type=Path, help="Captured UI fixture for offscreen layout and inventory interaction checks")
     args = parser.parse_args()
     build = ROOT/"build-deluxe-native"
     game = build/"game"
@@ -35,7 +36,7 @@ def main():
     python = [sys.executable,"-B"]
     if not args.skip_build:
         run("build",python+[ROOT/"deluxe/build.py","--ninja","--target","OurExecutable","angband-deluxe",
-                            "deluxe-client-tests","deluxe-gpu-tests","deluxe-audio-tests","deluxe-transport-tests","deluxe-ui-preview"],timeout=600)
+                            "deluxe-client-tests","deluxe-gpu-tests","deluxe-audio-tests","deluxe-transport-tests","deluxe-ui-preview","deluxe-window-tests"],timeout=600)
     run("client",[game/"deluxe-client-tests.exe",output/"settings.json"])
     run("backend",python+[ROOT/"deluxe/test_backend.py","--backend",game/"angband-backend.exe"])
     run("audio",[game/"deluxe-audio-tests.exe",game/"audio"])
@@ -53,12 +54,18 @@ def main():
             super().assert_semantic_view(state)
             if not self.captured and state["player"]["depth"]==1:
                 self.captured=True
+                (output/"dungeon-ui.json").write_text(json.dumps({"state":state}),encoding="utf-8")
                 self.engine.call("session.save")
                 shutil.copytree(Path(self.temp.name)/"save",fixture/"save")
     with (output/"fixture.log").open("w") as log:
         result=unittest.TextTestRunner(stream=log).run(Journey("test_stairs_and_dungeon_inspection"))
     if not result.wasSuccessful() or not (fixture/"save/ProtocolTest").exists():
         raise RuntimeError("Dungeon benchmark fixture failed; see fixture.log")
+    run("detached-windows",[game/"deluxe-window-tests.exe",output/"dungeon-ui.json"])
+    if args.ui_fixture:
+        for kind in ("layout", "inventory"):
+            run(kind+"-interaction",python+[ROOT/f"deluxe/test_{kind}_ui.py","--preview",game/"deluxe-ui-preview.exe",
+                "--fixture",args.ui_fixture.resolve(),"--output",output/(kind+"-interaction")])
     # Keep the full generated dungeon, but remove nearby combat interference
     # from the movement timing fixture through the existing wizard command.
     probe=engine_tests.Engine(fixture)

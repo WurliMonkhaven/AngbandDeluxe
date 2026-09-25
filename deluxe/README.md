@@ -41,6 +41,10 @@ checks, all real-engine integration tests, audio checks, GPU pixel checks,
 using a freshly generated first-floor save. Test profiles are disposable;
 personal saves are never used. Logs and results live under
 `build-deluxe/readiness-<timestamp>`. `--skip-build` reuses existing binaries.
+Hidden detached-window checks cover rendering, input isolation, CRT scope,
+redocking and monitor recovery. To include the coordinate-based offscreen
+inventory and layout checks, pass `--ui-fixture PATH` with their captured UI
+fixture (the development fixture is `build-deluxe/aesthetic-fixture.json`).
 
 With `--package`, it also builds a ZIP, relocates it into a folder with spaces,
 checks source-independent asset discovery, and exercises native birth,

@@ -913,12 +913,21 @@ class BackendTests(unittest.TestCase):
         while e.state['readiness'] != 'ready': e.key('enter')
         # Both direct clicks and clicks exiting look must provide a direction;
         # the engine then randomizes that direction using its normal rules.
+        features=e.call('catalog.get')['result']['features']
+        floor_ids={f['id'] for f in features if f['name'] in ('open floor','up staircase','down staircase','open door')}
         for exit_look in (False, True):
             if exit_look:
                 self.targeting('targeting.begin', mode='look')
             p = e.state['player']
             turn = e.state['turn']
-            self.targeting('dungeon.click', x=p['x']+1, y=p['y'], exit_look=exit_look)
+            # Confusion sometimes preserves the requested direction. An east
+            # wall then costs no turn, just as with keyboard movement.
+            actual=e.state['map']['actual']
+            choices=[(p['x']+dx,p['y']+dy) for dx,dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1))
+                     if actual[p['y']+dy][p['x']+dx] in floor_ids]
+            self.assertTrue(choices,'Confused movement fixture needs an adjacent open tile')
+            x,y=choices[0]
+            self.targeting('dungeon.click', x=x, y=y, exit_look=exit_look)
             self.assertFalse(e.state.get('direction_prompt'), e.screen())
             self.assertNotIn('targeting', e.state)
             self.assertFalse(e.state.get('aiming'), e.screen())
@@ -1852,6 +1861,21 @@ class BackendTests(unittest.TestCase):
         while e.state['readiness']!='ready': e.key('enter')
         self.assertGreater(e.state['turn'],turn)
         self.assertLessEqual(max(abs(e.state['player']['x']-wall['x']),abs(e.state['player']['y']-wall['y'])),1)
+        # Long digging can reach a -more- prompt at the repeat boundary.
+        # Acknowledging it interrupts the travel intent. Verify a full batch
+        # actually ran before retrying, rather than requiring uninterrupted
+        # success from random digging or accepting a single-turn regression.
+        if e.state['map']['actual'][wall['y']][wall['x']] == original_feature:
+            self.assertTrue(any(m.get('count',0)>=99 and 'You tunnel into' in m.get('text','')
+                                for m in e.state['messages']),e.screen())
+        for _ in range(10):
+            if e.state['map']['actual'][wall['y']][wall['x']] != original_feature:
+                break
+            before=e.state['turn']
+            self.targeting('dungeon.terrain',**wall)
+            while e.state['readiness']!='ready': e.key('enter')
+            if e.state['map']['actual'][wall['y']][wall['x']] == original_feature:
+                self.assertGreater(e.state['turn']-before,1,'Adjacent tunnelling must repeat')
         self.assertNotEqual(e.state['map']['actual'][wall['y']][wall['x']],original_feature,e.screen())
 
     def enter_store(self, name):
@@ -2186,9 +2210,19 @@ class BackendTests(unittest.TestCase):
         # Work the spell so its dynamic get_spell_info summary is exercised.
         for _ in range(8):
             self.spell_command('core.cast',self.spell_book()['spells'][0]['id'])
-            if e.prompt: self.store_reply(True)
-            e.key(ord('6'))
-            while e.state['readiness']!='ready': e.key('enter')
+            # A failed cast can leave the next attempt short of mana. Handle
+            # confirmation, -more- and aiming separately, as in cast() below;
+            # blindly sending Enter can leave this setup stuck in aiming.
+            for _ in range(60):
+                e.state=e.call('state.get')['result']
+                if e.state['readiness']=='ready': break
+                if e.prompt:
+                    self.assertEqual(e.prompt['type'],'confirmation')
+                    self.store_reply(True)
+                elif e.state.get('message_pending'): e.key('enter')
+                elif e.state.get('aiming'): e.key(ord('6'))
+                else: e.key('enter')
+            self.assertEqual(e.state['readiness'],'ready','Practice cast did not finish')
             if self.spell_book()['spells'][0]['status']=='Learned': break
         self.assertEqual(self.spell_book()['spells'][0]['status'],'Learned')
         self.assertTrue(self.spell_book()['spells'][0]['info'])
