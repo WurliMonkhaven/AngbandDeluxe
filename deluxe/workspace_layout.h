@@ -349,7 +349,7 @@ struct WorkspaceLayout {
   }
  }
  struct DockPreview { bool active=false; ImVec2 pos,size; std::string label; } dock_preview;
- ImVec2 workspace_pos,workspace_size,floating_preview_pos,floating_preview_size;
+ ImVec2 workspace_pos,workspace_size,workspace_view_pos,workspace_view_size,floating_preview_pos,floating_preview_size;
  bool measure_panel(const Node &n,ImVec2 pos,ImVec2 size,int panel,const Enabled &enabled,ImVec2 &out_pos,ImVec2 &out_size) const {
   if(!visible(n,enabled) || !contains(n,panel)) return false;
   if(!n.axis) {
@@ -359,7 +359,8 @@ struct WorkspaceLayout {
   const bool a=visible(n.children[0],enabled),b=visible(n.children[1],enabled);
   if(!a || !b) return measure_panel(n.children[a?0:1],pos,size,panel,enabled,out_pos,out_size);
   const float usable=std::max(2.f,(n.axis==1?size.x:size.y)-6);
-  auto ma=minimum(n.children[0],enabled,n.axis==1?size.x*n.ratio:size.x),mb=minimum(n.children[1],enabled,n.axis==1?size.x*(1-n.ratio):size.x);
+  const float measured_first=n.axis==1?first_width(n,enabled,size.x):size.x;
+  auto ma=minimum(n.children[0],enabled,measured_first),mb=minimum(n.children[1],enabled,n.axis==1?size.x-6-measured_first:size.x);
   float lower=n.axis==1?ma.x:ma.y,upper=n.axis==1?mb.x:mb.y;
   if(lower+upper>usable) { float fit=usable/(lower+upper); lower*=fit; upper*=fit; }
   upper=std::max(lower,usable-upper);
@@ -383,7 +384,14 @@ struct WorkspaceLayout {
      // Measure the proposed tree after removing the source, so its vacated
      // space and fixed-height panels are included in the landing preview.
      ImVec2 landing_pos=pos,landing_size=size;
-     if(!planned.measure_panel(planned.root,workspace_pos,workspace_size,panel,enabled,landing_pos,landing_size)) {
+     const auto planned_size=planned.canvas_size(planned.root,enabled,workspace_view_size);
+     ImVec2 planned_pos=workspace_view_pos;
+     if(planned_size.x>workspace_view_size.x+.5f || planned_size.y>workspace_view_size.y+.5f) {
+      const float scrollbar=ImGui::GetStyle().ScrollbarSize;
+      planned_pos.x-=std::clamp(workspace_view_pos.x-workspace_pos.x,0.f,std::max(0.f,planned_size.x-workspace_view_size.x+scrollbar));
+      planned_pos.y-=std::clamp(workspace_view_pos.y-workspace_pos.y,0.f,std::max(0.f,planned_size.y-workspace_view_size.y+scrollbar));
+     }
+     if(!planned.measure_panel(planned.root,planned_pos,planned_size,panel,enabled,landing_pos,landing_size)) {
       for(const auto &f:planned.floating) if(contains(f.node,panel)) {
        // Floating destinations retain their window footprint.
        planned.measure_panel(f.node,floating_preview_pos,floating_preview_size,panel,enabled,landing_pos,landing_size); break;
@@ -410,42 +418,82 @@ struct WorkspaceLayout {
   d->AddRectFilled(label,{label.x+text.x+2*pad,label.y+text.y+2*pad},ImGui::GetColorU32(ImGuiCol_WindowBg),3);
   d->AddText(ImGui::GetFont(),ImGui::GetFontSize(),{label.x+pad,label.y+pad},ImGui::GetColorU32(ImGuiCol_Text),p.label.c_str(),nullptr,wrap);
  }
- // Dedicated compact panels have a natural height, not a share of a split.
- // Mixed tab groups remain flexible because their other panels need the space.
+ // Measure the same widths and chrome that draw_node actually uses. In
+ // particular, tabbing compact panels must not turn them into flexible panels.
+ float panel_height(int panel,float width) const {
+  return panel==Quickbar?quickbar_content_height:panel==TrackedCreature?tracker_content_height:
+   compact_height?compact_height(panel,std::max(1.f,(width>0?width:22*ImGui::GetFontSize())-2*ImGui::GetStyle().WindowPadding.x)):0;
+ }
+ float chrome_height(const Node &n,const Enabled &enabled) const {
+  int count=0; for(int p:n.tabs) if(enabled(p)) ++count;
+  float height=2*ImGui::GetStyle().WindowPadding.y;
+  if(editing || count>1) height+=ImGui::GetFrameHeightWithSpacing();
+  return height;
+ }
+ float minimum_width(const Node &n,const Enabled &enabled) const {
+  if(!visible(n,enabled)) return 0;
+  if(n.axis) {
+   float a=minimum_width(n.children[0],enabled),b=minimum_width(n.children[1],enabled);
+   if(!a || !b) return std::max(a,b);
+   return n.axis==1?a+b+6:std::max(a,b);
+  }
+  float units=10;
+  for(int p:n.tabs) if(enabled(p)) units=std::max(units,
+   p==Dungeon||p==Quickbar||p==Character||p==Status||p==DungeonDetails||p==TrackedCreature?22.f:p==Inventory||p==Spells?18.f:14.f);
+  return units*ImGui::GetFontSize();
+ }
+ float first_width(const Node &n,const Enabled &enabled,float width) const {
+  const float usable=std::max(2.f,width-6),a=minimum_width(n.children[0],enabled),b=minimum_width(n.children[1],enabled);
+  if(a+b>usable) return usable*a/std::max(1.f,a+b);
+  return std::clamp(usable*n.ratio,a,usable-b);
+ }
  float fitted_height(const Node &n,const Enabled &enabled,float width=0) const {
   if(!visible(n,enabled)) return 0;
   if(n.axis) {
    bool a=visible(n.children[0],enabled),b=visible(n.children[1],enabled);
    if(!a || !b) return fitted_height(n.children[a?0:1],enabled,width);
-   float ah=fitted_height(n.children[0],enabled,n.axis==1?width*n.ratio:width),bh=fitted_height(n.children[1],enabled,n.axis==1?width*(1-n.ratio):width);
+   const float first=n.axis==1?first_width(n,enabled,width):width;
+   float ah=fitted_height(n.children[0],enabled,first),bh=fitted_height(n.children[1],enabled,n.axis==1?std::max(1.f,width-6-first):width);
    return ah>0 && bh>0?(n.axis==2?ah+bh+6:std::max(ah,bh)):0;
   }
-  int count=0,panel=-1;
-  for(int p:n.tabs) if(enabled(p)) { ++count; panel=p; }
-  if(count!=1) return 0;
-  const float content=panel==Quickbar?quickbar_content_height:panel==TrackedCreature?tracker_content_height:compact_height?compact_height(panel,std::max(1.f,(width>0?width:22*ImGui::GetFontSize())-2*ImGui::GetStyle().WindowPadding.x)):0;
-  if(content<=0) return 0;
-  float height=content+2*ImGui::GetStyle().WindowPadding.y;
-  if(editing) {
-   height+=ImGui::GetFrameHeightWithSpacing();
-   if(ImGui::GetDragDropPayload() && !measuring_drop) height+=ImGui::GetTextLineHeightWithSpacing()+ImGui::GetFrameHeightWithSpacing();
+  float selected=0; int active=-1;
+  for(int p:n.tabs) if(enabled(p)) {
+   const float h=panel_height(p,width);
+   if(h<=0) return 0; // A mixed group still needs a resizable content area.
+   if(active<0 || p==n.active) { active=p; selected=h; }
   }
-  return height;
+  return selected>0?selected+chrome_height(n,enabled):0;
  }
  ImVec2 minimum(const Node &n,const Enabled &enabled,float width=0) const {
   if(!visible(n,enabled)) return {0,0};
   if(n.axis) {
-   auto a=minimum(n.children[0],enabled,n.axis==1?width*n.ratio:width),b=minimum(n.children[1],enabled,n.axis==1?width*(1-n.ratio):width);
-   if(a.x==0) return b; if(b.x==0) return a;
+   const bool va=visible(n.children[0],enabled),vb=visible(n.children[1],enabled);
+   if(!va || !vb) return minimum(n.children[va?0:1],enabled,width);
+   const float first=n.axis==1?first_width(n,enabled,width):width;
+   auto a=minimum(n.children[0],enabled,first),b=minimum(n.children[1],enabled,n.axis==1?std::max(1.f,width-6-first):width);
    return n.axis==1?ImVec2(a.x+b.x+6,std::max(a.y,b.y)):ImVec2(std::max(a.x,b.x),a.y+b.y+6);
   }
-  if(float height=fitted_height(n,enabled,width); height>0) return {22*ImGui::GetFontSize(),height};
-  float width_units=10,height=5;
+  if(float height=fitted_height(n,enabled,width); height>0) return {minimum_width(n,enabled),height};
+  float height=5*ImGui::GetFontSize();
   for(int p:n.tabs) if(enabled(p)) {
-   width_units=std::max(width_units,p==Character?20.f:p==Dungeon||p==Quickbar?22.f:p==Inventory||p==Spells?18.f:14.f);
-   height=std::max(height,p==Dungeon?10.f:p==Character?12.f:p==Inventory||p==Spells?8.f:5.f);
+   const float content=panel_height(p,width);
+   height=std::max(height,content>0?content:(p==Dungeon?10.f:p==Character?12.f:p==Inventory||p==Spells?8.f:5.f)*ImGui::GetFontSize());
   }
-  return {width_units*ImGui::GetFontSize(),height*ImGui::GetFontSize()+(editing?ImGui::GetFrameHeightWithSpacing():0)};
+  return {minimum_width(n,enabled),height+chrome_height(n,enabled)};
+ }
+ // Resolve scrollbar space before drawing (or previewing) the tree. Waiting
+ // for last frame's scrollbar width causes compact rows to oscillate on resize.
+ ImVec2 canvas_size(const Node &n,const Enabled &enabled,ImVec2 viewport) const {
+  bool horizontal=false,vertical=false;
+  ImVec2 canvas=viewport;
+  for(int i=0;i<3;++i) {
+   const float w=std::max(1.f,viewport.x-(vertical?ImGui::GetStyle().ScrollbarSize:0));
+   const float h=std::max(1.f,viewport.y-(horizontal?ImGui::GetStyle().ScrollbarSize:0));
+   canvas.x=std::max(w,minimum_width(n,enabled));
+   canvas.y=std::max(h,minimum(n,enabled,canvas.x).y);
+   horizontal=horizontal || canvas.x>w+.5f; vertical=vertical || canvas.y>h+.5f;
+  }
+  return canvas;
  }
  // Ancestor geometry lets a divider push a compact panel through the stack
  // without stretching it or changing unrelated siblings' heights.
@@ -475,7 +523,8 @@ struct WorkspaceLayout {
    const bool a=visible(n.children[0],enabled),b=visible(n.children[1],enabled);
    if(!a||!b) { draw_node(n.children[a?0:1],pos,size,enabled,draw); return; }
    const float gap=6.f,extent=n.axis==1?size.x:size.y,usable=std::max(2.f,extent-gap);
-   const auto min_a=minimum(n.children[0],enabled,n.axis==1?size.x*n.ratio:size.x),min_b=minimum(n.children[1],enabled,n.axis==1?size.x*(1-n.ratio):size.x);
+   const float measured_first=n.axis==1?first_width(n,enabled,size.x):size.x;
+   const auto min_a=minimum(n.children[0],enabled,measured_first),min_b=minimum(n.children[1],enabled,n.axis==1?size.x-6-measured_first:size.x);
    float lower=n.axis==1?min_a.x:min_a.y,upper=n.axis==1?min_b.x:min_b.y;
    const bool space_limited=lower+upper>=usable-.5f;
    if(lower+upper>usable) { const float fit=usable/(lower+upper); lower*=fit; upper*=fit; }
@@ -555,18 +604,28 @@ struct WorkspaceLayout {
     ImGui::EndTabBar();
    }
   }
+  // Gameplay controls are disabled during editing; layout controls remain active.
+  const auto guides_pos=ImGui::GetCursorScreenPos();
+  const float natural=panel_height(n.active,size.x);
+  const bool clipped=natural>ImGui::GetContentRegionAvail().y+.5f;
+  ImGui::BeginChild("Content",ImVec2(0,0),ImGuiChildFlags_None,!clipped && (n.active==Dungeon||n.active==Map||natural>0)?ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse:ImGuiWindowFlags_None);
+  ImGui::BeginDisabled(editing); draw(n.active); ImGui::EndDisabled();
+  ImGui::EndChild();
+  // Docking controls overlay disabled content so starting a drag cannot push
+  // every target away or suddenly make the workspace taller.
   if(editing && ImGui::GetDragDropPayload()) {
+   ImGui::SetCursorScreenPos(guides_pos);
+   ImGui::PushStyleColor(ImGuiCol_ChildBg,ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
+   ImGui::BeginChild("Dock guides",{0,ImGui::GetTextLineHeightWithSpacing()+ImGui::GetFrameHeightWithSpacing()},ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
    ImGui::TextDisabled("Dock here");
    const char *labels[]={"Tabs","Left","Right","Above","Below"};
    for(int e=0;e<5;++e) {
     if(e) ImGui::SameLine();
     ImGui::SmallButton(labels[e]); target(n.id,e,pos,size,enabled);
    }
+   ImGui::EndChild(); ImGui::PopStyleColor();
   }
-  // Gameplay controls are disabled during editing; layout controls remain active.
-  ImGui::BeginChild("Content",ImVec2(0,0),ImGuiChildFlags_None,n.active==Dungeon||n.active==Map||n.active==Quickbar||n.active==TrackedCreature||n.active==DungeonDetails||n.active==Character||n.active==Status?ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse:ImGuiWindowFlags_None);
-  ImGui::BeginDisabled(editing); draw(n.active); ImGui::EndDisabled();
-  ImGui::EndChild(); ImGui::EndChild(); ImGui::PopID();
+  ImGui::EndChild(); ImGui::PopID();
  }
  void draw(const Enabled &enabled,const std::function<void(int)> &panel) {
   if(editing && !history_ready) { edit_initial=edit_checkpoint=snapshot(); history_ready=true; undo_steps.clear(); redo_steps.clear(); }
@@ -592,13 +651,29 @@ struct WorkspaceLayout {
   }
   const ImVec2 pos=ImGui::GetCursorScreenPos(),size=ImGui::GetContentRegionAvail();
   if(size.x<4||size.y<4) return;
-  workspace_pos=pos; workspace_size=size; dock_preview.active=false;
-  draw_node(root,pos,size,enabled,panel);
+  workspace_view_pos=workspace_pos=pos; workspace_view_size=workspace_size=size; dock_preview.active=false;
+  const auto canvas=canvas_size(root,enabled,size);
+  if(canvas.x>size.x+.5f || canvas.y>size.y+.5f) {
+   // Preserve content minima when the window or a new dock arrangement cannot
+   // fit. Scrolling is preferable to silently compressing unscrollable panels.
+   ImGui::SetNextWindowContentSize(canvas);
+   ImGui::BeginChild("Workspace overflow",size,ImGuiChildFlags_None,ImGuiWindowFlags_HorizontalScrollbar);
+   const auto origin=ImGui::GetCursorScreenPos();
+   workspace_pos=origin; workspace_size=canvas;
+   draw_node(root,origin,canvas,enabled,panel);
+   ImGui::SetCursorScreenPos(origin); ImGui::Dummy(canvas);
+   ImGui::EndChild();
+  } else draw_node(root,pos,size,enabled,panel);
   for(auto &f:floating) {
    if(!visible(f.node,enabled)) continue;
    float w=std::clamp(f.w*size.x,std::min(size.x,ImGui::GetFontSize()*16),size.x);
    float h=std::clamp(f.h*size.y,std::min(size.y,ImGui::GetFontSize()*8),size.y);
-   const float fitted=fitted_height(f.node,enabled,w);
+   w=std::min(size.x,std::max(w,minimum_width(f.node,enabled)+2*ImGui::GetStyle().WindowPadding.x));
+   const float inner_width=std::max(1.f,w-2*ImGui::GetStyle().WindowPadding.x);
+   const float floating_chrome=2*ImGui::GetStyle().WindowPadding.y+
+    (editing||!floating_locked?ImGui::GetFrameHeightWithSpacing():0)+(editing?ImGui::GetFrameHeightWithSpacing():0);
+   h=std::min(size.y,std::max(h,minimum(f.node,enabled,inner_width).y+floating_chrome));
+   const float fitted=fitted_height(f.node,enabled,inner_width);
    if(fitted>0) h=std::min(size.y,fitted+2*ImGui::GetStyle().WindowPadding.y+
     (editing||!floating_locked?ImGui::GetFrameHeightWithSpacing():0)+(editing?ImGui::GetFrameHeightWithSpacing():0));
    float x=std::clamp(f.x*size.x,0.f,size.x-w),y=std::clamp(f.y*size.y,0.f,size.y-h);

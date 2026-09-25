@@ -668,6 +668,29 @@ int main(int argc,char **argv) {
    check(option_draft.changes().empty(),"Rendering native options must not edit them");
   }
   SDL_strlcpy(option_draft.search,"no matching setting",sizeof(option_draft.search));
+   {
+    ImGui::NewFrame(); ImGui::Begin("Layout measurements");
+    WorkspaceLayout measured;
+    auto enabled=[](int) { return true; };
+    measured.compact_height=[](int p,float width) {
+     if(p==WorkspaceLayout::Character) return 290.f;
+     if(p==WorkspaceLayout::DungeonDetails) return width<450?110.f:60.f;
+     return 0.f;
+    };
+    auto tabs=measured.leaf({WorkspaceLayout::Character,WorkspaceLayout::DungeonDetails});
+    float character=measured.fitted_height(tabs,enabled,500);
+    check(character>=290 && character<350,"Compact tab groups fit their selected content and tab strip");
+    tabs.active=WorkspaceLayout::DungeonDetails;
+    check(measured.fitted_height(tabs,enabled,500)<character-150,"Switching compact tabs releases unused height");
+    tabs.tabs.push_back(WorkspaceLayout::Inventory);
+    check(measured.fitted_height(tabs,enabled,500)==0,"Mixed tab groups stay resizable");
+    check(measured.minimum(tabs,enabled,500).y>=character,"Mixed groups preserve the tallest compact panel's minimum");
+    auto row=measured.split(1,.9f,measured.leaf({WorkspaceLayout::Inventory}),measured.leaf({WorkspaceLayout::DungeonDetails}));
+    check(measured.minimum(row,enabled,1000).y>=110,"Height measurement uses constrained split widths");
+    measured.editing=true;
+    check(measured.minimum(tabs,enabled,500).y>=character,"Editing preserves content and tab height");
+    ImGui::End(); ImGui::Render();
+   }
   ImGui::NewFrame(); ImGui::Begin("Options empty search"); option_draft.draw(); ImGui::End(); ImGui::Render();
   {
   {
