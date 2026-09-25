@@ -84,7 +84,7 @@ struct CharacterOverview {
   const float row_padding=2*style.CellPadding.y;
   float total=std::max(ImGui::GetFrameHeight(),headings?DeluxeTheme::section_height():ImGui::GetFrameHeight())+row_padding;
   total+=style.ItemSpacing.y+2*(ImGui::GetFrameHeight()+row_padding);
-  if(p.contains("stats") && !p["stats"].empty()) total+=style.ItemSpacing.y+2*font+style.ItemSpacing.y+row_padding;
+  if(p.contains("stats") && !p["stats"].empty()) total+=style.ItemSpacing.y+ImGui::GetFrameHeight()+row_padding;
   const char *labels[]={"Gold","Armour","Speed"};
   const int speed=p.value("speed",0);
   const std::string values[]={std::to_string(p.value("gold",0)),std::to_string(p.value("armour",0)),(speed>=0?"+":"")+std::to_string(speed)};
@@ -152,22 +152,41 @@ struct CharacterOverview {
    ImGui::EndTable();
   }
   static const char *names[]={"STR","INT","WIS","DEX","CON"};
-  if(p.contains("stats") && !p["stats"].empty() && ImGui::BeginTable("Attributes",int(p["stats"].size()),ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_BordersInnerV)) {
-   ImGui::TableNextRow();
+  if(p.contains("stats") && !p["stats"].empty()) {
+   // Equal cells, with inline label/value pairs and one shared text scale.
+   // Wide exceptional stats must not collide with the neighbouring cell.
+   std::vector<std::string> values;
+   float longest=0;
    for(size_t i=0;i<p["stats"].size();++i) {
-    ImGui::TableNextColumn();
-    ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,ImGui::GetColorU32(ImGuiCol_FrameBg));
     const int v=p["stats"][i]; char value[32];
     if(v>18) SDL_snprintf(value,sizeof(value),"18/%02d",v-18); else SDL_snprintf(value,sizeof(value),"%d",v);
-    auto centered=[&](const char *text,bool muted) {
-     ImGui::SetCursorPosX(ImGui::GetCursorPosX()+std::max(0.f,(ImGui::GetContentRegionAvail().x-ImGui::CalcTextSize(text).x)*.5f));
-     if(muted) ImGui::TextDisabled("%s",text); else ImGui::TextUnformatted(text);
-    };
-    const float left=ImGui::GetCursorPosX();
-    centered(i<std::size(names)?names[i]:"Stat",true);
-    ImGui::SetCursorPosX(left); centered(value,false);
+    values.emplace_back(value);
+    longest=std::max(longest,ImGui::CalcTextSize(i<std::size(names)?names[i]:"Stat").x+ImGui::CalcTextSize(value).x);
    }
-   ImGui::EndTable();
+   const float font=ImGui::GetFontSize(),gap=font*.45f;
+   const float cell=ImGui::GetContentRegionAvail().x/values.size()-2*ImGui::GetStyle().CellPadding.x;
+   const float scale=std::min(1.f,std::max(1.f,cell-2)/(longest+gap));
+   if(ImGui::BeginTable("Attributes",int(values.size()),ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_BordersInnerV)) {
+    ImGui::TableNextRow();
+    for(size_t i=0;i<values.size();++i) {
+     ImGui::TableNextColumn();
+     ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,ImGui::GetColorU32(ImGuiCol_FrameBg));
+     const char *label=i<std::size(names)?names[i]:"Stat";
+     const float width=ImGui::GetContentRegionAvail().x,height=ImGui::GetFrameHeight();
+     const float label_width=ImGui::CalcTextSize(label).x*scale;
+     const float pair_width=label_width+(gap+ImGui::CalcTextSize(values[i].c_str()).x)*scale;
+     const auto a=ImGui::GetCursorScreenPos();
+     const ImVec2 text(a.x+std::max(0.f,(width-pair_width)*.5f),a.y+(height-font*scale)*.5f);
+     auto *draw=ImGui::GetWindowDrawList();
+     draw->PushClipRect(a,ImVec2(a.x+width,a.y+height),true);
+     draw->AddText(ImGui::GetFont(),font*scale,text,ImGui::GetColorU32(ImGuiCol_TextDisabled),label);
+     draw->AddText(ImGui::GetFont(),font*scale,ImVec2(text.x+label_width+gap*scale,text.y),ImGui::GetColorU32(ImGuiCol_Text),values[i].c_str());
+     draw->PopClipRect();
+     ImGui::Dummy(ImVec2(width,height));
+     if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s: %s",label,values[i].c_str());
+    }
+    ImGui::EndTable();
+   }
   }
   if(ImGui::BeginTable("Combat overview",3,ImGuiTableFlags_SizingStretchSame)) {
    ImGui::TableNextRow(); ImGui::TableNextColumn(); metric("Gold",std::to_string(p.value("gold",0)));

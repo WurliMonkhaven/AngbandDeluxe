@@ -1915,6 +1915,20 @@ class BackendTests(unittest.TestCase):
         count=len(e.motion_events); e.call('state.get'); e.call('state.get')
         self.assertEqual(len(e.motion_events),count,'Queries do not replay animations')
 
+    def test_debug_stats(self):
+        e=self.engine
+        e.hello()
+        self.assertIn('error',e.call('debug.stats'))
+        e.birth()
+        before=e.state
+        self.assertIn('result',e.call('debug.stats'))
+        e.next_state(before['revision'])
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.key('enter')
+        self.assertEqual(e.state['player']['stats'],[238]*5)
+        self.assertEqual(e.state['turn'],before['turn'])
+
     def test_debug_experience(self):
         e=self.engine
         e.hello()

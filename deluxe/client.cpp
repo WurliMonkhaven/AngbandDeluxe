@@ -2116,6 +2116,9 @@ struct UI {
    if(ImGui::MenuItem("Cast test blast",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.blast",0)>0)) open_blast=true;
    if(ImGui::MenuItem("Inflict damage on player",nullptr,false,c.ready() && c.state.value("phase","")=="playing")) open_damage=true;
    if(ImGui::MenuItem("Inflict status effect",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.status",0)>0)) open_status=true;
+   if(ImGui::MenuItem("Set all stats to 18/220",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.stats",0)>0)) {
+    keys.clear(); c.send("debug.stats"); c.busy=true;
+   }
    if(ImGui::MenuItem("Give player XP",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.experience",0)>0)) open_xp=true;
    ImGui::Separator();
    if(ImGui::MenuItem("Quit without saving",nullptr,false,c.connected && !c.busy && c.capabilities.value("debug.quit",0)>0)) c.quit_without_saving();

@@ -34,12 +34,12 @@ struct StatusEffects {
    const float h=ImGui::CalcTextSize(label.c_str(),nullptr,false,std::max(1.f,badge_width-3*pad)).y+pad;
    row_height=std::max(row_height,h); used+=(used>0?style.ItemSpacing.x:0)+badge_width;
   }
-  return title+total+row_height+2*style.ItemSpacing.y;
+  return title+total+row_height;
  }
  static void draw(const json &player,bool *open_spells=nullptr,float study_flash=0) {
   const auto effects=badges(player);
   if(effects.empty()) return;
-  ImGui::PushID("Status effects"); ImGui::Spacing();
+  ImGui::PushID("Status effects");
   const float left=ImGui::GetCursorScreenPos().x,width=std::max(1.f,ImGui::GetContentRegionAvail().x);
   const float pad=ImGui::GetFontSize()*.4f,gap=ImGui::GetStyle().ItemSpacing.x;
   bool first=true;
@@ -83,6 +83,6 @@ struct StatusEffects {
    }
    first=false;
   }
-  ImGui::Spacing(); ImGui::PopID();
+  ImGui::PopID();
  }
 };

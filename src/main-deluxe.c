@@ -95,6 +95,7 @@ static int debug_glow_kind;
 static struct loc debug_glow_grid;
 static int debug_breath_element = -1;
 static int debug_damage, debug_experience, debug_blast_radius;
+static bool debug_max_stats;
 static int debug_status=-1,debug_status_amount;
 static int native_target_mode;
 static bool native_target_immediate;
@@ -773,7 +774,7 @@ static void pump(void)
   negotiated = true;
   native_inventory=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_inventory"));
   native_equipment=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_equipment"));
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"tuning\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.scene\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"presentation.tiles\":1,\"presentation.viewport\":1,\"presentation.camera\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"tuning\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.scene\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.stats\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"presentation.tiles\":1,\"presentation.viewport\":1,\"presentation.camera\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   cJSON_SetNumberValue(cJSON_GetObjectItem(out,"max_frame_bytes"),(double)frame_limit);
   response(id, out); goto done;
  }
@@ -1222,6 +1223,13 @@ static void pump(void)
     !square_isseen(cave,grid) || !square_isfloor(cave,grid) || square_object(cave,grid) || square_monster(cave,grid) || square_isplayer(cave,grid)))
    error(id,"invalid_argument","Choose an empty, visible floor tile and an artifact, rune or cursed item.");
   else { debug_glow_kind=kind; debug_glow_grid=grid; debug_glow_items=true; ready=false; response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0); }
+ } else if (streq(method, "debug.stats")) {
+  if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing"))
+   error(id,"busy","Return to normal play before changing stats.");
+  else {
+   debug_max_stats=true; ready=false;
+   response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0);
+  }
  } else if (streq(method, "debug.experience")) {
   cJSON *amount=cJSON_GetObjectItem(p,"amount");
   if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing"))
@@ -1399,6 +1407,18 @@ static errr get_command(cmd_context context)
    handle_stuff(player);
   }
   if(debug_glow_items) { debug_glow_items=false; ready=false; deluxe_spawn_glow_items(); }
+  if(debug_max_stats) {
+   debug_max_stats=false; ready=false;
+   /* Offset current equipment, race and class bonuses so the visible values
+    * are exactly 18/220, rather than only setting the unmodified base stats. */
+   for(int i=0;i<STAT_MAX;++i) {
+    int add=player->state.stat_add[i]+player->race->r_adj[i]+player->class->c_adj[i];
+    player->stat_cur[i]=player->stat_max[i]=modify_stat_value(18+220,-add);
+   }
+   player->upkeep->update|=PU_BONUS|PU_HP|PU_MANA;
+   player->upkeep->redraw|=PR_STATS|PR_HP|PR_MANA;
+   handle_stuff(player);
+  }
   if(debug_experience) {
    int amount=debug_experience; debug_experience=0; ready=false;
    player_exp_gain(player,amount);
