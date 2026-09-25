@@ -44,6 +44,11 @@ int main(int argc,char **argv) {
    DungeonCameraSettings defaults; check(!defaults.enabled && defaults.follow,"Camera is opt-in with following enabled");
    defaults.enabled=true; defaults.follow=false; DungeonCameraSettings restored; restored.load(defaults.serialize());
    check(restored.enabled && !restored.follow,"Camera preferences round trip");
+   DungeonCameraSettings size_settings;
+   size_settings.load({{"fixed_size",32},{"fixed_width",16},{"custom_size",true}});
+   DungeonCameraSettings restored_size; restored_size.load(size_settings.serialize());
+   check(restored_size.fixed_size==32 && restored_size.fixed_width==16 && restored_size.custom_size,"Fixed tile sizes round trip");
+   restored_size.load({{"fixed_size",999}}); check(restored_size.fixed_size==64,"Custom tile sizes are bounded");
    DungeonCamera camera; json view={{"level_id","1"},{"width",198},{"height",66}},player={{"x",40},{"y",20}};
    camera.update(view,player,true);
    check(camera.x==40.5f && camera.y==20.5f,"Initial camera centers the player");

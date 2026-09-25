@@ -88,7 +88,7 @@ struct ScenePresence {
      }
     } else if(kind==3 && settings.terrain) {
      // A permanent hot bed keeps every known tile legible even between sparks.
-     const float pulse=.5f+.5f*std::sin(clock*2.3f+seed),memory=cell[10].get<int>()?1.f:.8f;
+     const float pulse=.5f+.5f*std::sin(clock*2.3f+seed),memory=1.33f*(cell[10].get<int>()?1.f:.8f);
      d->AddRectFilledMultiColor({at.x-cw*.5f,at.y-ch*.5f},{at.x+cw*.5f,at.y+ch*.5f},
       IM_COL32(255,65,8,int((65+25*pulse)*memory)),IM_COL32(255,95,12,int((75+20*pulse)*memory)),
       IM_COL32(235,35,5,int((65+20*pulse)*memory)),IM_COL32(255,55,6,int((75+20*pulse)*memory)));

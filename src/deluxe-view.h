@@ -7,6 +7,8 @@ static bool *deluxe_cells_valid;
 static int deluxe_width, deluxe_height;
 static unsigned long deluxe_level;
 static bool deluxe_full_map;
+static int deluxe_view_width, deluxe_view_height, deluxe_view_x, deluxe_view_y;
+static bool deluxe_view_initialized;
 
 /* Looking may cycle over terrain/items as well as monsters. Confirm those as
  * locations using the engine's existing free-cursor controls. Kill targeting
@@ -27,6 +29,7 @@ static void deluxe_target_key(int key)
 static void deluxe_reset_view(void)
 {
  mem_free(deluxe_cells); mem_free(deluxe_cells_valid);
+ deluxe_view_initialized = false;
  deluxe_cells = NULL; deluxe_cells_valid = NULL;
  deluxe_width = deluxe_height = 0; ++deluxe_level;
 }
@@ -59,7 +62,17 @@ static void deluxe_capture_view(cJSON *state_record)
  width = deluxe_full_map ? cave->width : MIN(SCREEN_WID, cave->width - ox);
  height = deluxe_full_map ? cave->height : MIN(SCREEN_HGT, cave->height - oy);
  if (width < 1 || height < 1 || terminal.offset_x < 0 || terminal.offset_y < 0) return;
- if (!deluxe_full_map) for (y=0;y<height;++y) for (x=0;x<width;++x)
+ if (!deluxe_full_map && deluxe_view_width>0) {
+  const struct loc focus=target_ui_current?target_ui_current->grid:player->grid;
+  width=MIN(deluxe_view_width,cave->width); height=MIN(deluxe_view_height,cave->height);
+  const bool centered=OPT(player,center_player) && !player->upkeep->running && !target_ui_current;
+  if(!deluxe_view_initialized || centered || focus.x<deluxe_view_x+3 || focus.x>=deluxe_view_x+width-3) deluxe_view_x=focus.x-width/2;
+  if(!deluxe_view_initialized || centered || focus.y<deluxe_view_y+2 || focus.y>=deluxe_view_y+height-2) deluxe_view_y=focus.y-height/2;
+  deluxe_view_x=MAX(0,MIN(deluxe_view_x,cave->width-width));
+  deluxe_view_y=MAX(0,MIN(deluxe_view_y,cave->height-height));
+  ox=deluxe_view_x; oy=deluxe_view_y; deluxe_view_initialized=true;
+ }
+ if (!deluxe_full_map && !deluxe_view_width) for (y=0;y<height;++y) for (x=0;x<width;++x)
   if (!deluxe_cells_valid[(y+terminal.offset_y)*deluxe_width+x+terminal.offset_x]) return;
  view=cJSON_CreateObject(); rows=cJSON_CreateArray(); observed_items=cJSON_CreateArray();
  json_bool(state_record,"message_pending",textui_message_pending);
@@ -73,7 +86,7 @@ static void deluxe_capture_view(cJSON *state_record)
   for (x=0;x<width;++x) {
    struct map_visual whole;
    const struct map_visual *v;
-   if (deluxe_full_map) { map_visual_readonly(loc(x,y), &whole); v=&whole; }
+   if (deluxe_full_map || deluxe_view_width>0) { map_visual_readonly(loc(x+ox,y+oy), &whole); v=&whole; }
    else v=&deluxe_cells[(y+oy)*deluxe_width+x+ox];
    int cell[13]={v->terrain_char,v->terrain_attr,v->trap_char,v->trap_attr,
     v->object_char,v->object_attr,v->actor_char,v->actor_attr,

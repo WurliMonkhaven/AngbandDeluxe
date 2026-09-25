@@ -151,7 +151,8 @@ struct Connection {
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
  bool pickup_travel=false, resting=false, saving=false;
  std::string loading;
- int camera_sent=-1, tiles_sent=-1;
+ int camera_sent=-1, tiles_sent=-1, viewport_width_sent=-1, viewport_height_sent=-1;
+ Uint64 viewport_sent_at=0;
  bool return_to_menu = false, restart_ready = false, close_confirmed = false;
  json state = json::object(), prompt = json::object(), pending_prompt = json::object(), commands = json::array(), saves = json::array(), catalog = json::object();
  Connection()=default;
@@ -284,10 +285,10 @@ struct Connection {
    bindings_saved=j.contains("error")?json{{"error",j["error"].value("message","Bindings could not be saved.")}}:j["result"];
    busy=false; return;
   }
-  if(method=="dungeon.camera" || method=="dungeon.tiles") {
+  if(method=="dungeon.camera" || method=="dungeon.tiles" || method=="dungeon.viewport") {
    busy=false;
    if(j.contains("error")) {
-    if(j["error"].value("code","")=="busy") { if(method=="dungeon.tiles") tiles_sent=-1; else camera_sent=-1; }
+    if(j["error"].value("code","")=="busy") { if(method=="dungeon.tiles") tiles_sent=-1; else if(method=="dungeon.viewport") viewport_width_sent=viewport_height_sent=-1; else camera_sent=-1; }
     else notice(j["error"].value("message","Camera mode could not be changed."));
    }
    return;
@@ -718,6 +719,7 @@ struct UI {
    settings_error="Settings could not be saved. Please try again."; return false;
   }
   if(camera_settings.enabled!=draft_camera.enabled || camera_settings.follow!=draft_camera.follow) dungeon_camera.reset();
+  if(camera_settings.fixed_size!=draft_camera.fixed_size || camera_settings.fixed_width!=draft_camera.fixed_width) dungeon_camera.zoom=1;
   camera_settings=draft_camera; tileset=draft_tileset;
   font_settings=draft_fonts; theme_settings=draft_theme;
   audio_settings=draft_audio_settings; audio.configure(audio_settings,window_active);
@@ -831,7 +833,7 @@ struct UI {
      if(draft_tileset) {
       if(tiles.load(draft_tileset)) {
        tiles.preview(draft_tileset);
-       ImGui::TextWrapped("Square tiles replace dungeon lettering. Zoom with the free camera for a closer look.");
+       ImGui::TextWrapped("Tiles replace dungeon lettering. Choose a cell size below, or zoom with the free camera.");
       } else ImGui::TextWrapped("%s",tiles.atlases[draft_tileset].error.c_str());
      } else ImGui::TextWrapped("Classic lettering, using your chosen dungeon font.");
      ImGui::TextDisabled("Unmapped artwork falls back to ASCII.");
@@ -842,6 +844,34 @@ struct UI {
      ImGui::BeginDisabled(!draft_camera.enabled);
      ImGui::Checkbox("Keep player centered",&draft_camera.follow);
      ImGui::EndDisabled();
+     if(!draft_camera.enabled) {
+      ImGui::SameLine(); ImGui::TextDisabled("(i)");
+      if(ImGui::IsItemHovered()) ImGui::SetTooltip("For camera centering without a free camera, see \"Game rules -> Display -> Center map continuously\".");
+     }
+     ImGui::TextUnformatted("Glyph / tile size"); ImGui::SetNextItemWidth(-1);
+     const char *automatic_size=draft_camera.enabled?"Default":"Auto-fit";
+     const std::string size_label=draft_camera.custom_size?"Custom":draft_camera.fixed_size?
+      (draft_camera.fixed_width?std::to_string(draft_camera.fixed_width)+" x ":"")+std::to_string(draft_camera.fixed_size)+" px":automatic_size;
+     if(ImGui::BeginCombo("##Fixed cell size",size_label.c_str())) {
+      if(ImGui::Selectable(automatic_size,!draft_camera.custom_size && !draft_camera.fixed_size)) { draft_camera.fixed_size=draft_camera.fixed_width=0; draft_camera.custom_size=false; }
+      for(const auto dimensions:{ImVec2(8,8),ImVec2(8,16),ImVec2(12,20),ImVec2(16,16),ImVec2(16,24),ImVec2(16,32),ImVec2(24,24),ImVec2(24,32),ImVec2(32,32),ImVec2(32,48),ImVec2(48,48)}) {
+       const int width=int(dimensions.x),height=int(dimensions.y);
+       const auto label=std::to_string(width)+" x "+std::to_string(height)+" px";
+       if(ImGui::Selectable(label.c_str(),!draft_camera.custom_size && draft_camera.fixed_width==width && draft_camera.fixed_size==height)) { draft_camera.fixed_width=width; draft_camera.fixed_size=height; draft_camera.custom_size=false; }
+      }
+      if(ImGui::Selectable("Custom",draft_camera.custom_size)) {
+       draft_camera.custom_size=true;
+       if(!draft_camera.fixed_size) draft_camera.fixed_size=24;
+       if(!draft_camera.fixed_width) draft_camera.fixed_width=draft_tileset?draft_camera.fixed_size:std::clamp(int(draft_camera.fixed_size*.6f),8,64);
+      }
+      ImGui::EndCombo();
+     }
+     if(draft_camera.custom_size) {
+      ImGui::TextUnformatted("Width"); ImGui::SetNextItemWidth(-1); ImGui::InputInt("##Custom cell width",&draft_camera.fixed_width);
+      ImGui::TextUnformatted("Height"); ImGui::SetNextItemWidth(-1); ImGui::InputInt("##Custom cell height",&draft_camera.fixed_size);
+      draft_camera.fixed_width=std::clamp(draft_camera.fixed_width,8,64); draft_camera.fixed_size=std::clamp(draft_camera.fixed_size,8,64);
+     }
+     ImGui::TextDisabled("%s",draft_camera.enabled?"Cell size at 100% zoom. Zoom preserves the chosen proportions.":"Width x height in pixels. Smaller cells show more dungeon.");
      ImGui::TextDisabled("Middle-drag to pan. Scroll to zoom.");
      ImGui::TextWrapped("Panning pauses following. Return to player resumes it. Changing floors recenters the view.");
      ImGui::Spacing(); DeluxeTheme::section("Window");
@@ -1163,21 +1193,44 @@ struct UI {
   float pixels=std::min(
    std::max(.01f,viewport.x-2)/(float(columns)*cell_ratio),
    std::max(.01f,viewport.y-2)/(float(std::max(size_t(1),grid.height))*1.12f));
+  const bool fixed_cells=!camera_settings.enabled && camera_settings.fixed_size>0 && c.capabilities.value("presentation.viewport",0)>0;
+  if(c.capabilities.value("presentation.viewport",0)>0 && c.ready() && !layout.editing && SDL_GetTicks()-c.viewport_sent_at>=200) {
+   const float cell_height=float(camera_settings.fixed_size),cell_width=camera_settings.fixed_width>0?float(camera_settings.fixed_width):cell_height*cell_ratio/1.12f;
+   const int wanted_w=fixed_cells?std::clamp(int(std::max(1.f,viewport.x-2)/cell_width),9,240):0;
+   const int wanted_h=fixed_cells?std::clamp(int(std::max(1.f,viewport.y-2)/cell_height),5,128):0;
+   if(wanted_w!=c.viewport_width_sent || wanted_h!=c.viewport_height_sent) {
+    c.send("dungeon.viewport",{{"width",wanted_w},{"height",wanted_h}});
+    c.viewport_width_sent=wanted_w; c.viewport_height_sent=wanted_h; c.viewport_sent_at=SDL_GetTicks(); c.busy=true;
+   }
+  }
+  if(fixed_cells && grid.semantic && !free_camera) pixels=std::min(pixels,float(camera_settings.fixed_size)/1.12f);
   ImGui::InvisibleButton("Dungeon keyboard surface",viewport,ImGuiButtonFlags_EnableNav|ImGuiButtonFlags_MouseButtonLeft|ImGuiButtonFlags_MouseButtonMiddle);
+  float cw=pixels*cell_ratio, ch=pixels*1.12f;
   if(free_camera) {
    const auto &io=ImGui::GetIO();
    const float base=22.f*display_scale;
+   const float base_h=camera_settings.fixed_size>0?float(camera_settings.fixed_size):base*1.12f;
+   const float base_w=camera_settings.fixed_size>0 && camera_settings.fixed_width>0?float(camera_settings.fixed_width):base_h*cell_ratio/1.12f;
    if(ImGui::IsItemHovered() && io.MouseWheel!=0)
-    dungeon_camera.zoom_at(io.MouseWheel,io.MousePos.x-start.x,io.MousePos.y-start.y,viewport.x,viewport.y,base*cell_ratio,base*1.12f,camera_settings.follow && !dungeon_camera.paused);
+    dungeon_camera.zoom_at(io.MouseWheel,io.MousePos.x-start.x,io.MousePos.y-start.y,viewport.x,viewport.y,base_w,base_h,camera_settings.follow && !dungeon_camera.paused);
    dungeon_camera.dragging=ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Middle);
    if(dungeon_camera.dragging) {
     ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
-    dungeon_camera.pan(io.MouseDelta.x,io.MouseDelta.y,base*cell_ratio*dungeon_camera.zoom,base*1.12f*dungeon_camera.zoom);
+    dungeon_camera.pan(io.MouseDelta.x,io.MouseDelta.y,base_w*dungeon_camera.zoom,base_h*dungeon_camera.zoom);
    }
-   pixels=base*dungeon_camera.zoom;
-   dungeon_camera.reveal_target(c.state,viewport.x/(pixels*cell_ratio),viewport.y/(pixels*1.12f));
+   cw=base_w*dungeon_camera.zoom; ch=base_h*dungeon_camera.zoom;
+   const float glyph_ratio=font_library?font_library->cell_ratio(font_settings.dungeon()):.60f;
+   pixels=std::min(ch/1.12f,cw/glyph_ratio);
+   dungeon_camera.reveal_target(c.state,viewport.x/cw,viewport.y/ch);
   }
-  const float cw=pixels*cell_ratio, ch=pixels*1.12f;
+  if(fixed_cells && grid.semantic && !free_camera) {
+   const float wanted_h=float(camera_settings.fixed_size);
+   const float wanted_w=camera_settings.fixed_width>0?float(camera_settings.fixed_width):wanted_h*cell_ratio/1.12f;
+   const float fit=std::min({1.f,std::max(.01f,viewport.x-2)/(columns*wanted_w),std::max(.01f,viewport.y-2)/(std::max(size_t(1),grid.height)*wanted_h)});
+   cw=wanted_w*fit; ch=wanted_h*fit;
+   const float glyph_ratio=font_library?font_library->cell_ratio(font_settings.dungeon()):.60f;
+   pixels=std::min(ch/1.12f,cw/glyph_ratio);
+  }
   const ImVec2 size(cw*float(columns),ch*float(grid.height));
   const ImVec2 origin=free_camera?ImVec2(start.x+viewport.x*.5f-dungeon_camera.x*cw,start.y+viewport.y*.5f-dungeon_camera.y*ch):
    ImVec2(start.x+(viewport.x-size.x)*.5f,start.y+(viewport.y-size.y)*.5f);
@@ -1215,7 +1268,7 @@ struct UI {
   for(int y=y0;y<y1;++y) for(int x=x0;x<x1;++x) {
    const auto &cell=grid.cells[y*grid.width+x];
    if(cell.glyph && cell.glyph!=' ') {
-    const ImVec2 at(origin.x+float(x)*cw,origin.y+float(y)*ch);
+    const ImVec2 at(origin.x+float(x)*cw+std::max(0.f,cw-pixels*cell_ratio)*.5f,origin.y+float(y)*ch+std::max(0.f,ch-pixels*1.12f)*.5f);
     ImVec2 displacement(0,0);
     if(grid.semantic && !motion_feedback.walks.empty()) {
      const auto &view=c.state["dungeon"]; const auto &layers=view["cells"][y][x];

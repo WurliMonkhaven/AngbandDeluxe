@@ -345,3 +345,13 @@ to dump the entire simulation.
 
 Do not publish protocol 1.0 as stable while mandatory record fields, command
 completion rules or actual/known-state semantics are still being inferred by client code.
+
+### Fixed dungeon viewport
+
+`presentation.viewport: 1` advertises `dungeon.viewport {width, height}`.
+Dimensions are 9–240 columns and 5–128 rows, clipped to level bounds;
+`{width: 0, height: 0}` restores the classic viewport. Requires a 4 MiB
+negotiated frame budget and normal-play readiness. This read-only presentation
+uses remembered map visuals, follows the player at the edges (or continuously
+with `center_player`), and reveals the native targeting cursor as needed.
+Free camera takes precedence while enabled. No turn or gameplay RNG is consumed.

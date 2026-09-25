@@ -6,12 +6,16 @@
 
 struct DungeonCameraSettings {
  bool enabled=false, follow=true;
+ int fixed_size=0, fixed_width=0; bool custom_size=false;
  void load(const nlohmann::json &j) {
   if(!j.is_object()) return;
+  if(j.contains("fixed_size") && j["fixed_size"].is_number_integer()) { const int size=j["fixed_size"]; fixed_size=size==0?0:std::clamp(size,8,64); }
+  if(j.contains("fixed_width") && j["fixed_width"].is_number_integer()) { const int width=j["fixed_width"]; fixed_width=width==0?0:std::clamp(width,8,64); }
+  if(j.contains("custom_size") && j["custom_size"].is_boolean()) custom_size=j["custom_size"];
   if(j.contains("enabled") && j["enabled"].is_boolean()) enabled=j["enabled"];
   if(j.contains("follow") && j["follow"].is_boolean()) follow=j["follow"];
  }
- nlohmann::json serialize() const { return {{"enabled",enabled},{"follow",follow}}; }
+ nlohmann::json serialize() const { return {{"enabled",enabled},{"follow",follow},{"fixed_size",fixed_size},{"fixed_width",fixed_width},{"custom_size",custom_size}}; }
 };
 
 // All positions are in world tiles. Camera movement never sends game input.

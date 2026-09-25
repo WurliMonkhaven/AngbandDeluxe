@@ -773,7 +773,7 @@ static void pump(void)
   negotiated = true;
   native_inventory=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_inventory"));
   native_equipment=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_equipment"));
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"tuning\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.scene\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"presentation.tiles\":1,\"presentation.camera\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"tuning\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.scene\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"presentation.tiles\":1,\"presentation.viewport\":1,\"presentation.camera\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   cJSON_SetNumberValue(cJSON_GetObjectItem(out,"max_frame_bytes"),(double)frame_limit);
   response(id, out); goto done;
  }
@@ -787,6 +787,20 @@ static void pump(void)
   else if(character_generated && (!ready || active_prompt || !streq(phase,"playing"))) error(id,"busy","Change tiles during normal play.");
   else {
    deluxe_tiles_id=mode; deluxe_tiles_failed=false;
+   if(character_generated) publish();
+   response(id,cJSON_CreateObject());
+  }
+ }
+ else if (streq(method, "dungeon.viewport")) {
+  cJSON *w=cJSON_GetObjectItem(p,"width"), *h=cJSON_GetObjectItem(p,"height");
+  const int width=num(p,"width",-1),height=num(p,"height",-1);
+  if(!cJSON_IsNumber(w) || !cJSON_IsNumber(h) || w->valuedouble!=width || h->valuedouble!=height ||
+     !((width==0 && height==0) || (width>=9 && width<=240 && height>=5 && height<=128)))
+   error(id,"invalid_argument","Expected a 9-240 by 5-128 viewport, or zero for automatic sizing.");
+  else if(frame_limit<CAMERA_FRAME_LIMIT) error(id,"invalid_argument","Viewport sizing requires a 4 MiB frame budget.");
+  else if(character_generated && (!ready || active_prompt || !streq(phase,"playing"))) error(id,"busy","Change viewport size during normal play.");
+  else {
+   deluxe_view_width=width; deluxe_view_height=height; deluxe_view_initialized=false;
    if(character_generated) publish();
    response(id,cJSON_CreateObject());
   }

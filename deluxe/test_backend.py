@@ -323,6 +323,51 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(27<=tile[7]&127<=31)
         self.assertEqual(e.state['turn'],state['turn'])
 
+    def test_offset_viewport_effect_coordinates(self):
+        e=self.engine; e.hello(); e.birth()
+        catalog=e.call('catalog.get')['result']; view=e.state['dungeon']; player=e.state['player']
+        floors={f['id'] for f in catalog['features'] if f['name']=='open floor'}
+        spots=[(x+view['x'],y+view['y']) for y,row in enumerate(view['cells']) for x,c in enumerate(row)
+               if c[8] in floors and c[10] and not c[4] and not c[6] and not c[12]]
+        x,y=min(spots,key=lambda xy:abs(xy[0]-player['x'])+abs(xy[1]-player['y']))
+        old=e.state['revision']; self.assertIn('result',e.call('debug.scene',{'kind':'lava','x':x,'y':y})); e.next_state(old)
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertIn('result',e.call('dungeon.tiles',{'id':5}))
+        self.assertIn('result',e.call('dungeon.camera',{'enabled':True}))
+        whole=e.call('state.get')['result']['dungeon']
+        self.assertIn('result',e.call('dungeon.viewport',{'width':20,'height':10}))
+        self.assertIn('result',e.call('dungeon.camera',{'enabled':False}))
+        cropped=e.call('state.get')['result']['dungeon']
+        self.assertTrue(cropped['x'] or cropped['y'],'Exercise nonzero world offsets')
+        for row in range(cropped['height']):
+            for col in range(cropped['width']):
+                wx,wy=col+cropped['x'],row+cropped['y']
+                self.assertEqual(cropped['cells'][row][col],whole['cells'][wy][wx])
+                self.assertEqual(cropped['tiles'][row][col],whole['tiles'][wy][wx])
+        lava=next(f['id'] for f in catalog['features'] if f['name']=='lava')
+        self.assertEqual(cropped['cells'][y-cropped['y']][x-cropped['x']][8],lava)
+
+    def test_fixed_dungeon_viewport(self):
+        e=self.engine; e.hello(); e.birth()
+        original=e.state['dungeon']; turn=e.state['turn']
+        for width,height in [(9,5),(40,20),(120,50),(240,128)]:
+            self.assertIn('result',e.call('dungeon.viewport',{'width':width,'height':height}))
+            state=e.call('state.get')['result']; view=state['dungeon']; player=state['player']
+            self.assertLessEqual(view['width'],width); self.assertLessEqual(view['height'],height)
+            self.assertEqual(len(view['cells']),view['height'])
+            self.assertTrue(all(len(row)==view['width'] for row in view['cells']))
+            self.assertTrue(view['x']<=player['x']<view['x']+view['width'])
+            self.assertTrue(view['y']<=player['y']<view['y']+view['height'])
+            self.assertFalse(view['full_level']); self.assertEqual(state['turn'],turn)
+        for width,height in [(0,10),(8,5),(9,4),(241,50),(20,129),(20.5,10)]:
+            self.assertIn('error',e.call('dungeon.viewport',{'width':width,'height':height}))
+        self.assertIn('result',e.call('dungeon.camera',{'enabled':True}))
+        self.assertTrue(e.call('state.get')['result']['dungeon']['full_level'])
+        self.assertIn('result',e.call('dungeon.camera',{'enabled':False}))
+        self.assertIn('result',e.call('dungeon.viewport',{'width':0,'height':0}))
+        restored=e.call('state.get')['result']['dungeon']
+        self.assertEqual((restored['width'],restored['height']),(original['width'],original['height']))
+
     def test_free_dungeon_camera(self):
         e=self.engine
         e.hello(); e.birth()
