@@ -1172,3 +1172,14 @@ CRT scope choices are Off, Dungeon Only, Main Window Only, Full (in that order).
 Main Window Only applies whole-window effects and curved input mapping to the
 main window, leaving detached utility windows plain. Existing saved Full scope
 retains its meaning; persisted scope IDs remain backward compatible.
+
+### Settings navigation
+
+Settings uses a two-column layout with a persistent category sidebar and a
+scrolling page; narrow windows switch the sidebar to a category dropdown.
+Play groups Interaction, Keyboard and Game rules. Presentation groups Display,
+Theme, Fonts, CRT effects and Animations. Sound contains Audio. Each page has
+an introduction and grouped controls. CRT presets precede collapsible tube
+settings and effect families. Font selection retains its independent preview.
+Cancel and Save and Close remain fixed in the footer, with save errors visible
+above them. Draft preferences and backend save semantics are unchanged.

@@ -551,6 +551,7 @@ struct UI {
  bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
  int damage_amount=1, xp_amount=100, blast_radius=2, breath_element=0;
  DevStatusDialog dev_status_dialog;
+ int settings_page=0;
  int crt=0, draft_crt=0; // Persisted IDs: 0 off, 1 dungeon, 2 full, 3 main window.
  int crt_strength=1, draft_crt_strength=1;
  AudioSettings audio_settings{}, draft_audio_settings{};
@@ -688,8 +689,8 @@ struct UI {
  void settings_window(SDL_Window *window) {
   auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x+vp->WorkSize.x*.5f,vp->WorkPos.y+vp->WorkSize.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
-  ImGui::SetNextWindowSize(ImVec2(std::min(vp->WorkSize.x-24.f,ImGui::GetFontSize()*42),
-   std::min(vp->WorkSize.y-24.f,ImGui::GetFontSize()*34)),ImGuiCond_Appearing);
+  ImGui::SetNextWindowSize(ImVec2(std::min(vp->WorkSize.x-24.f,ImGui::GetFontSize()*62),
+   std::min(vp->WorkSize.y-24.f,ImGui::GetFontSize()*40)),ImGuiCond_Appearing);
   settings_open=ImGui::BeginPopupModal("Settings",nullptr,ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoSavedSettings);
   if(settings_open) {
    if(!engine_options.loaded && !c.options_result.is_null()) engine_options.load(c.options_result);
@@ -717,12 +718,40 @@ struct UI {
     }
    }
    ImGui::BeginDisabled(settings_saving);
-   const float footer=ImGui::GetFrameHeightWithSpacing()+ImGui::GetStyle().ItemSpacing.y;
-   ImGui::BeginChild("Settings contents",ImVec2(0,-footer));
+   const float footer=ImGui::GetFrameHeightWithSpacing()+ImGui::GetStyle().ItemSpacing.y+
+    (settings_error.empty()?0:ImGui::CalcTextSize(settings_error.c_str(),nullptr,false,ImGui::GetContentRegionAvail().x).y+ImGui::GetStyle().ItemSpacing.y);
+   const char *pages[]={"Interaction","Keyboard","Game rules","Display","Theme","Fonts","CRT effects","Animations","Audio"};
+   const char *descriptions[]={"Mouse controls and shortcuts for everyday adventuring.","Make the keyboard feel like home.","Angband preferences for the current character.","Window mode and interface size.","Colour, contrast and the character of your interface.","Choose the lettering for your interface and dungeon.","Build your own tube: from a gentle glow to a full retro display.","Choose how the dungeon moves and reacts.","Clicks, buzzes and sounds from the dungeon."};
+   ImGui::BeginChild("Settings body",ImVec2(0,-footer),ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar);
+   const bool sidebar=ImGui::GetContentRegionAvail().x>ImGui::GetFontSize()*40;
+   if(sidebar) {
+    ImGui::BeginChild("Settings navigation",ImVec2(ImGui::GetFontSize()*12,0),ImGuiChildFlags_Borders);
+    for(int i=0;i<9;++i) {
+     if(i==0 || i==3 || i==8) {
+      if(i) ImGui::Spacing();
+      ImGui::TextDisabled("%s",i==0?"PLAY":i==3?"PRESENTATION":"SOUND"); ImGui::Separator();
+     }
+     if(ImGui::Selectable(pages[i],settings_page==i,0,ImVec2(0,ImGui::GetFrameHeight()*1.25f))) settings_page=i;
+    }
+    const char *save_note="Changes apply when you save.";
+    const float note_height=ImGui::CalcTextSize(save_note,nullptr,false,ImGui::GetContentRegionAvail().x).y;
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY()+std::max(ImGui::GetStyle().ItemSpacing.y,ImGui::GetContentRegionAvail().y-note_height));
+    ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("%s",save_note);
+    ImGui::PopStyleColor();
+    ImGui::EndChild(); ImGui::SameLine();
+   } else {
+    ImGui::SetNextItemWidth(-1); ImGui::Combo("##Settings page",&settings_page,pages,9);
+   }
+   ImGui::PushID(settings_page);
+   ImGui::BeginChild("Settings contents",ImVec2(0,0));
+   DeluxeTheme::section(pages[settings_page]);
+   ImGui::TextWrapped("%s",descriptions[settings_page]); ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
    bool editing_bindings=false;
-   if(ImGui::BeginTabBar("Settings tabs")) {
-    if(ImGui::BeginTabItem("Graphics")) {
-     ImGui::Spacing(); ImGui::Checkbox("Fullscreen",&draft_fullscreen);
+   {
+    if(settings_page==3) {
+     DeluxeTheme::section("Window");
+     ImGui::Checkbox("Fullscreen",&draft_fullscreen);
      ImGui::Spacing(); ImGui::TextUnformatted("UI scale"); ImGui::SetNextItemWidth(-1);
      char zoom[16]; SDL_snprintf(zoom,sizeof(zoom),"%.0f%%",draft_scale*100);
      if(ImGui::BeginCombo("##UI scale",zoom)) {
@@ -732,12 +761,14 @@ struct UI {
       }
       ImGui::EndCombo();
      }
-     ImGui::EndTabItem();
+
     }
-    if(ImGui::BeginTabItem("Theme")) {
+    if(settings_page==4) {
      DeluxeTheme::editor(draft_theme);
+    }
+    if(settings_page==5) {
      if(font_library) {
-      ImGui::Spacing(); DeluxeTheme::section("Fonts");
+      DeluxeTheme::section("Typefaces");
       font_library->picker("Interface font",draft_fonts.interface_font);
       font_library->picker("Dungeon font",draft_fonts.dungeon_font,true);
       if(ImGui::Button("Restore default fonts")) draft_fonts=FontSettings{};
@@ -748,26 +779,29 @@ struct UI {
       if(crt==1) { game_draw_list=ImGui::GetWindowDrawList(); game_pos=ImGui::GetWindowPos(); game_size=ImGui::GetWindowSize(); }
       ImGui::EndChild();
      }
-     ImGui::EndTabItem();
+
     }
-    if(ImGui::BeginTabItem("Gameplay")) {
+    if(settings_page==0) {
+     DeluxeTheme::section("Shortcuts");
      ImGui::Checkbox("Quick-action bar",&draft_quickbar_enabled);
      if(ImGui::IsItemHovered()) ImGui::SetTooltip("Ten slots using top-row 1-0. Numpad movement is unchanged. Right-click a slot, item, spell or command to assign.");
-     ImGui::Spacing();
-     ImGui::Spacing(); ImGui::Checkbox("Proceed with click",&draft_proceed_with_click);
+     ImGui::Spacing(); DeluxeTheme::section("Mouse & targeting");
+     ImGui::Checkbox("Proceed with click",&draft_proceed_with_click);
      ImGui::TextWrapped("Left-click the game view to continue when messages are waiting.");
      ImGui::Spacing(); ImGui::Checkbox("Quick targeting",&draft_quick_targeting);
      if(ImGui::IsItemHovered()) ImGui::SetTooltip("Click to confirm a target and continue casting, shooting or another aimed action.");
      ImGui::Spacing(); ImGui::Checkbox("Click exits look",&draft_click_exits_look);
-     ImGui::EndTabItem();
+     ImGui::TextWrapped("Resume normal click movement when leaving look mode.");
+
     }
-    if(ImGui::BeginTabItem("Angband")) {
+    if(settings_page==2) {
      engine_options.draw();
-     ImGui::EndTabItem();
+
     }
-    if(ImGui::BeginTabItem("Keybindings")) { editing_bindings=true; keybinding_editor.draw(); ImGui::EndTabItem(); }
-    if(ImGui::BeginTabItem("Audio")) {
+    if(settings_page==1) { editing_bindings=true; keybinding_editor.draw();  }
+    if(settings_page==8) {
      ImGui::Checkbox("Sound enabled",&draft_audio_settings.enabled);
+     ImGui::Spacing(); DeluxeTheme::section("Mix");
      ImGui::BeginDisabled(!draft_audio_settings.enabled);
      auto volume=[](const char *label,float &value) {
       float percent=value*100;
@@ -777,29 +811,47 @@ struct UI {
      volume("Gameplay",draft_audio_settings.gameplay);
      volume("Interface",draft_audio_settings.interface_volume);
      ImGui::EndDisabled();
-     ImGui::TextWrapped("Audio mutes while this window is unfocused. Changes apply with Save and Close.");
+     ImGui::Spacing(); ImGui::TextWrapped("Audio mutes when Deluxe and its detached windows are unfocused.");
      if(!audio.error.empty()) ImGui::TextWrapped("Audio unavailable: %s",audio.error.c_str());
-     ImGui::EndTabItem();
+
     }
-    if(ImGui::BeginTabItem("Animations")) {
-     ImGui::Spacing(); ImGui::Checkbox("Low Health Animation",&draft_low_animation);
+    if(settings_page==7) {
+     DeluxeTheme::section("Atmosphere & milestones");
+     ImGui::Checkbox("Low health glitch",&draft_low_animation);
+     if(ImGui::IsItemHovered()) ImGui::SetTooltip("Distort the CRT image below the low-hitpoint warning threshold. Requires CRT effects.");
      ImGui::Checkbox("Scene transitions",&draft_scene_animation);
      if(ImGui::IsItemHovered()) ImGui::SetTooltip("Floor changes, shops, character loading and the final death transition.");
+     ImGui::Checkbox("Level up flourish",&draft_level_animation);
+     ImGui::Spacing(); DeluxeTheme::section("Movement & combat");
      ImGui::Checkbox("Monster walking",&draft_movement_animation);
      ImGui::Checkbox("Teleport ripples",&draft_blink_animation);
      ImGui::Checkbox("Projectiles and spells",&draft_projectile_animation);
      ImGui::Checkbox("Combat feedback",&draft_combat_animation);
+     ImGui::Spacing(); DeluxeTheme::section("Creature indicators");
      ImGui::Checkbox("Sleeping monsters",&draft_sleep_animation);
      ImGui::Checkbox("Frightened monsters",&draft_fear_animation);
-     ImGui::Checkbox("Level up flourish",&draft_level_animation);
-     ImGui::EndTabItem();
+
+
     }
-    if(ImGui::BeginTabItem("CRT effects")) {
-     ImGui::Spacing(); ImGui::TextUnformatted("Effects Enabled"); ImGui::SetNextItemWidth(-1);
+    if(settings_page==6) {
+     ImGui::Spacing(); ImGui::TextUnformatted("Apply effects to"); ImGui::SetNextItemWidth(-1);
      const char *effects[]={"Off","Dungeon Only","Main Window Only","Full"};
      const int scope_ids[]={0,1,3,2};
      int choice=draft_crt==2?3:draft_crt==3?2:draft_crt;
      if(ImGui::Combo("##CRT Effects",&choice,effects,4)) draft_crt=scope_ids[choice];
+     ImGui::Spacing(); ImGui::TextUnformatted("Effect Strength"); ImGui::SetNextItemWidth(-1);
+     const char *strengths[]={"Subtle","Classic","Deluxe","Zero Cool"};
+     if(ImGui::BeginCombo("##CRT Effects Strength",draft_crt_strength<0?"Custom":strengths[draft_crt_strength])) {
+      for(int i=0;i<4;++i) if(ImGui::Selectable(strengths[i],draft_crt_strength==i)) {
+       const int lines=draft_crt_settings.raster_lines,mask=draft_crt_settings.mask;
+       draft_crt_strength=i; draft_crt_settings=CrtSettings(i);
+       draft_crt_settings.raster_lines=lines; draft_crt_settings.mask=mask; draft_crt_settings.tube_preset=-1;
+      }
+      ImGui::EndCombo();
+     }
+     ImGui::TextWrapped("Presets reset all effect sliders and switches.");
+     ImGui::Spacing();
+     if(ImGui::CollapsingHeader("Tube & phosphor layout")) {
      ImGui::Spacing(); ImGui::TextUnformatted("Tube preset"); ImGui::SetNextItemWidth(-1);
      const char *tubes[]={"Desktop Monitor","Shadow-mask Monitor","Soft Terminal"};
      if(ImGui::BeginCombo("##Tube",draft_crt_settings.tube_preset<0?"Custom":tubes[draft_crt_settings.tube_preset])) {
@@ -815,33 +867,28 @@ struct UI {
      ImGui::TextUnformatted("Phosphor layout"); ImGui::SetNextItemWidth(-1);
      const char *masks[]={"Delta RGB dots","Aperture grille","Slot mask"};
      if(ImGui::Combo("##Mask",&draft_crt_settings.mask,masks,3)) { draft_crt_settings.tube_preset=-1; draft_crt_strength=-1; }
-     ImGui::Spacing(); ImGui::TextUnformatted("Effect Strength"); ImGui::SetNextItemWidth(-1);
-     const char *strengths[]={"Subtle","Classic","Deluxe","Zero Cool"};
-     if(ImGui::BeginCombo("##CRT Effects Strength",draft_crt_strength<0?"Custom":strengths[draft_crt_strength])) {
-      for(int i=0;i<4;++i) if(ImGui::Selectable(strengths[i],draft_crt_strength==i)) {
-       const int lines=draft_crt_settings.raster_lines,mask=draft_crt_settings.mask;
-       draft_crt_strength=i; draft_crt_settings=CrtSettings(i);
-       draft_crt_settings.raster_lines=lines; draft_crt_settings.mask=mask; draft_crt_settings.tube_preset=-1;
-      }
-      ImGui::EndCombo();
      }
-     ImGui::TextWrapped("Presets reset all effect sliders and switches.");
      ImGui::Spacing(); ImGui::Separator();
-     for(int i=0;i<CrtPartCount;++i) {
+     const std::vector<std::pair<const char*,std::vector<int>>> groups={
+      {"Light & glow",{Glow,Bloom,Glass}}, {"Screen texture",{Scanlines,Dots,Beam}},
+      {"Geometry & focus",{Barrel,Edges,Fringe,Focus}}, {"Signal & interference",{Hum,Ghost,Interference}}};
+     for(const auto &group:groups) if(ImGui::CollapsingHeader(group.first,ImGuiTreeNodeFlags_DefaultOpen)) {
+      for(int i:group.second) {
       auto &control=draft_crt_settings.parts[i];
       ImGui::PushID(i); ImGui::Spacing();
       if(ImGui::Checkbox(crt_labels[i],&control.enabled)) { draft_crt_strength=-1; draft_crt_settings.tube_preset=-1; }
       ImGui::BeginDisabled(!control.enabled); ImGui::SetNextItemWidth(-1);
       if(ImGui::SliderFloat("##Amount",&control.value,0.f,100.f,"%.0f%%",ImGuiSliderFlags_AlwaysClamp)) { draft_crt_strength=-1; draft_crt_settings.tube_preset=-1; }
       ImGui::EndDisabled(); ImGui::PopID();
+      }
      }
-     ImGui::EndTabItem();
+
     }
-    ImGui::EndTabBar();
+
    }
    if(!editing_bindings && keybinding_editor.listening) { keybinding_editor.listening=false; keybinding_editor.command=-1; }
-   if(!settings_error.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",settings_error.c_str()); }
-   ImGui::EndChild();
+   ImGui::EndChild(); ImGui::PopID(); ImGui::EndChild();
+   if(!settings_error.empty()) ImGui::TextWrapped("%s",settings_error.c_str());
    if(ImGui::Button("Cancel")||(!keybinding_editor.listening && !settings_saving && ImGui::IsKeyPressed(ImGuiKey_Escape))) ImGui::CloseCurrentPopup();
    ImGui::SameLine();
    const float button_width=ImGui::CalcTextSize("Save and Close").x+2*ImGui::GetStyle().FramePadding.x;

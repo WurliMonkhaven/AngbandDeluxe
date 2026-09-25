@@ -60,12 +60,14 @@ struct DeluxeTheme {
    for(int i=0;i<5;++i) if(ImGui::Selectable(names[i])) theme.preset(i);
    ImGui::EndCombo();
   }
+  ImGui::Spacing(); section("Palette");
   bool changed=false;
   changed|=ImGui::ColorEdit3("Background",&theme.background.x);
   changed|=ImGui::ColorEdit3("Surfaces",&theme.surface.x);
   changed|=ImGui::ColorEdit3("Text",&theme.text.x);
   changed|=ImGui::ColorEdit3("Accent",&theme.accent.x);
   theme.custom|=changed;
+  ImGui::Spacing(); section("Details");
   ImGui::SliderFloat("Corner rounding",&theme.rounding,0,16,"%.0f px");
   ImGui::Checkbox("Decorative accents",&theme.decorations);
   ImGui::Checkbox("Light theme styling",&theme.light_styling);
