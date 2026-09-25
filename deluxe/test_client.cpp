@@ -26,6 +26,30 @@ static BackendReader::Batch read_test_frames(const std::string &wire) {
 int main(int argc,char **argv) {
  try {
   check(argc==2,"Pass an unused settings-file path");
+  {
+   DungeonCameraSettings defaults; check(!defaults.enabled && defaults.follow,"Camera is opt-in with following enabled");
+   defaults.enabled=true; defaults.follow=false; DungeonCameraSettings restored; restored.load(defaults.serialize());
+   check(restored.enabled && !restored.follow,"Camera preferences round trip");
+   DungeonCamera camera; json view={{"level_id","1"},{"width",198},{"height",66}},player={{"x",40},{"y",20}};
+   camera.update(view,player,true);
+   check(camera.x==40.5f && camera.y==20.5f,"Initial camera centers the player");
+   camera.pan(100,-40,10,20); player["x"]=45; camera.update(view,player,true);
+   check(camera.x==30.5f && camera.y==22.5f && camera.paused,"Pan pauses player following");
+   camera.return_to_player(player); player["x"]=46; camera.update(view,player,true);
+   check(camera.x==46.5f && !camera.paused,"Return to player resumes following");
+   const float wx=camera.x+(600-400)/10.f,wy=camera.y+(220-300)/20.f;
+   camera.zoom_at(2,600,220,800,600,10,20,false);
+   check(std::abs(camera.x+(600-400)/(10*camera.zoom)-wx)<.001f && std::abs(camera.y+(220-300)/(20*camera.zoom)-wy)<.001f,"Zoom anchors the hovered world position");
+   camera.pan(1000,1000,10,20); view["level_id"]="2"; camera.update(view,player,true);
+   check(camera.x==46.5f && camera.y==20.5f && !camera.paused,"Floor change resets panning");
+   player["x"]=55; camera.update(view,player,false); check(camera.x==46.5f,"Fixed camera does not follow walking");
+   json state={{"targeting",{{"x",170},{"y",55}}}};
+   camera.reveal_target(state,80,30); check(camera.x>=132.5f && camera.y>=42.5f,"Keyboard target is brought into view");
+   camera.pan(100,100,10,20); float x=camera.x; camera.reveal_target(state,80,30);
+   check(camera.x==x,"Stationary target does not fight manual panning");
+   camera.zoom_at(100,0,0,800,600,10,20,true); check(camera.zoom==4,"Maximum zoom is bounded");
+   camera.zoom_at(-100,0,0,800,600,10,20,true); check(camera.zoom==.35f,"Minimum zoom is bounded");
+  }
   for(int i=0;i<5;++i) {
    ThemeSettings theme; theme.preset(i); theme.invert_dungeon=true; ThemeSettings loaded; loaded.load(theme.serialize());
    check(loaded.serialize()==theme.serialize(),"Theme presets must round-trip exactly");
@@ -121,11 +145,13 @@ int main(int argc,char **argv) {
    Connection live; live.connected=true; live.state={{"readiness","ready"},{"context","c"}}; live.transitions.start(SceneTransitions::Kind::Down,1,old);
    check(live.key(50) && live.transitions.kind==SceneTransitions::Kind::None && !live.outgoing.empty(),"Movement immediately skips a transition and reaches the backend");
   }
+  auto full_map_frame=read_test_frames(json{{"map",std::string(1500000,'x')}}.dump()+"\n");
+  check(full_map_frame.error.empty() && full_map_frame.frames.size()==1,"Full-level snapshots above the old 1 MiB limit are accepted");
   auto messages=read_test_frames("{\"seq\":1}\n{\"seq\":2}\n");
   check(messages.error.empty() && messages.frames.size()==2 && messages.frames[0]["seq"]==1 && messages.frames[1]["seq"]==2,"Reader must preserve final message order at EOF");
   check(!read_test_frames("{bad}\n").error.empty(),"Malformed frame must be reported");
   check(!read_test_frames("{\"seq\":1}").error.empty(),"Incomplete final frame must be reported");
-  check(!read_test_frames(std::string(1048577,'x')).error.empty(),"Oversized frame must be rejected");
+  check(!read_test_frames(std::string(4194305,'x')).error.empty(),"Oversized frame must be rejected");
   {
    InventoryChanges gains;
    json potion={{"id","old"},{"binding_key","potion"},{"kind_key","potion"},{"location","Pack"},{"quantity",3},{"label","unknown potion"}};

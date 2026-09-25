@@ -30,6 +30,7 @@ int main(int argc,char **argv) {
   if(fixture.contains("blast")) c.blast=fixture["blast"];
   if(fixture.value("saving_preview",false)) { c.saving=true; c.close_requested=true; c.busy=true; }
   UI ui{c}; ui.font_library=&fonts; ui.font_settings.load(fixture.value("fonts",json::object())); ui.base_style=ImGui::GetStyle();
+  ui.camera_settings.load(fixture.value("camera",json::object()));
   ui.settings_page=fixture.value("settings_page",0);
   ui.quit_dialog=fixture.value("quit_dialog",false);
   c.inventory_requested=fixture.value("inventory_window",false);
@@ -57,6 +58,8 @@ int main(int argc,char **argv) {
    for(const auto &event:fixture.value("input",json::array())) if(event.value("frame",-1)==i) {
     if(event.contains("mouse")) io.AddMousePosEvent(event["mouse"][0].get<float>(),event["mouse"][1].get<float>());
     if(event.contains("down")) io.AddMouseButtonEvent(0,event["down"].get<bool>());
+    if(event.contains("middle")) io.AddMouseButtonEvent(2,event["middle"].get<bool>());
+    if(event.contains("wheel")) io.AddMouseWheelEvent(0,event["wheel"].get<float>());
     if(event.contains("right")) io.AddMouseButtonEvent(1,event["right"].get<bool>());
    }
    if(fixture.contains("transition")) {
@@ -121,6 +124,7 @@ int main(int argc,char **argv) {
   if(fixture.value("layout_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); auto trace=ui.layout.arrangement(); trace["panel_rects"]=panel_rects; trace["undo_count"]=ui.layout.undo_steps.size(); trace["redo_count"]=ui.layout.redo_steps.size();
    const auto &preview=ui.layout.dock_preview;
    trace["dock_preview"]={{"active",preview.active},{"x",preview.pos.x},{"y",preview.pos.y},{"w",preview.size.x},{"h",preview.size.y},{"label",preview.label}}; out<<trace.dump(2); }
+  if(fixture.value("camera_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); out<<json{{"x",ui.dungeon_camera.x},{"y",ui.dungeon_camera.y},{"zoom",ui.dungeon_camera.zoom},{"surface",{ui.dungeon_surface_pos.x,ui.dungeon_surface_pos.y,ui.dungeon_surface_size.x,ui.dungeon_surface_size.y}},{"cell",{c.transitions.camera.cw,c.transitions.camera.ch}},{"paused",ui.dungeon_camera.paused},{"outgoing",c.outgoing}}.dump(2); }
   if(fixture.value("inventory_trace",false)) { std::ofstream out(std::string(argv[2])+".json"); out<<json{{"open",ui.inventory_window_open},{"selected",ui.inventory_selected},{"outgoing",c.outgoing}}.dump(2); }
   auto *bytes=SDL_MapGPUTransferBuffer(gpu,download,false);
   auto *surface=SDL_CreateSurfaceFrom(w,h,SDL_PIXELFORMAT_RGBA32,bytes,w*4);

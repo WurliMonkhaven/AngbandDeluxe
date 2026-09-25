@@ -81,3 +81,9 @@ The release pass targets Windows only. Signing, an installer, clean-machine
 manual certification, accessibility validation and macOS/Linux certification
 remain separate work. Protocol v1, alternate-engine conformance and reconnect
 semantics remain future architecture; this build does not claim them.
+
+
+Optional free dungeon camera: Settings > Display > Free dungeon camera.
+Middle-drag pans, the wheel (or +/-) zooms, and Return to player recenters.
+Keep player centered controls following; panning pauses it until Return to player.
+Floors reset the camera. Fog of war and gameplay rules are unchanged.

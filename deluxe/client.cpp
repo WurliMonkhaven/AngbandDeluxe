@@ -11,6 +11,7 @@
 #include "workspace_layout.h"
 #include <iostream>
 #include "dungeon_view.h"
+#include "dungeon_camera.h"
 #include "backend_reader.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -146,6 +147,7 @@ struct Connection {
  unsigned long next = 0;
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
  bool pickup_travel=false, resting=false, saving=false;
+ int camera_sent=-1;
  bool return_to_menu = false, restart_ready = false, close_confirmed = false;
  json state = json::object(), prompt = json::object(), pending_prompt = json::object(), commands = json::array(), saves = json::array(), catalog = json::object();
  Connection()=default;
@@ -216,7 +218,7 @@ struct Connection {
   auto errors=static_cast<SDL_IOStream*>(SDL_GetPointerProperty(SDL_GetProcessProperties(process.get()),SDL_PROP_PROCESS_STDERR_POINTER,nullptr));
   reader=std::make_unique<BackendReader>(SDL_GetProcessOutput(process.get()),errors);
   connected = true;
-  send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",1048576},{"native_inventory",true},{"native_equipment",true}});
+  send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",4194304},{"native_inventory",true},{"native_equipment",true}});
   return true;
  }
  bool inventory_requested=false, equipment_requested=false;
@@ -273,6 +275,14 @@ struct Connection {
   if(method=="keybindings.set") {
    bindings_saved=j.contains("error")?json{{"error",j["error"].value("message","Bindings could not be saved.")}}:j["result"];
    busy=false; return;
+  }
+  if(method=="dungeon.camera") {
+   busy=false;
+   if(j.contains("error")) {
+    if(j["error"].value("code","")=="busy") camera_sent=-1;
+    else notice(j["error"].value("message","Camera mode could not be changed."));
+   }
+   return;
   }
   if(method=="journal.get") {
    if(id==journal_request) {
@@ -535,6 +545,8 @@ struct UI {
  bool open_character_sheet=false;
  KnowledgeBrowser knowledge_browser;
  MapOverview map_overview;
+ DungeonCamera dungeon_camera;
+ DungeonCameraSettings camera_settings,draft_camera;
  bool inscription_edit=false;
  ItemRules item_rules_panel;
  StorePanel store_panel;
@@ -574,6 +586,7 @@ struct UI {
  bool settings_saving=false;
  ImDrawList *game_draw_list=nullptr;
  ImVec2 game_pos{},game_size{};
+ ImVec2 dungeon_surface_pos{},dungeon_surface_size{};
  bool quit_dialog = false;
  bool inventory_window_open=false, inventory_window_drawing=false;
  int inventory_category=0;
@@ -602,6 +615,7 @@ struct UI {
  std::vector<json> keys;
  void load_settings() {
   try { std::ifstream in(settings_path); if (!in) return; json j; in >> j;
+   camera_settings.load(j.value("camera",json::object()));
    font_settings.load(j.value("fonts",json::object()));
    theme_settings.load(j.value("theme",json::object()));
    layout.load(j.value("layout",json::object()));
@@ -631,10 +645,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr,const ThemeSettings *theme=nullptr,const bool *glow=nullptr) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr,const ThemeSettings *theme=nullptr,const bool *glow=nullptr,const DungeonCameraSettings *camera=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"item_glow",glow?*glow:item_glow},{"theme",(theme?*theme:theme_settings).serialize()},{"layout",layout.serialize()},{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"camera",(camera?*camera:camera_settings).serialize()},{"item_glow",glow?*glow:item_glow},{"theme",(theme?*theme:theme_settings).serialize()},{"layout",layout.serialize()},{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -642,6 +656,7 @@ struct UI {
   if(!write_settings(scale,fullscreen,crt,crt_strength,crt_settings,low_animation,death_animation,proceed_with_click,click_exits_look,quick_targeting,quickbar_enabled)) c.notice("Settings could not be saved.");
  }
  void begin_settings() {
+  draft_camera=camera_settings;
   draft_fonts=font_settings; draft_theme=theme_settings;
   draft_audio_settings=audio_settings;
   engine_options.reset(); settings_saving=false; saving_bindings=false;
@@ -671,10 +686,12 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts,&draft_theme,&draft_item_glow)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts,&draft_theme,&draft_item_glow,&draft_camera)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
+  if(camera_settings.enabled!=draft_camera.enabled || camera_settings.follow!=draft_camera.follow) dungeon_camera.reset();
+  camera_settings=draft_camera;
   font_settings=draft_fonts; theme_settings=draft_theme;
   audio_settings=draft_audio_settings; audio.configure(audio_settings,window_active);
   projectile_animation=draft_projectile_animation;
@@ -729,7 +746,7 @@ struct UI {
    const float footer=ImGui::GetFrameHeightWithSpacing()+ImGui::GetStyle().ItemSpacing.y+
     (settings_error.empty()?0:ImGui::CalcTextSize(settings_error.c_str(),nullptr,false,ImGui::GetContentRegionAvail().x).y+ImGui::GetStyle().ItemSpacing.y);
    const char *pages[]={"Interaction","Keyboard","Game rules","Display","Theme","Fonts","CRT effects","Animations","Audio"};
-   const char *descriptions[]={"Mouse controls and shortcuts for everyday adventuring.","Make the keyboard feel like home.","Angband preferences for the current character.","Window mode and interface size.","Colour, contrast and the character of your interface.","Choose the lettering for your interface and dungeon.","Build your own tube: from a gentle glow to a full retro display.","Choose how the dungeon moves and reacts.","Clicks, buzzes and sounds from the dungeon."};
+   const char *descriptions[]={"Mouse controls and shortcuts for everyday adventuring.","Make the keyboard feel like home.","Angband preferences for the current character.","Window mode, interface size and dungeon camera.","Colour, contrast and the character of your interface.","Choose the lettering for your interface and dungeon.","Build your own tube: from a gentle glow to a full retro display.","Choose how the dungeon moves and reacts.","Clicks, buzzes and sounds from the dungeon."};
    ImGui::BeginChild("Settings body",ImVec2(0,-footer),ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar);
    const bool sidebar=ImGui::GetContentRegionAvail().x>ImGui::GetFontSize()*40;
    if(sidebar) {
@@ -758,7 +775,15 @@ struct UI {
    bool editing_bindings=false;
    {
     if(settings_page==3) {
-     DeluxeTheme::section("Window");
+     DeluxeTheme::section("Dungeon camera");
+     ImGui::Checkbox("Free dungeon camera",&draft_camera.enabled);
+     ImGui::TextWrapped("Explore the whole known level at your own scale. Unexplored areas remain hidden.");
+     ImGui::BeginDisabled(!draft_camera.enabled);
+     ImGui::Checkbox("Keep player centered",&draft_camera.follow);
+     ImGui::EndDisabled();
+     ImGui::TextDisabled("Middle-drag to pan. Scroll to zoom.");
+     ImGui::TextWrapped("Panning pauses following. Return to player resumes it. Changing floors recenters the view.");
+     ImGui::Spacing(); DeluxeTheme::section("Window");
      ImGui::Checkbox("Fullscreen",&draft_fullscreen);
      ImGui::Spacing(); ImGui::TextUnformatted("UI scale"); ImGui::SetNextItemWidth(-1);
      char zoom[16]; SDL_snprintf(zoom,sizeof(zoom),"%.0f%%",draft_scale*100);
@@ -1064,27 +1089,61 @@ struct UI {
   if(ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) grid_focus=true;
   const auto &grid=c.game_grid;
   const size_t columns=std::max(size_t(1),grid.width);
+  const bool free_camera=grid.semantic && c.state["dungeon"].value("full_level",false);
+  if(free_camera) {
+   dungeon_camera.update(c.state["dungeon"],c.state["player"],camera_settings.follow && !c.state.contains("targeting"));
+   if(ImGui::GetContentRegionAvail().x>ImGui::GetFontSize()*25) {
+    ImGui::TextDisabled("%s",camera_settings.follow && !dungeon_camera.paused?"Following player":"Free camera");
+    if(ImGui::IsItemHovered()) ImGui::SetTooltip("Middle-drag to pan. Scroll to zoom.\nPanning pauses following; Return to player resumes it.");
+    ImGui::SameLine();
+   }
+   if(ImGui::SmallButton("-##camera")) dungeon_camera.zoom=std::max(.35f,dungeon_camera.zoom/1.15f);
+   ImGui::SameLine();
+   if(ImGui::SmallButton("+##camera")) dungeon_camera.zoom=std::min(4.f,dungeon_camera.zoom*1.15f);
+   ImGui::SameLine();
+   if(ImGui::SmallButton("Return to player")) { dungeon_camera.return_to_player(c.state["player"]); focus_game(); }
+  }
   const auto start=ImGui::GetCursorScreenPos();
   const auto available=ImGui::GetContentRegionAvail();
   const ImVec2 viewport(std::max(1.f,available.x),std::max(1.f,available.y));
+  dungeon_surface_pos=start; dungeon_surface_size=viewport;
   // Fit the complete semantic viewport (or fallback terminal) without scrolling.
   auto *dungeon_font=font_library?font_library->get(font_settings.dungeon()):ImGui::GetFont();
   const float cell_ratio=font_library?font_library->cell_ratio(font_settings.dungeon()):.60f;
-  const float pixels=std::min(
+  float pixels=std::min(
    std::max(.01f,viewport.x-2)/(float(columns)*cell_ratio),
    std::max(.01f,viewport.y-2)/(float(std::max(size_t(1),grid.height))*1.12f));
+  ImGui::InvisibleButton("Dungeon keyboard surface",viewport,ImGuiButtonFlags_EnableNav|ImGuiButtonFlags_MouseButtonLeft|ImGuiButtonFlags_MouseButtonMiddle);
+  if(free_camera) {
+   const auto &io=ImGui::GetIO();
+   const float base=22.f*display_scale;
+   if(ImGui::IsItemHovered() && io.MouseWheel!=0)
+    dungeon_camera.zoom_at(io.MouseWheel,io.MousePos.x-start.x,io.MousePos.y-start.y,viewport.x,viewport.y,base*cell_ratio,base*1.12f,camera_settings.follow && !dungeon_camera.paused);
+   dungeon_camera.dragging=ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+   if(dungeon_camera.dragging) {
+    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+    dungeon_camera.pan(io.MouseDelta.x,io.MouseDelta.y,base*cell_ratio*dungeon_camera.zoom,base*1.12f*dungeon_camera.zoom);
+   }
+   pixels=base*dungeon_camera.zoom;
+   dungeon_camera.reveal_target(c.state,viewport.x/(pixels*cell_ratio),viewport.y/(pixels*1.12f));
+  }
   const float cw=pixels*cell_ratio, ch=pixels*1.12f;
   const ImVec2 size(cw*float(columns),ch*float(grid.height));
-  const ImVec2 origin(start.x+(viewport.x-size.x)*.5f,start.y+(viewport.y-size.y)*.5f);
-  ImGui::InvisibleButton("Dungeon keyboard surface",viewport,ImGuiButtonFlags_EnableNav);
+  const ImVec2 origin=free_camera?ImVec2(start.x+viewport.x*.5f-dungeon_camera.x*cw,start.y+viewport.y*.5f-dungeon_camera.y*ch):
+   ImVec2(start.x+(viewport.x-size.x)*.5f,start.y+(viewport.y-size.y)*.5f);
   if (ImGui::IsItemClicked()) grid_focus = true;
   if(ImGui::IsItemClicked()) proceed_click();
   if(ImGui::IsItemFocused()) grid_focus=true;
   auto draw=ImGui::GetWindowDrawList();
   game_draw_list=draw; game_pos=ImGui::GetWindowPos(); game_size=ImGui::GetWindowSize();
   draw->AddRectFilled(start,ImVec2(start.x+viewport.x,start.y+viewport.y),DeluxeTheme::dungeon_colour(color(0)));
+  draw->PushClipRect(start,ImVec2(start.x+viewport.x,start.y+viewport.y),true);
   if(grid.semantic && item_glow) ItemGlow::draw(draw,c.state["dungeon"],origin,size,cw,ch,double(SDL_GetTicksNS())/1e9);
-  for(size_t y=0;y<grid.height;++y) for(size_t x=0;x<grid.width;++x) {
+  const int x0=std::clamp(int(std::floor((start.x-origin.x)/cw))-1,0,int(grid.width));
+  const int y0=std::clamp(int(std::floor((start.y-origin.y)/ch))-1,0,int(grid.height));
+  const int x1=std::clamp(int(std::ceil((start.x+viewport.x-origin.x)/cw))+1,0,int(grid.width));
+  const int y1=std::clamp(int(std::ceil((start.y+viewport.y-origin.y)/ch))+1,0,int(grid.height));
+  for(int y=y0;y<y1;++y) for(int x=x0;x<x1;++x) {
    const auto &cell=grid.cells[y*grid.width+x];
    if(cell.glyph && cell.glyph!=' ') {
     const ImVec2 at(origin.x+float(x)*cw,origin.y+float(y)*ch);
@@ -1113,7 +1172,7 @@ struct UI {
    };
    int x=0,y=0;
    const auto mouse=ImGui::GetMousePos();
-   const bool hovered=ImGui::IsItemHovered() && grid_cell_at(mouse.x-origin.x,mouse.y-origin.y,cw,ch,grid.width,grid.height,x,y);
+   const bool hovered=ImGui::IsItemHovered() && !(free_camera && dungeon_camera.dragging) && grid_cell_at(mouse.x-origin.x,mouse.y-origin.y,cw,ch,grid.width,grid.height,x,y);
    x+=ox; y+=oy;
    // A direction prompt is already an aiming interaction. Preview its mouse
    // location locally, without entering another engine mode or sending input.
@@ -1257,7 +1316,9 @@ struct UI {
    }
   }
 
+  draw->PopClipRect();
   c.transitions.dungeon(draw,start,viewport,double(SDL_GetTicksNS())/1e9,CharacterSelect::accent(c.character_save),dungeon_font,cell_ratio);
+  if(grid.semantic) c.transitions.remember_camera(free_camera,{origin.x-start.x,origin.y-start.y},pixels,cw,ch);
   DungeonFeedback::ribbon(c,draw,start,viewport,proceed_with_click);
 
   if(!ImGui::IsWindowFocused()) grid_focus=false;
@@ -1751,6 +1812,12 @@ struct UI {
   }
  }
  void draw(SDL_Window *window) {
+  if(c.negotiated && !c.busy && c.capabilities.value("presentation.camera",0)>0 &&
+     c.camera_sent!=int(camera_settings.enabled) && (c.ready() || !c.state.contains("player"))) {
+   c.send("dungeon.camera",{{"enabled",camera_settings.enabled}});
+   c.camera_sent=int(camera_settings.enabled); c.busy=true;
+  }
+  if(!c.state.contains("player")) dungeon_camera.reset();
   const double scene_now=double(SDL_GetTicksNS())/1e9;
   if(!scene_animation || (c.transitions.kind!=SceneTransitions::Kind::Death && !c.transitions.active(scene_now))) c.transitions.dismiss();
   // Drawing never owns input. A deliberate click/key can skip the flourish.

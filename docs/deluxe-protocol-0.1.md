@@ -6,7 +6,9 @@ and the real-engine tests in `deluxe/test_backend.py`.
 
 The backend is a local child process. UTF-8 JSON objects are separated by
 newlines on stdin/stdout; diagnostics go to stderr. Frames must be smaller
-than 1 MiB. One process hosts one game. Networking is not supported.
+than 1 MiB before negotiation. Clients offering `max_frame_bytes: 4194304`
+receive a 4 MiB limit, required for the optional full-level camera. Other
+clients retain the 1 MiB limit. One process hosts one game. Networking is not supported.
 
 ```json
 {"kind":"request","id":"1","method":"hello","params":{"protocols":[{"major":0,"minor":1}]}}
@@ -346,3 +348,24 @@ is insufficient nearby space, it reports that without creating items.
 
 Ground item glow is independently enabled by the persisted `item_glow` setting
 (default true), available under Animations / Dungeon indicators.
+
+
+### Free dungeon camera
+
+`presentation.camera: 1` advertises `dungeon.camera {enabled: boolean}`.
+Configure it before character creation/loading or at a normal play boundary.
+Changing it publishes a new state (and fresh revision/handles) without spending
+energy. Enabling requires a negotiated 4 MiB frame budget. Default is disabled.
+
+When enabled, `dungeon.full_level` is true, its origin is `(0,0)` and its cells
+cover the whole level. The engine uses read-only known-map extraction: terrain,
+traps and objects come from remembered knowledge, and actors obey visibility.
+Hallucinated glyphs use deterministic presentation noise, not the engine RNG.
+The classic cached viewport is unchanged when disabled. Clicks, aiming and
+pickup accept world coordinates outside the terminal panel in full-level mode;
+normal engine rules still resolve movement, directions, targeting and travel.
+
+The client's `camera.enabled` and `camera.follow` preferences live under Display.
+Middle-drag pauses following; the wheel zooms; Return to player recenters and
+resumes following if enabled. Floor changes recenter automatically. Target
+cursor changes are kept in view. Panning and zooming are entirely client-side.

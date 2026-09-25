@@ -1621,6 +1621,14 @@ static bool textui_get_rep_dir(int *dp, bool allow_5)
  * if there is a usable target already set.
  */
 bool textui_aiming;
+static bool textui_aim_location;
+static struct loc textui_aim_grid;
+void textui_aim_at(struct loc grid)
+{
+ if (!textui_aiming) return;
+ textui_aim_grid=grid; textui_aim_location=true;
+ Term_keypress('*',0);
+}
 
 static bool textui_get_aim_dir(int *dp)
 {
@@ -1667,8 +1675,10 @@ static bool textui_get_aim_dir(int *dp)
 			}
 		} else if (ke.type == EVT_KBRD) {
 			if (ke.key.code == '*') {
+				struct loc initial = textui_aim_location ? textui_aim_grid : loc(-1,-1);
+				textui_aim_location = false;
 				/* Set new target, use target if legal */
-				if (target_set_interactive(TARGET_KILL, -1, -1,
+				if (target_set_interactive(TARGET_KILL, initial.x, initial.y,
 						false))
 					dir = 5;
 			} else if (ke.key.code == '\'') {

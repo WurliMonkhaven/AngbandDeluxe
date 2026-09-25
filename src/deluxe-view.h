@@ -1,10 +1,12 @@
 /* Semantic presentation adapter, included by main-deluxe.c after JSON helpers.
- * Cached values come from ordinary map drawing, never extra map_info() calls.
+ * The classic viewport uses ordinary map drawing; the free camera uses the
+ * engine's read-only known-map renderer for the full level.
  * No terminal-cell parsing, RNG use, pointer handles or client gameplay rules. */
 static struct map_visual *deluxe_cells;
 static bool *deluxe_cells_valid;
 static int deluxe_width, deluxe_height;
 static unsigned long deluxe_level;
+static bool deluxe_full_map;
 
 /* Looking may cycle over terrain/items as well as monsters. Confirm those as
  * locations using the engine's existing free-cursor controls. Kill targeting
@@ -42,26 +44,32 @@ static void deluxe_observe_cell(struct loc grid, const struct map_visual *v)
 }
 static void deluxe_capture_view(cJSON *state_record)
 {
- int x, y, width, height;
+ int x, y, width, height, ox, oy;
  cJSON *view, *rows, *observed_items;
  /* Native targeting/aiming share the dungeon; nested recall screens still own
   * the terminal. Presentation mode never depends on parsing terminal text. */
  if ((!ready && !native_prompt && !textui_message_pending && !target_ui_current && !textui_aiming && !textui_direction && !item_choice_objects && !spell_selection) || (active_prompt && !native_prompt) || screen_save_depth || !streq(phase,"playing") || !deluxe_cells) return;
- width = MIN(SCREEN_WID, cave->width - terminal.offset_x);
- height = MIN(SCREEN_HGT, cave->height - terminal.offset_y);
+ ox = deluxe_full_map ? 0 : terminal.offset_x;
+ oy = deluxe_full_map ? 0 : terminal.offset_y;
+ width = deluxe_full_map ? cave->width : MIN(SCREEN_WID, cave->width - ox);
+ height = deluxe_full_map ? cave->height : MIN(SCREEN_HGT, cave->height - oy);
  if (width < 1 || height < 1 || terminal.offset_x < 0 || terminal.offset_y < 0) return;
- for (y=0;y<height;++y) for (x=0;x<width;++x)
+ if (!deluxe_full_map) for (y=0;y<height;++y) for (x=0;x<width;++x)
   if (!deluxe_cells_valid[(y+terminal.offset_y)*deluxe_width+x+terminal.offset_x]) return;
  view=cJSON_CreateObject(); rows=cJSON_CreateArray(); observed_items=cJSON_CreateArray();
  json_bool(state_record,"message_pending",textui_message_pending);
  json_bool(state_record,"spell_selection",spell_selection);
  json_bool(state_record,"native_prompt",native_prompt);
- counter(view,"level_id",deluxe_level); number(view,"x",terminal.offset_x); number(view,"y",terminal.offset_y);
+ counter(view,"level_id",deluxe_level); number(view,"x",ox); number(view,"y",oy);
+ json_bool(view,"full_level",deluxe_full_map);
  number(view,"width",width); number(view,"height",height);
  for (y=0;y<height;++y) {
   cJSON *row=cJSON_CreateArray();
   for (x=0;x<width;++x) {
-   const struct map_visual *v=&deluxe_cells[(y+terminal.offset_y)*deluxe_width+x+terminal.offset_x];
+   struct map_visual whole;
+   const struct map_visual *v;
+   if (deluxe_full_map) { map_visual_readonly(loc(x,y), &whole); v=&whole; }
+   else v=&deluxe_cells[(y+oy)*deluxe_width+x+ox];
    int cell[13]={v->terrain_char,v->terrain_attr,v->trap_char,v->trap_attr,
     v->object_char,v->object_attr,v->actor_char,v->actor_attr,
     v->feature,v->lighting,v->seen,v->hallucinated,v->player};
@@ -69,7 +77,7 @@ static void deluxe_capture_view(cJSON *state_record)
    /* Describe remembered piles, not live-world objects at these coordinates.
     * Copies keep object_desc's everseen bookkeeping out of read-only capture. */
    if(v->object_char && !v->hallucinated && player->cave) {
-    struct loc grid=loc(x+terminal.offset_x,y+terminal.offset_y);
+    struct loc grid=loc(x+ox,y+oy);
     const struct object *o;
     for(o=square_object(player->cave,grid);o;o=o->next) {
      struct object copy=*o; char label[512]; cJSON *entry;

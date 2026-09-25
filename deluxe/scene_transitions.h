@@ -10,6 +10,10 @@ struct SceneTransitions {
  int depth=0;
  bool established=false, in_shop=false;
  RenderGrid previous;
+ struct CameraFrame { bool free=false; ImVec2 origin{}; float font=0,cw=0,ch=0; } camera,previous_camera;
+ void remember_camera(bool free,ImVec2 origin,float font,float cw,float ch) {
+  camera={free,origin,font,cw,ch};
+ }
  static double duration(Kind k) { return k==Kind::Death?.9:k==Kind::Load?.42:k==Kind::Shop?.30:.34; }
  float progress(double now) const { return std::clamp(float((now-started)/duration(kind)),0.f,1.f); }
  bool active(double now) const { return kind!=Kind::None && now-started<duration(kind); }
@@ -17,6 +21,7 @@ struct SceneTransitions {
  void reset() { *this=SceneTransitions{}; }
  void start(Kind k,double now,const RenderGrid &old=RenderGrid{}) {
   kind=k; started=now; returning_colour=false; previous=old.semantic?old:RenderGrid{};
+  previous_camera=camera;
  }
  void observe(const json &state,const RenderGrid &old,double now) {
   const auto phase=state.value("phase","");
@@ -74,15 +79,17 @@ struct SceneTransitions {
  static float noise(size_t x,size_t y) { return float((unsigned(x)*73856093u ^ unsigned(y)*19349663u)%101)/100.f; }
  void old_grid(ImDrawList *draw,ImVec2 p,ImVec2 size,float opacity,ImFont *face,float ratio) const {
   if(previous.cells.empty()) return;
-  const float font=std::min(size.x/(std::max(size_t(1),previous.width)*ratio),size.y/(std::max(size_t(1),previous.height)*1.12f));
-  const float cw=font*ratio,ch=font*1.12f;
-  const ImVec2 origin(p.x+(size.x-cw*previous.width)*.5f,p.y+(size.y-ch*previous.height)*.5f);
+  const float font=previous_camera.free?previous_camera.font:std::min(size.x/(std::max(size_t(1),previous.width)*ratio),size.y/(std::max(size_t(1),previous.height)*1.12f));
+  const float cw=previous_camera.free?previous_camera.cw:font*ratio,ch=previous_camera.free?previous_camera.ch:font*1.12f;
+  const ImVec2 origin=previous_camera.free?ImVec2(p.x+previous_camera.origin.x,p.y+previous_camera.origin.y):
+   ImVec2(p.x+(size.x-cw*previous.width)*.5f,p.y+(size.y-ch*previous.height)*.5f);
   for(size_t y=0;y<previous.height;++y) for(size_t x=0;x<previous.width;++x) {
    const auto &cell=previous.cells[y*previous.width+x];
    if(!cell.glyph || cell.glyph==' ') continue;
    auto ink=ImGui::ColorConvertU32ToFloat4(color(cell.color));
    float fade=opacity;
    ImVec2 at(origin.x+x*cw,origin.y+y*ch);
+   if(at.x+cw<p.x || at.y+ch<p.y || at.x>p.x+size.x || at.y>p.y+size.y) continue;
    ink.w=fade;
    draw->AddText(face,font,at,ImGui::GetColorU32(ink),utf8(cell.glyph).c_str());
   }

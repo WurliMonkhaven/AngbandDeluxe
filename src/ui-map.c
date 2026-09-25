@@ -172,7 +172,7 @@ static void grid_get_attr(struct grid_data *g, int *a)
  * This will probably be done outside of the current text->graphics mappings
  * though.
  */
-static void grid_data_as_text_layers(struct grid_data *g, int *ap, wchar_t *cp, int *tap, wchar_t *tcp, struct map_visual *visual)
+static void grid_data_as_text_layers(struct grid_data *g, int *ap, wchar_t *cp, int *tap, wchar_t *tcp, struct map_visual *visual, unsigned presentation_seed)
 {
 	struct feature *feat = &f_info[g->f_idx];
 
@@ -213,7 +213,8 @@ static void grid_data_as_text_layers(struct grid_data *g, int *ap, wchar_t *cp, 
 		} else if (g->first_kind) {
 			if (g->hallucinate) {
 				/* Just pick a random object to display. */
-				hallucinatory_object(&a, &c);
+				if (presentation_seed) { a = 1 + presentation_seed % 15; c = L"!?=/|)["[presentation_seed % 7]; }
+				else hallucinatory_object(&a, &c);
 			} else if (g->multiple_objects) {
 				/* Get the "pile" feature instead */
 				a = object_kind_attr(pile_kind);
@@ -232,7 +233,8 @@ static void grid_data_as_text_layers(struct grid_data *g, int *ap, wchar_t *cp, 
 	if (g->m_idx > 0) {
 		if (g->hallucinate) {
 			/* Just pick a random monster to display. */
-			hallucinatory_monster(&a, &c);
+			if (presentation_seed) { a = 1 + presentation_seed % 15; c = L'a' + presentation_seed % 26; }
+			else hallucinatory_monster(&a, &c);
 		} else if (!monster_is_camouflaged(cave_monster(cave, g->m_idx)))	{
 			struct monster *mon = cave_monster(cave, g->m_idx);
 
@@ -280,7 +282,7 @@ static void grid_data_as_text_layers(struct grid_data *g, int *ap, wchar_t *cp, 
 			}
 
 			/* Store the drawing attr so we can use it elsewhere */
-			mon->attr = a;
+			if (!presentation_seed) mon->attr = a;
 		}
 	} else if (g->is_player) {
 		struct monster_race *race = &r_info[0];
@@ -351,14 +353,25 @@ void (*map_visual_hook)(struct loc, const struct map_visual *);
 void (*map_visual_reset_hook)(void);
 void grid_data_as_text(struct grid_data *g, int *a, wchar_t *c, int *ta, wchar_t *tc)
 {
- grid_data_as_text_layers(g,a,c,ta,tc,NULL);
+ grid_data_as_text_layers(g,a,c,ta,tc,NULL,0);
 }
 void map_info_as_text(struct loc grid, struct grid_data *g, int *a, wchar_t *c, int *ta, wchar_t *tc)
 {
  struct map_visual visual = {0};
  map_info(grid,g);
- grid_data_as_text_layers(g,a,c,ta,tc,map_visual_hook?&visual:NULL);
+ grid_data_as_text_layers(g,a,c,ta,tc,map_visual_hook?&visual:NULL,0);
  if(map_visual_hook) map_visual_hook(grid,&visual);
+}
+
+void map_visual_readonly(struct loc grid, struct map_visual *visual)
+{
+ struct grid_data g;
+ int a, ta; wchar_t c, tc;
+ /* Stable visual noise, deliberately independent of the engine RNG. */
+ unsigned seed = ((unsigned)grid.x * 73856093u ^ (unsigned)grid.y * 19349663u) | 1u;
+ memset(visual, 0, sizeof(*visual));
+ map_info_readonly(grid, &g);
+ grid_data_as_text_layers(&g, &a, &c, &ta, &tc, visual, seed);
 }
 
 /**

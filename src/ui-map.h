@@ -34,5 +34,6 @@ struct map_visual {
 };
 extern void (*map_visual_hook)(struct loc grid, const struct map_visual *visual);
 extern void (*map_visual_reset_hook)(void);
+extern void map_visual_readonly(struct loc grid, struct map_visual *visual);
 extern void map_info_as_text(struct loc grid, struct grid_data *g, int *a,
  wchar_t *c, int *ta, wchar_t *tc);

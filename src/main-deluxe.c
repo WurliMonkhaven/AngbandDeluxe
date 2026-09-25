@@ -74,6 +74,8 @@
 #endif
 
 #define FRAME_LIMIT (1024 * 1024)
+#define CAMERA_FRAME_LIMIT (4 * FRAME_LIMIT)
+static size_t frame_limit=FRAME_LIMIT;
 #define SCREEN_W 100
 #define SCREEN_H 34
 static term terminal;
@@ -155,7 +157,7 @@ static void counter(cJSON *j, const char *key, unsigned long value)
 static void send_json(cJSON *j)
 {
  char *s = cJSON_PrintUnformatted(j);
- if (!s || strlen(s) >= FRAME_LIMIT) { fprintf(stderr, "Deluxe frame exceeds limit\n"); exit(2); }
+ if (!s || strlen(s) >= frame_limit) { fprintf(stderr, "Deluxe frame exceeds limit\n"); exit(2); }
  if (puts(s) < 0 || fflush(stdout)) exit(2);
  cJSON_free(s); cJSON_Delete(j);
 }
@@ -730,7 +732,7 @@ static bool item_hook(struct object **choice, const char *text, const char *reje
 
 static void pump(void)
 {
- static char line[FRAME_LIMIT + 2]; cJSON *r, *p; const char *id, *method; size_t n, i;
+ static char line[CAMERA_FRAME_LIMIT + 2]; cJSON *r, *p; const char *id, *method; size_t n, i;
  if (!fgets(line, sizeof(line), stdin)) {
   connected = false;
   if (character_generated && player && !player->is_dead) {
@@ -739,7 +741,7 @@ static void pump(void)
   exit(0);
  }
  n = strlen(line);
- if (n >= FRAME_LIMIT || !strchr(line, '\n')) { fprintf(stderr, "Invalid frame size\n"); exit(2); }
+ if (n >= frame_limit || !strchr(line, '\n')) { fprintf(stderr, "Invalid frame size\n"); exit(2); }
  { const char *end = NULL;
   r = cJSON_ParseWithOpts(line, &end, true);
  }
@@ -758,14 +760,26 @@ static void pump(void)
   cJSON_ArrayForEach(v, cJSON_GetObjectItem(p, "protocols"))
    if (num(v, "major", -1) == 0 && num(v, "minor", -1) == 1) match = true;
   if (!match) { error(id, "unsupported_protocol", "This development backend speaks 0.1, not stable v1."); goto done; }
+  frame_limit=num(p,"max_frame_bytes",FRAME_LIMIT)>=CAMERA_FRAME_LIMIT?CAMERA_FRAME_LIMIT:FRAME_LIMIT;
   negotiated = true;
   native_inventory=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_inventory"));
   native_equipment=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_equipment"));
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"presentation.camera\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  cJSON_SetNumberValue(cJSON_GetObjectItem(out,"max_frame_bytes"),(double)frame_limit);
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
  if (streq(method, "commands.list")) response(id, command_list());
+ else if (streq(method, "dungeon.camera")) {
+  if(!cJSON_IsBool(cJSON_GetObjectItem(p,"enabled"))) error(id,"invalid_argument","Expected an enabled flag.");
+  else if(cJSON_IsTrue(cJSON_GetObjectItem(p,"enabled")) && frame_limit<CAMERA_FRAME_LIMIT) error(id,"invalid_argument","Free camera requires a 4 MiB frame budget.");
+  else if(character_generated && (!ready || active_prompt || !streq(phase,"playing"))) error(id,"busy","Change the camera during normal play.");
+  else {
+   deluxe_full_map=cJSON_IsTrue(cJSON_GetObjectItem(p,"enabled"));
+   if(character_generated) publish();
+   response(id,cJSON_CreateObject());
+  }
+ }
  else if (streq(method, "state.get")) response(id, snapshot ? cJSON_CreateObjectReference(snapshot->child) : cJSON_CreateObject());
  else if(streq(method,"knowledge.unwatch")) { deluxe_knowledge_unwatch(); response(id,cJSON_CreateObject()); }
  else if(streq(method,"knowledge.list") || streq(method,"knowledge.get")) deluxe_knowledge_request(id,method,p);
@@ -945,7 +959,7 @@ static void pump(void)
   else if((!ready && !exit_look) || !character_generated || !streq(phase,"playing") || screen_save_depth || !cJSON_GetObjectItem(snapshot,"dungeon") || textui_message_pending)
    error(id,"busy","Return to normal play before moving.");
   else if(!cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) || jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint || !square_in_bounds_fully(cave,grid) ||
-          grid.x<terminal.offset_x || grid.y<terminal.offset_y || grid.x>=terminal.offset_x+SCREEN_WID || grid.y>=terminal.offset_y+SCREEN_HGT)
+          (!deluxe_full_map && (grid.x<terminal.offset_x || grid.y<terminal.offset_y || grid.x>=terminal.offset_x+SCREEN_WID || grid.y>=terminal.offset_y+SCREEN_HGT)))
    error(id,"invalid_argument","Select an interior tile in the current viewport.");
   else if(!OPT(player,mouse_movement)) error(id,"invalid_argument","Mouse movement is disabled in Angband's interface options.");
   else {
@@ -953,7 +967,8 @@ static void pump(void)
     (cJSON_IsTrue(cJSON_GetObjectItem(p,"control"))?KC_MOD_CONTROL:0) |
     (cJSON_IsTrue(cJSON_GetObjectItem(p,"alt"))?KC_MOD_ALT:0);
    if(!mods && !loc_eq(player->grid,grid)) deluxe_travel_begin(grid,CMD_WALK);
-   if(exit_look) {
+   if(exit_look || deluxe_full_map) {
+    ready=false;
     click_after_look=true; look_click_grid=grid; look_click_mods=mods;
     Term_keypress(ESCAPE,0);
    } else Term_mousepress(COL_MAP+(grid.x-terminal.offset_x)*tile_width,ROW_MAP+(grid.y-terminal.offset_y)*tile_height,(char)(1|(mods<<4)));
@@ -988,7 +1003,7 @@ static void pump(void)
    if(target_ui_current) { target_ui_select(grid,confirm); response(id,cJSON_CreateObject()); }
    else {
     /* The engine's aim-direction handler already accepts a mouse location. */
-    if(grid.x<terminal.offset_x || grid.y<terminal.offset_y || grid.x>=terminal.offset_x+SCREEN_WID || grid.y>=terminal.offset_y+SCREEN_HGT)
+    if((!deluxe_full_map && (grid.x<terminal.offset_x || grid.y<terminal.offset_y || grid.x>=terminal.offset_x+SCREEN_WID || grid.y>=terminal.offset_y+SCREEN_HGT)))
      error(id,"invalid_argument","Select a tile in the current viewport.");
     else if(textui_aiming && confirm) {
      struct monster *mon=square_monster(cave,grid);
@@ -996,6 +1011,12 @@ static void pump(void)
      else target_set_location(grid.y,grid.x);
      /* Resume the original aim handler with its ordinary use-target input. */
      Term_keypress('5',0); response(id,cJSON_CreateObject());
+    } else if(deluxe_full_map && textui_aiming) {
+     textui_aim_at(grid); response(id,cJSON_CreateObject());
+    } else if(deluxe_full_map && textui_direction) {
+     int direction=pathfind_direction_to(player->grid,grid);
+     if(direction<1 || direction>9 || direction==5) error(id,"invalid_argument","Select a direction away from the player.");
+     else { Term_keypress('0'+direction,0); response(id,cJSON_CreateObject()); }
     } else { Term_mousepress(COL_MAP+(grid.x-terminal.offset_x)*tile_width,ROW_MAP+(grid.y-terminal.offset_y)*tile_height,1); response(id,cJSON_CreateObject()); }
    }
   } else {

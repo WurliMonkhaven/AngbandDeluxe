@@ -54,7 +54,7 @@ public:
   return result;
  }
 private:
- static constexpr size_t frame_limit=1048576, queue_limit=4*frame_limit;
+ static constexpr size_t frame_limit=4*1048576, queue_limit=4*frame_limit;
  std::atomic<bool> stopping{false}, output_done{true}, errors_done{true};
  std::mutex mutex;
  std::condition_variable room;

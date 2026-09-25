@@ -121,7 +121,7 @@ class Engine:
                          for row in self.state.get("terminal", []))
 
     def hello(self, native_inventory=False, native_equipment=False):
-        result = self.call("hello", {"protocols": [{"major": 0, "minor": 1}], "native_inventory": native_inventory, "native_equipment": native_equipment})
+        result = self.call("hello", {"protocols": [{"major": 0, "minor": 1}], "native_inventory": native_inventory, "native_equipment": native_equipment, "max_frame_bytes":4194304})
         assert "result" in result, result
 
     def birth(self, name="ProtocolTest", class_index=0):
@@ -194,6 +194,115 @@ class BackendTests(unittest.TestCase):
         player = state["player"]
         cell = view["cells"][player["y"]-view["y"]][player["x"]-view["x"]]
         self.assertTrue(cell[12])
+
+    def test_free_dungeon_camera(self):
+        e=self.engine
+        e.hello(); e.birth()
+        self.assertFalse(e.state['dungeon'].get('full_level',False))
+        # Birth starts on the stairs. A dungeon is larger than the terminal.
+        e.key(ord('>'))
+        while e.state['readiness']!='ready': e.key('enter')
+        before=e.call('state.get')['result']
+        self.assertEqual(before['player']['depth'],1)
+        self.assertIn('error',e.call('dungeon.camera',{'enabled':'yes'}))
+        self.assertIn('result',e.call('dungeon.camera',{'enabled':True}))
+        full=e.call('state.get')['result']; e.state=full
+        view=full['dungeon']; known=full['map']['known']
+        self.assertTrue(view['full_level'])
+        self.assertEqual((view['x'],view['y']),(0,0))
+        self.assertEqual((view['width'],view['height']),(len(known[0]),len(known)))
+        self.assertGreater(view['width'],before['dungeon']['width'])
+        for key in ('turn','player','map'):
+            self.assertEqual(before[key],full[key],key)
+        self.assertEqual([{k:v for k,v in m.items() if k!='id'} for m in before['monsters']],
+                         [{k:v for k,v in m.items() if k!='id'} for m in full['monsters']])
+        visible={(m['x'],m['y']) for m in full['monsters'] if m['visible']}
+        for y,row in enumerate(view['cells']):
+            for x,cell in enumerate(row):
+                if not known[y][x]: self.assertEqual(cell[8],0,'Unexplored terrain leaked')
+                if cell[6] and not cell[12]: self.assertIn((x,y),visible,'Hidden actor leaked')
+                self.assertEqual(bool(cell[10]),full['map']['visible'][y][x]=='1')
+        for y,row in enumerate(before['dungeon']['cells']):
+            for x,cell in enumerate(row):
+                self.assertEqual(cell,view['cells'][y+before['dungeon']['y']][x+before['dungeon']['x']])
+        # World-coordinate clicking outside the original viewport, including
+        # the nested aim handler (whose legacy mouse event has byte coordinates).
+        far_x,far_y=view['width']-2,view['height']-2
+        self.targeting('dungeon.click',x=far_x,y=far_y,alt=True)
+        self.assertEqual((e.state['targeting']['x'],e.state['targeting']['y']),(far_x,far_y))
+        self.assertTrue(e.state['dungeon']['full_level'])
+        self.assertIn('error',e.call('dungeon.camera',{'enabled':False}))
+        self.targeting('targeting.control',operation='cancel')
+        while e.state['readiness']!='ready': e.key('enter')
+        old=e.state['revision']; self.assertIn('result',e.call('debug.blast',{'radius':2})); e.next_state(old)
+        self.assertTrue(e.state['aiming'])
+        self.targeting('targeting.select',x=far_x,y=far_y,confirm=False)
+        self.assertEqual((e.state['targeting']['x'],e.state['targeting']['y']),(far_x,far_y))
+        self.targeting('targeting.control',operation='cancel')
+        for _ in range(10):
+            if e.state['readiness']=='ready': break
+            e.key('escape')
+        self.assertEqual(e.state['turn'],before['turn'])
+        # Adjacent walking still performs a real engine action in free mode.
+        p=e.state['player']; x,y=p['x'],p['y']
+        catalog=e.call('catalog.get')['result']['features']
+        floors={f['id'] for f in catalog if f['name'] in ('open floor','open door','up staircase','down staircase')}
+        dest=next((x+dx,y+dy) for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)) if e.state['map']['known'][y+dy][x+dx] in floors)
+        self.targeting('dungeon.click',x=dest[0],y=dest[1])
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertEqual((e.state['player']['x'],e.state['player']['y']),dest)
+        self.assertIn('result',e.call('dungeon.camera',{'enabled':False}))
+        e.state=e.call('state.get')['result']; self.assert_semantic_view(e.state)
+
+    def test_fully_mapped_camera(self):
+        e=self.engine; e.hello(); e.birth(); e.key(ord('>'))
+        while e.state['readiness']!='ready': e.key('enter')
+        self.assertIn('result',e.call('dungeon.camera',{'enabled':True}))
+        e.state=e.call('state.get')['result']
+        e.key(1); e.key(ord('w'))
+        for _ in range(20):
+            if e.state['readiness']=='ready': break
+            e.call('state.get')
+            if e.prompt:
+                prompt=e.prompt; e.prompt=None; old=e.state['revision']
+                e.call('prompt.reply',{'prompt_id':prompt['prompt_id'],'value':True})
+                e.next_state(old)
+            else: e.key('enter')
+        full=e.call('state.get')['result']
+        self.assertTrue(full['dungeon']['full_level'])
+        self.assertGreater(sum(bool(cell[8]) for row in full['dungeon']['cells'] for cell in row),1000)
+        self.assertLess(len(json.dumps(full,separators=(',',':')).encode('utf-8')),4194304)
+        self.assertEqual(e.call('state.get')['result'],full)
+
+    def test_camera_hallucination_randomness(self):
+        e=self.engine; e.hello(); e.birth()
+        old=e.state['revision']; e.call('debug.status',{'effect':'IMAGE','amount':100}); e.next_state(old)
+        while e.state['readiness']!='ready': e.key('enter')
+        e.call('session.close'); e.process.wait(timeout=10); e.stop()
+        baseline=Path(self.temp.name)/'camera-baseline'; shutil.copytree(Path(self.temp.name)/'save',baseline)
+        def play(camera):
+            folder=Path(self.temp.name)/('camera' if camera else 'classic')
+            shutil.copytree(baseline,folder/'save')
+            branch=Engine(folder); self.engine=branch
+            branch.hello(); branch.call('session.load',{'save':'ProtocolTest'}); branch.next_state(None)
+            while branch.state['readiness']!='ready': branch.key('enter')
+            if camera:
+                for enabled in (True,False,True,False,True):
+                    self.assertIn('result',branch.call('dungeon.camera',{'enabled':enabled}))
+                    branch.state=branch.call('state.get')['result']
+                self.assertTrue(any(c[11] for row in branch.state['dungeon']['cells'] for c in row))
+            for _ in range(8):
+                branch.key(ord(','))
+                while branch.state['readiness']!='ready': branch.key('enter')
+            result={key:branch.state[key] for key in ('turn','player','map','monsters','items')}
+            for collection in ('items','monsters'):
+                for entity in result[collection]: entity.pop('id',None)
+            branch.call('session.close'); branch.process.wait(timeout=10); branch.stop()
+            return result
+        try:
+            self.assertEqual(play(False),play(True))
+        finally:
+            self.engine=Engine(Path(self.temp.name)/'cleanup')
 
     def test_native_keybindings(self):
         e=self.engine

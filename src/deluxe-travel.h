@@ -64,6 +64,11 @@ static bool deluxe_pickup_observed(struct loc grid)
 {
  size_t index;
  if(!square_in_bounds_fully(cave,grid) || grid.x>=deluxe_width || grid.y>=deluxe_height || !deluxe_cells) return false;
+ if(deluxe_full_map) {
+  struct map_visual visual;
+  map_visual_readonly(grid,&visual);
+  return visual.object_char!=0;
+ }
  index=grid.y*deluxe_width+grid.x;
  return deluxe_cells_valid[index] && deluxe_cells[index].object_char!=0;
 }

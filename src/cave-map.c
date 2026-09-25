@@ -79,7 +79,7 @@
  * into different monsters, and terrain may be objects, monsters, or stay the
  * same.
  */
-void map_info(struct loc grid, struct grid_data *g)
+static void map_info_internal(struct loc grid, struct grid_data *g, bool readonly)
 {
 	struct object *obj;
 	int16_t m_idx;
@@ -134,7 +134,7 @@ void map_info(struct loc grid, struct grid_data *g)
 		}
 
 		/* Remember seen feature */
-		square_memorize(cave, grid);
+		if (!readonly) square_memorize(cave, grid);
 	} else {
 		g->in_view = false;
 	}
@@ -176,7 +176,7 @@ void map_info(struct loc grid, struct grid_data *g)
 	}
 
 	/* Rare random hallucination on non-outer walls */
-	if (g->hallucinate && g->m_idx == 0 && g->first_kind == 0) {
+	if (g->hallucinate && g->m_idx == 0 && g->first_kind == 0 && !readonly) {
 		if (one_in_(128) && (int) g->f_idx != FEAT_PERM)
 			g->m_idx = 1;
 		else if (one_in_(128) && (int) g->f_idx != FEAT_PERM)
@@ -189,6 +189,17 @@ void map_info(struct loc grid, struct grid_data *g)
 	assert((int)g->f_idx < FEAT_MAX);
 	assert(g->lighting >= 0 && g->lighting < LIGHTING_MAX);
 	assert(g->hallucinate || (int)g->m_idx < cave->mon_max);
+}
+
+void map_info(struct loc grid, struct grid_data *g)
+{
+	map_info_internal(grid, g, false);
+}
+
+/* Presentation only: do not memorize terrain or consume gameplay randomness. */
+void map_info_readonly(struct loc grid, struct grid_data *g)
+{
+	map_info_internal(grid, g, true);
 }
 
 
