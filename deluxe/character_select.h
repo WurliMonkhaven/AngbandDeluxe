@@ -15,8 +15,7 @@ struct CharacterSelect {
   ImVec4 color(0,0,0,1);
   ImGui::ColorConvertHSVtoRGB(hue,55.f/183.f,183.f/255.f,color.x,color.y,color.z);
   // Keep the filename's hue, but give it enough weight on light surfaces.
-  const auto bg=DeluxeTheme::current.background;
-  if(DeluxeTheme::current.custom && bg.x*.2126f+bg.y*.7152f+bg.z*.0722f>.5f) {
+  if(DeluxeTheme::light_surface()) {
    color.x*=.52f; color.y*=.52f; color.z*=.52f;
   }
   return ImGui::ColorConvertFloat4ToU32(color);

@@ -99,7 +99,7 @@ static ImU32 color(int index) {
 static ImU32 ui_color(int index) {
  auto ink=ImGui::ColorConvertU32ToFloat4(color(index));
  const auto bg=ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
- if(DeluxeTheme::current.custom && bg.x*.2126f+bg.y*.7152f+bg.z*.0722f>.5f) {
+ if(DeluxeTheme::light_surface()) {
   auto luminance=[](ImVec4 v) { auto linear=[](float x) { return x<=.04045f?x/12.92f:std::pow((x+.055f)/1.055f,2.4f); }; return .2126f*linear(v.x)+.7152f*linear(v.y)+.0722f*linear(v.z); };
   for(int i=0;i<30 && (luminance(bg)+.05f)/(luminance(ink)+.05f)<4.5f;++i) { ink.x*=.9f; ink.y*=.9f; ink.z*=.9f; }
  }

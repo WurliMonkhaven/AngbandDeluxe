@@ -33,6 +33,15 @@ int main(int argc,char **argv) {
   DeluxeTheme::current.invert_dungeon=true;
   check(DeluxeTheme::dungeon_colour(IM_COL32(12,15,20,180))==IM_COL32(243,240,235,180),"Dungeon inversion preserves alpha");
   DeluxeTheme::current=ThemeSettings{};
+  ThemeSettings manual; manual.preset(2); manual.light_styling=false;
+  ThemeSettings restored; restored.load(manual.serialize());
+  check(!restored.light_styling,"Explicit dark styling must survive a light background");
+  manual.preset(0); manual.light_styling=true; restored.load(manual.serialize());
+  check(restored.light_styling,"Explicit light styling must survive a dark background");
+  auto legacy=manual.serialize(); legacy.erase("light_styling"); restored.load(legacy);
+  check(!restored.light_styling,"Legacy original theme keeps dark styling");
+  manual.preset(2); legacy=manual.serialize(); legacy.erase("light_styling"); restored.load(legacy);
+  check(restored.light_styling,"Legacy light themes retain their appearance");
   ThemeSettings bounded; bounded.load({{"rounding",100},{"accent",json::array({-1,2,.5})},{"text","invalid"}});
   check(bounded.rounding==16 && bounded.accent.x==0 && bounded.accent.y==1,"Theme input must be bounded");
   {

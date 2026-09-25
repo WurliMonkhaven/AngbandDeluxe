@@ -2,11 +2,11 @@
 // One visual vocabulary for native panels. Decorations are bounded geometry,
 // not windows or input targets; the normal GPU/CRT pipeline renders them.
 struct ThemeSettings {
- bool custom=false, decorations=true, invert_dungeon=false;
+ bool custom=false, decorations=true, invert_dungeon=false, light_styling=false;
  float rounding=5;
  ImVec4 background{.027f,.043f,.052f,1},surface{.065f,.10f,.115f,1},text{.85f,.89f,.86f,1},accent{.50f,.72f,.57f,1};
  static json rgba(ImVec4 v) { return json::array({v.x,v.y,v.z}); }
- json serialize() const { return {{"invert_dungeon",invert_dungeon},{"custom",custom},{"decorations",decorations},{"rounding",rounding},{"background",rgba(background)},{"surface",rgba(surface)},{"text",rgba(text)},{"accent",rgba(accent)}}; }
+ json serialize() const { return {{"light_styling",light_styling},{"invert_dungeon",invert_dungeon},{"custom",custom},{"decorations",decorations},{"rounding",rounding},{"background",rgba(background)},{"surface",rgba(surface)},{"text",rgba(text)},{"accent",rgba(accent)}}; }
  void load(const json &j) {
   if(!j.is_object()) return;
   if(j.contains("invert_dungeon") && j["invert_dungeon"].is_boolean()) invert_dungeon=j["invert_dungeon"];
@@ -17,11 +17,14 @@ struct ThemeSettings {
    if(a.is_array() && a.size()==3 && a[0].is_number() && a[1].is_number() && a[2].is_number())
     v={std::clamp(a[0].get<float>(),0.f,1.f),std::clamp(a[1].get<float>(),0.f,1.f),std::clamp(a[2].get<float>(),0.f,1.f),1}; };
   read("background",background); read("surface",surface); read("text",text); read("accent",accent);
+  // Preserve older saved themes once; explicit choices never follow brightness.
+  light_styling=j.contains("light_styling") && j["light_styling"].is_boolean()
+   ?j["light_styling"].get<bool>():custom && background.x*.2126f+background.y*.7152f+background.z*.0722f>.5f;
  }
  void preset(int n) {
   *this=ThemeSettings{}; if(n==0) return; custom=true;
   if(n==1) { background={.055f,.06f,.075f,1}; surface={.12f,.13f,.16f,1}; accent={.61f,.68f,.85f,1}; }
-  if(n==2) { background={.90f,.91f,.89f,1}; surface={.98f,.98f,.95f,1}; text={.12f,.17f,.18f,1}; accent={.13f,.36f,.32f,1}; rounding=8; }
+  if(n==2) { light_styling=true; background={.90f,.91f,.89f,1}; surface={.98f,.98f,.95f,1}; text={.12f,.17f,.18f,1}; accent={.13f,.36f,.32f,1}; rounding=8; }
   if(n==3) { background={.065f,.045f,.025f,1}; surface={.14f,.10f,.055f,1}; text={.94f,.85f,.65f,1}; accent={.91f,.62f,.26f,1}; rounding=0; }
   if(n==4) { background={.025f,.045f,.09f,1}; surface={.055f,.105f,.17f,1}; text={.81f,.9f,.96f,1}; accent={.35f,.76f,.88f,1}; rounding=7; }
  }
@@ -29,6 +32,7 @@ struct ThemeSettings {
 struct DeluxeTheme {
  inline static ThemeSettings current{};
  static ImU32 dungeon_colour(ImU32 ink) { return current.invert_dungeon?ink ^ IM_COL32(255,255,255,0):ink; }
+ static bool light_surface() { return current.light_styling; }
  static ImVec4 green() { return current.accent; }
  static ImVec4 mix(ImVec4 a,ImVec4 b,float t) { return {a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t,1}; }
  static ImU32 tint(float alpha) { auto a=green(); a.w=alpha; return ImGui::GetColorU32(a); }
@@ -64,6 +68,8 @@ struct DeluxeTheme {
   theme.custom|=changed;
   ImGui::SliderFloat("Corner rounding",&theme.rounding,0,16,"%.0f px");
   ImGui::Checkbox("Decorative accents",&theme.decorations);
+  ImGui::Checkbox("Light theme styling",&theme.light_styling);
+  if(ImGui::IsItemHovered()) ImGui::SetTooltip("Use softly tinted bars and badges, and darker item and character accents. Independent of your chosen background colour.");
   ImGui::Checkbox("Invert Dungeon Colours",&theme.invert_dungeon);
   if(ImGui::IsItemHovered()) ImGui::SetTooltip("Invert the dungeon background and glyph colours, including the fallback terminal.");
   ImGui::TextDisabled("Preview only until Save and Close.");

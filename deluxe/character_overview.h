@@ -2,27 +2,30 @@
 // Compact character overview. All values and XP thresholds come from the engine.
 struct CharacterOverview {
  static void meter(const char *label,const std::string &value,float fraction,ImVec4 fill,const std::string &badge="",float flash=0,float sweep=0) {
-  ImGui::PushStyleColor(ImGuiCol_PlotHistogram,fill);
-  ImGui::PushStyleColor(ImGuiCol_FrameBg,ImVec4(fill.x*.22f,fill.y*.22f,fill.z*.22f,1));
+  const bool light=DeluxeTheme::light_surface();
+  const auto surface=ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+  const auto empty=light?DeluxeTheme::mix(surface,fill,.07f):ImVec4(fill.x*.22f,fill.y*.22f,fill.z*.22f,1);
+  ImGui::PushStyleColor(ImGuiCol_PlotHistogram,light?DeluxeTheme::mix(surface,fill,.35f):fill);
+  ImGui::PushStyleColor(ImGuiCol_FrameBg,empty);
   ImGui::ProgressBar(fraction,ImVec2(-1,ImGui::GetFrameHeight()),"");
   const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();
   const float pad=ImGui::GetStyle().FramePadding.x;
   const float y=a.y+(b.y-a.y-ImGui::GetFontSize())*.5f;
-  auto *draw=ImGui::GetWindowDrawList(); const auto ink=IM_COL32(235,240,236,255);
+  auto *draw=ImGui::GetWindowDrawList(); const auto ink=light?ImGui::GetColorU32(ImGuiCol_Text):IM_COL32(235,240,236,255);
   // A lit glass face, a thin bright edge, and fine scale marks below the text.
   const float badge_width=badge.empty()?0.f:std::min(ImGui::CalcTextSize(badge.c_str()).x+2*pad,(b.x-a.x)*.55f);
   const ImVec2 track(a.x+badge_width,a.y);
   // Labels share one continuous fill; the level is not a separate segment.
   const float edge=a.x+(b.x-a.x)*std::clamp(fraction,0.f,1.f);
   if(edge>a.x) {
-   const auto top=ImGui::GetColorU32(ImVec4(fill.x*1.15f,fill.y*1.15f,fill.z*1.15f,1));
-   const auto bottom=ImGui::GetColorU32(ImVec4(fill.x*.55f,fill.y*.55f,fill.z*.55f,1));
+   const auto top=ImGui::GetColorU32(light?DeluxeTheme::mix(surface,fill,.26f):ImVec4(fill.x*1.15f,fill.y*1.15f,fill.z*1.15f,1));
+   const auto bottom=ImGui::GetColorU32(light?DeluxeTheme::mix(surface,fill,.38f):ImVec4(fill.x*.55f,fill.y*.55f,fill.z*.55f,1));
    draw->AddRectFilledMultiColor(a,ImVec2(edge,b.y),top,top,bottom,bottom);
-   draw->AddLine(ImVec2(a.x+1,a.y+1),ImVec2(edge,a.y+1),ImGui::GetColorU32(ImVec4(fill.x+.18f,fill.y+.18f,fill.z+.18f,.8f)));
+   draw->AddLine(ImVec2(a.x+1,a.y+1),ImVec2(edge,a.y+1),ImGui::GetColorU32(light?DeluxeTheme::mix(surface,fill,.5f):ImVec4(fill.x+.18f,fill.y+.18f,fill.z+.18f,.8f)));
   }
   for(int i=1;i<10;++i) {
    const float x=a.x+(b.x-a.x)*i/10.f;
-   draw->AddLine(ImVec2(x,b.y-3),ImVec2(x,b.y-1),IM_COL32(180,210,200,65));
+   draw->AddLine(ImVec2(x,b.y-3),ImVec2(x,b.y-1),light?ImGui::GetColorU32(DeluxeTheme::mix(surface,fill,.35f)):IM_COL32(180,210,200,65));
   }
   draw->AddRect(a,b,ImGui::GetColorU32(ImGuiCol_Border),2);
   if(flash>0) {

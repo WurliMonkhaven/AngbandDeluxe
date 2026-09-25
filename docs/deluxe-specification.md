@@ -1144,3 +1144,8 @@ Theme also offers Invert Dungeon Colours (off by default), inverting RGB of
 the dungeon/fallback-terminal background and glyph palette without changing
 UI colours. Character selection uses themed surfaces and text; filename-seeded
 accents retain their hue with darker values on light themes.
+
+Light theme styling is an explicit Theme checkbox, independent of background
+colour. It controls resource/status styling and native colour contrast variants.
+Light / Paper enables it; other presets disable it. Old settings without the
+field inherit their prior brightness-based behaviour on load.
