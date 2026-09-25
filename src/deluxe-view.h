@@ -80,6 +80,15 @@ static void deluxe_capture_view(cJSON *state_record)
      entry=cJSON_CreateObject(); number(entry,"x",grid.x); number(entry,"y",grid.y);
      string(entry,"label",label); number(entry,"quantity",o->number);
      number(entry,"color",o->kind->base ? o->kind->base->attr : COLOUR_WHITE);
+     /* The remembered object contains only discovered properties. Never use
+      * the live pile to decorate an unidentified or hallucinated item. */
+     const char *aura="";
+     if(o->kind!=unknown_item_kind && o->kind!=unknown_gold_kind) {
+      if(cursed(o)) aura="cursed";
+      else if(o->artifact) aura="artifact";
+      else for(int rune=0;rune<max_runes();++rune) if(object_has_rune(o,rune)) { aura="rune"; break; }
+     }
+     string(entry,"aura",aura);
      cJSON_AddItemToArray(observed_items,entry);
     }
    }

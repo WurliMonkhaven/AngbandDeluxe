@@ -414,7 +414,7 @@ int main(int argc,char **argv) {
   ui.draft_proceed_with_click=true;
   check(!ui.proceed_with_click,"Gameplay draft must not apply immediately");
   ui.draft_scene_animation=false; check(ui.scene_animation,"Scene draft must not apply before saving");
-  ui.draft_low_animation=false; ui.draft_death_animation=false; ui.draft_combat_animation=false; ui.draft_sleep_animation=false; ui.draft_fear_animation=false; ui.draft_level_animation=false;
+  ui.draft_low_animation=false; ui.draft_death_animation=false; ui.draft_combat_animation=false; ui.draft_sleep_animation=false; ui.draft_item_glow=false; ui.draft_fear_animation=false; ui.draft_level_animation=false;
   check(ui.low_animation && ui.death_animation && ui.combat_animation && ui.sleep_animation && ui.fear_animation,"Animation drafts applied immediately");
   ui.draft_crt_strength=3; ui.draft_crt_settings.parts[Hum].enabled=true;
   check(!ui.crt_settings.parts[Hum].enabled,"Hum bar draft applied immediately");
@@ -439,7 +439,7 @@ int main(int argc,char **argv) {
   ui.draft_scale=1.5f; ui.draft_crt=1; ui.draft_crt_settings.parts[Hum].enabled=true;
   ui.draft_crt_settings.raster_lines=720; ui.draft_crt_settings.mask=2; ui.draft_crt_settings.tube_preset=-1;
   ui.draft_scene_animation=false;
-  ui.draft_low_animation=false; ui.draft_death_animation=true; ui.draft_combat_animation=false; ui.draft_sleep_animation=false; ui.draft_fear_animation=false; ui.draft_level_animation=false;
+  ui.draft_low_animation=false; ui.draft_death_animation=true; ui.draft_combat_animation=false; ui.draft_sleep_animation=false; ui.draft_item_glow=false; ui.draft_fear_animation=false; ui.draft_level_animation=false;
   ui.draft_click_exits_look=true;
   ui.draft_proceed_with_click=true;
   ui.draft_quick_targeting=true;
@@ -461,6 +461,7 @@ int main(int argc,char **argv) {
   check(loaded.quickbar_enabled && loaded.quickbar.slots()[0]["command"]=="core.hold","Quickbar settings and assignments did not persist");
   loaded.quickbar.profile="other-character"; check(loaded.quickbar.slots()[0].is_null(),"Characters must not share slots");
   check(loaded.crt_settings.raster_lines==720 && loaded.crt_settings.mask==2,"Staged raster/mask settings did not persist");
+  check(!loaded.item_glow,"Ground item glow setting did not persist");
   check(!loaded.low_animation && loaded.death_animation && !loaded.combat_animation && !loaded.sleep_animation && !loaded.fear_animation && !loaded.level_animation,"Independent animation switches did not persist");
   check(loaded.scale==1.5f && loaded.crt==1 && !loaded.fullscreen,"Saved values");
   check(loaded.crt_settings.parts[Hum].enabled,"Hum bar did not persist");
@@ -974,6 +975,20 @@ int main(int argc,char **argv) {
   check(replay_sent && replay.character_save=="Hero" && replay.busy,"Handshake must resume the completed save through replay");
   json sleep_view={{"x",3},{"y",4},{"width",1},{"height",1},{"cells",json::array({json::array({json::array({46,1,0,0,0,0,111,1,1,1,1,0,0})})})}};
   json sleeper={{"x",3},{"y",4},{"visible",true},{"asleep",true}};
+  {
+   json glow_view={{"x",0},{"y",0},{"width",1},{"height",1},{"cells",json::array({json::array({json::array({46,1,0,0,33,1,0,0,1,1,1,0,0})})})}};
+   json glow_item={{"x",0},{"y",0},{"aura","artifact"}};
+   check(ItemGlow::kind(glow_item,glow_view)==2,"Observed artifact gets holy glow");
+   glow_item["aura"]="cursed"; check(ItemGlow::kind(glow_item,glow_view)==3,"Known curse gets crimson glow");
+   glow_item["aura"]="rune"; check(ItemGlow::kind(glow_item,glow_view)==1,"Known rune gets gentle glow");
+   glow_item.erase("aura"); check(!ItemGlow::kind(glow_item,glow_view),"Old backends and ordinary items have no glow");
+   glow_item["aura"]="artifact";
+   for(int field:{10,11,6,12,4}) {
+    auto hidden=glow_view; hidden["cells"][0][0][field]=(field==10 || field==4)?0:1;
+    check(!ItemGlow::kind(glow_item,hidden),"Glow must not reveal unseen, hallucinated or covered objects");
+   }
+   glow_item["x"]=1; check(!ItemGlow::kind(glow_item,glow_view),"Glow stays within dungeon viewport");
+  }
   check(MonsterFeedback::eligible(sleeper,sleep_view),"Visible sleeping monster should have sleep markers");
   sleeper["afraid"]=true;
   check(MonsterFeedback::eligible(sleeper,sleep_view,"afraid"),"Feared monsters must use the engine fear flag");

@@ -17,6 +17,8 @@
 #include "obj-info.h"
 #include "obj-knowledge.h"
 #include "obj-pile.h"
+#include "obj-make.h"
+#include "obj-curse.h"
 #include "option.h"
 #include "obj-util.h"
 #include "obj-tval.h"
@@ -81,6 +83,9 @@ static unsigned long revision, sequence, context_id;
 static char revision_text[32], context_text[32];
 static const char *phase = "launcher";
 static bool debug_blink;
+static bool debug_glow_items;
+static int debug_glow_kind;
+static struct loc debug_glow_grid;
 static int debug_breath_element = -1;
 static int debug_damage, debug_experience, debug_blast_radius;
 static int debug_status=-1,debug_status_amount;
@@ -404,6 +409,52 @@ static cJSON *item_record(const struct object *o, const char *location, int inde
  }
  return j;
 }
+/* Explicit developer action: create real, identified samples on separate tiles. */
+static void deluxe_spawn_glow_items(void)
+{
+ struct loc spots[3]; int count=0;
+ struct object *samples[3]={NULL,NULL,NULL};
+ const int first=debug_glow_kind?debug_glow_kind-1:0,last=debug_glow_kind?debug_glow_kind:3;
+ if(debug_glow_kind) { spots[first]=debug_glow_grid; count=3; }
+ for(int radius=1;radius<=5 && count<3;++radius)
+  for(int dy=-radius;dy<=radius && count<3;++dy)
+   for(int dx=-radius;dx<=radius && count<3;++dx) {
+    struct loc grid=loc(player->grid.x+dx,player->grid.y+dy);
+    if(MAX(abs(dx),abs(dy))!=radius || !square_in_bounds_fully(cave,grid) ||
+       !square_isseen(cave,grid) || !square_isfloor(cave,grid) ||
+       square_object(cave,grid) || square_monster(cave,grid) || square_isplayer(cave,grid)) continue;
+    spots[count++]=grid;
+   }
+ if(count<3) { msg("Find three clear, visible floor tiles nearby to spawn glow test items."); return; }
+ struct object_kind *kind=lookup_kind(TV_SWORD,lookup_sval(TV_SWORD,"Dagger"));
+ if(!kind) { msg("No test weapon kind is available."); return; }
+ if(first==0) for(int i=1;i<z_info->a_max;++i) if(a_info[i].name && !is_artifact_created(&a_info[i])) {
+  struct object *obj=object_new(); make_fake_artifact(obj,&a_info[i]);
+  if(obj->kind && !cursed(obj)) { samples[0]=obj; break; }
+  object_delete(NULL,NULL,&obj);
+ }
+ if(first==0 && !samples[0]) { msg("No unused artifact is available for the glow test."); return; }
+ for(int i=MAX(1,first);i<last;++i) { samples[i]=object_new(); object_prep(samples[i],kind,0,MINIMISE); }
+ if(samples[1]) samples[1]->to_d=3;
+ bool has_curse=last<3;
+ if(last==3) for(int i=1;i<z_info->curse_max;++i) if(curses[i].name && curses[i].poss[kind->tval] && append_object_curse(samples[2],i,20)) { has_curse=true; break; }
+ if(!has_curse) {
+  for(int i=0;i<3;++i) object_delete(NULL,NULL,&samples[i]);
+  msg("No suitable curse is available for the glow test."); return;
+ }
+ for(int i=first;i<last;++i) {
+  struct object *obj=samples[i]; obj->origin=ORIGIN_CHEAT;
+  obj->origin_depth=convert_depth_to_origin(player->depth);
+  if(!floor_carry(cave,spots[i],obj,false)) { object_delete(NULL,NULL,&obj); continue; }
+  if(obj->artifact) mark_artifact_created(obj->artifact,true);
+  object_touch(player,obj);
+  for(int rune=0;rune<max_runes() && !object_runes_known(obj);++rune) object_learn_unknown_rune(player,obj);
+  square_note_spot(cave,spots[i]); square_light_spot(cave,spots[i]);
+ }
+ player->upkeep->notice|=PN_IGNORE;
+ player->upkeep->redraw|=PR_MAP|PR_ITEMLIST;
+ msg(debug_glow_kind?"Glow test item placed.":"Glow test items placed nearby: artifact, runed weapon and cursed weapon.");
+}
 #include "deluxe-character.h"
 #include "deluxe-options.h"
 #include "deluxe-keybindings.h"
@@ -710,7 +761,7 @@ static void pump(void)
   negotiated = true;
   native_inventory=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_inventory"));
   native_equipment=cJSON_IsTrue(cJSON_GetObjectItem(p,"native_equipment"));
-  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
+  out = cJSON_Parse("{\"protocol\":{\"major\":0,\"minor\":1},\"engine\":{\"id\":\"org.angband.angband\",\"version\":\"4.2.6-deluxe-dev\",\"save_compatibility\":\"angband-4.2.6\"},\"capabilities\":{\"state.player\":1,\"state.items\":1,\"state.map\":1,\"state.monsters\":1,\"state.messages\":1,\"commands\":1,\"prompts.basic\":1,\"prompts.items\":1,\"spells\":1,\"audio.events\":1,\"session.replay\":1,\"run.summary\":1,\"journal\":1,\"keybindings\":1,\"options\":1,\"knowledge.watch\":1,\"knowledge\":1,\"item.rules\":1,\"item.compare\":1,\"interaction.birth\":1,\"interaction.store\":1,\"interaction.inventory\":1,\"debug.glow_items\":1,\"debug.experience\":1,\"debug.blast\":1,\"debug.breath\":1,\"debug.blink\":1,\"targeting.blast\":1,\"debug.status\":1,\"debug.quit\":1,\"terminal.fallback\":1,\"presentation.dungeon\":1,\"interaction.targeting\":1,\"interaction.route\":1,\"interaction.mouse\":1,\"interaction.pickup\":1,\"interaction.terrain\":1},\"max_frame_bytes\":1048576}");
   response(id, out); goto done;
  }
  if (!negotiated) { error(id, "unsupported_protocol", "Negotiate first."); goto done; }
@@ -1069,6 +1120,18 @@ static void pump(void)
    debug_status=idx; debug_status_amount=amount->valueint; ready=false;
    response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0);
   }
+ } else if (streq(method, "debug.glow_items")) {
+  const char *type=str(p,"kind");
+  int kind=streq(type,"artifact")?1:streq(type,"rune")?2:streq(type,"cursed")?3:0;
+  const cJSON *jx=cJSON_GetObjectItem(p,"x"),*jy=cJSON_GetObjectItem(p,"y");
+  struct loc grid=loc(num(p,"x",-1),num(p,"y",-1));
+  if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing"))
+   error(id,"busy","Return to normal play before spawning items.");
+  else if((cJSON_GetObjectItem(p,"kind") || jx || jy) && (!kind || !cJSON_IsNumber(jx) || !cJSON_IsNumber(jy) ||
+    jx->valuedouble!=jx->valueint || jy->valuedouble!=jy->valueint || !square_in_bounds_fully(cave,grid) ||
+    !square_isseen(cave,grid) || !square_isfloor(cave,grid) || square_object(cave,grid) || square_monster(cave,grid) || square_isplayer(cave,grid)))
+   error(id,"invalid_argument","Choose an empty, visible floor tile and an artifact, rune or cursed item.");
+  else { debug_glow_kind=kind; debug_glow_grid=grid; debug_glow_items=true; ready=false; response(id,cJSON_CreateObject()); Term_keypress(ESCAPE,0); }
  } else if (streq(method, "debug.experience")) {
   cJSON *amount=cJSON_GetObjectItem(p,"amount");
   if(!ready || active_prompt || !character_generated || player->is_dead || !streq(phase,"playing"))
@@ -1226,6 +1289,7 @@ static errr get_command(cmd_context context)
    int idx=debug_status,amount=debug_status_amount; debug_status=-1; ready=false;
    player_set_timed(player,idx,amount,true,true);
   }
+  if(debug_glow_items) { debug_glow_items=false; ready=false; deluxe_spawn_glow_items(); }
   if(debug_experience) {
    int amount=debug_experience; debug_experience=0; ready=false;
    player_exp_gain(player,amount);

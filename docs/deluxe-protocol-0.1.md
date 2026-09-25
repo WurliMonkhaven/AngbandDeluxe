@@ -326,3 +326,23 @@ coordinate and visibility-of-viewport input checks still apply. Missing/false
 `native_prompt: true` retains semantic dungeon presentation behind structured
 native dialogs during normal play, including low-mana confirmations. It does
 not override birth, stores, saved terminal screens, or other fallback contexts.
+
+### Ground-item aura hints
+
+Semantic `dungeon.items` entries may include `aura`: `artifact`, `rune`,
+`cursed`, or an empty string. This is derived exclusively from the remembered
+object and known runes; curses take precedence over artifacts, then runes.
+Clients must suppress the effect for unseen, hallucinated or actor-covered
+tiles. An absent field means no glow. The hint does not identify items or
+change lighting, visibility, RNG or gameplay.
+
+`debug.glow_items` (capability of the same name) is a ready-play-only developer
+action. With `kind` (`artifact`, `rune`, `cursed`) and integer `x/y`, it places
+a single sample on that exact empty visible floor tile. Invalid destinations
+are rejected without mutation. With no arguments, it places a previously uncreated artifact, a +3 damage dagger, and a
+cursed dagger on three separate nearby visible empty floor tiles. Samples have
+cheat provenance and their properties are learned for glow testing. If there
+is insufficient nearby space, it reports that without creating items.
+
+Ground item glow is independently enabled by the persisted `item_glow` setting
+(default true), available under Animations / Dungeon indicators.

@@ -1648,6 +1648,54 @@ class BackendTests(unittest.TestCase):
         self.assertGreater(e.state['player']['level'],before['player']['level'])
         self.assertEqual(e.state['turn'],before['turn'])
 
+    def test_debug_glow_items(self):
+        e=self.engine
+        e.hello()
+        self.assertIn('error',e.call('debug.glow_items'))
+        e.birth()
+        turn=e.state['turn']; old=e.state['revision']
+        self.assertIn('result',e.call('debug.glow_items'))
+        e.next_state(old)
+        for _ in range(40):
+            if e.state['readiness']=='ready': break
+            e.key('enter')
+        self.assertEqual(e.state['readiness'],'ready')
+        self.assertEqual(e.state['turn'],turn)
+        glows=[o for o in e.state['dungeon']['items'] if o.get('aura')]
+        self.assertEqual({o['aura'] for o in glows},{'artifact','rune','cursed'},e.screen())
+        self.assertGreaterEqual(len({(o['x'],o['y']) for o in glows}),3)
+        artifacts=[o['actual']['label'] for o in e.state['items'] if o['location']=='Floor' and o['actual']['artifact']]
+        self.assertEqual(len(artifacts),1)
+        old=e.state['revision'];self.assertIn('result',e.call('debug.glow_items'));e.next_state(old)
+        for _ in range(40):
+            if e.state['readiness']=='ready': break
+            e.key('enter')
+        labels=[o['actual']['label'] for o in e.state['items'] if o['location']=='Floor' and o['actual']['artifact']]
+        self.assertEqual(len(labels),len(set(labels)),'Developer tool must not duplicate an existing artifact')
+
+    def test_debug_glow_placement(self):
+        e=self.engine; e.hello(); e.birth()
+        for kind in ('artifact','rune','cursed'):
+            v=e.state['dungeon']
+            floors={f['id'] for f in e.call('catalog.get')['result']['features'] if f['name']=='open floor'}
+            occupied={(o['x'],o['y']) for o in e.state['items'] if o['location']=='Floor'}
+            choices=[(x+v['x'],y+v['y']) for y,row in enumerate(v['cells']) for x,cell in enumerate(row)
+                     if cell[8] in floors and cell[10] and not cell[6] and not cell[12] and (x+v['x'],y+v['y']) not in occupied]
+            self.assertTrue(choices)
+            x,y=min(choices,key=lambda xy:abs(xy[0]-e.state['player']['x'])+abs(xy[1]-e.state['player']['y']))
+            turn=e.state['turn']; old=e.state['revision']
+            self.assertIn('result',e.call('debug.glow_items',{'kind':kind,'x':x,'y':y}))
+            e.next_state(old)
+            for _ in range(50):
+                if e.state['readiness']=='ready': break
+                e.key('enter')
+            self.assertEqual(e.state['turn'],turn)
+            observed=[o for o in e.state['dungeon']['items'] if (o['x'],o['y'])==(x,y)]
+            self.assertEqual([o['aura'] for o in observed],[kind])
+            self.assertIn('error',e.call('debug.glow_items',{'kind':kind,'x':x,'y':y}))
+        for params in ({'kind':'bogus','x':1,'y':1},{'kind':'rune','x':-1,'y':0},{'kind':'artifact'},{'x':1,'y':1}):
+            self.assertIn('error',e.call('debug.glow_items',params))
+
     def test_debug_damage(self):
         e = self.engine
         e.hello()

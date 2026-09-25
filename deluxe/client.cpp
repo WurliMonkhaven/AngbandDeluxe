@@ -497,6 +497,7 @@ static void properties(const json &value) {
 #include "motion_feedback.h"
 #include "blast_preview.h"
 #include "monster_feedback.h"
+#include "item_glow.h"
 #include "dungeon_tooltip.h"
 #include "rest_dialog.h"
 #include "quantity_picker.h"
@@ -545,10 +546,12 @@ struct UI {
  bool movement_animation=true, draft_movement_animation=true, blink_animation=true, draft_blink_animation=true;
  bool projectile_animation=true, draft_projectile_animation=true;
  bool combat_animation=true, draft_combat_animation=true;
+ bool item_glow=true, draft_item_glow=true;
  bool sleep_animation=true, draft_sleep_animation=true;
  bool fear_animation=true, draft_fear_animation=true;
  bool level_animation=true, draft_level_animation=true;
  bool low_animation=true, death_animation=true, draft_low_animation=true, draft_death_animation=true;
+ int glow_placement=0;
  int damage_amount=1, xp_amount=100, blast_radius=2, breath_element=0;
  DevStatusDialog dev_status_dialog;
  int settings_page=0;
@@ -612,6 +615,7 @@ struct UI {
    movement_animation=j.value("movement_animation",true); blink_animation=j.value("blink_animation",true);
    projectile_animation=j.value("projectile_animation",true);
    combat_animation=j.value("combat_animation",true);
+   item_glow=j.value("item_glow",true);
    sleep_animation=j.value("sleep_animation",true);
    fear_animation=j.value("fear_animation",true);
    level_animation=j.value("level_animation",true);
@@ -625,10 +629,10 @@ struct UI {
    if(j.contains("crt_components")) crt_settings.load(j.at("crt_components"));
   } catch (...) { c.notice("Settings could not be read; using defaults."); }
  }
- bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr,const ThemeSettings *theme=nullptr) {
+ bool write_settings(float zoom,bool full,int effect,int strength,const CrtSettings &settings,bool low,bool death,bool proceed,bool exit_look,bool quick,bool bar,const AudioSettings *sound=nullptr,const bool *combat=nullptr,const bool *sleep=nullptr,const bool *fear=nullptr,const bool *level=nullptr,const bool *projectiles=nullptr,const bool *movement=nullptr,const bool *blink=nullptr,const bool *scene=nullptr,const FontSettings *fonts=nullptr,const ThemeSettings *theme=nullptr,const bool *glow=nullptr) {
   const std::string temporary=settings_path+".tmp";
   std::ofstream out(temporary);
-  out << json{{"theme",(theme?*theme:theme_settings).serialize()},{"layout",layout.serialize()},{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
+  out << json{{"item_glow",glow?*glow:item_glow},{"theme",(theme?*theme:theme_settings).serialize()},{"layout",layout.serialize()},{"fonts",(fonts?*fonts:font_settings).serialize()},{"scene_animation",scene?*scene:scene_animation},{"movement_animation",movement?*movement:movement_animation},{"blink_animation",blink?*blink:blink_animation},{"projectile_animation",projectiles?*projectiles:projectile_animation},{"audio",(sound?*sound:audio_settings).serialize()},{"scale",zoom},{"game_fraction",game_fraction},{"fullscreen",full},{"crt",effect},{"crt_strength",strength},{"crt_components",settings.serialize()},{"level_animation",level?*level:level_animation},{"fear_animation",fear?*fear:fear_animation},{"sleep_animation",sleep?*sleep:sleep_animation},{"combat_animation",combat?*combat:combat_animation},{"low_health_animation",low},{"death_animation",death},{"proceed_with_click",proceed},{"click_exits_look",exit_look},{"quick_targeting",quick},{"quickbar_enabled",bar},{"quickbar_profiles",quickbar.profiles}}.dump(2);
   out.close();
   return bool(out) && SDL_RenamePath(temporary.c_str(),settings_path.c_str());
  }
@@ -652,6 +656,7 @@ struct UI {
   draft_projectile_animation=projectile_animation;
   draft_movement_animation=movement_animation; draft_blink_animation=blink_animation;
   draft_combat_animation=combat_animation;
+  draft_item_glow=item_glow;
   draft_sleep_animation=sleep_animation;
   draft_fear_animation=fear_animation;
   draft_level_animation=level_animation;
@@ -664,7 +669,7 @@ struct UI {
   if(draft_fullscreen!=fullscreen && !SDL_SetWindowFullscreen(window,draft_fullscreen)) {
    settings_error=SDL_GetError(); return false;
   }
-  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts,&draft_theme)) {
+  if(!write_settings(draft_scale,draft_fullscreen,draft_crt,draft_crt_strength,draft_crt_settings,draft_low_animation,draft_death_animation,draft_proceed_with_click,draft_click_exits_look,draft_quick_targeting,draft_quickbar_enabled,&draft_audio_settings,&draft_combat_animation,&draft_sleep_animation,&draft_fear_animation,&draft_level_animation,&draft_projectile_animation,&draft_movement_animation,&draft_blink_animation,&draft_scene_animation,&draft_fonts,&draft_theme,&draft_item_glow)) {
    if(draft_fullscreen!=fullscreen) SDL_SetWindowFullscreen(window,fullscreen);
    settings_error="Settings could not be saved. Please try again."; return false;
   }
@@ -673,6 +678,7 @@ struct UI {
   projectile_animation=draft_projectile_animation;
   movement_animation=draft_movement_animation; blink_animation=draft_blink_animation;
   combat_animation=draft_combat_animation;
+  item_glow=draft_item_glow;
   sleep_animation=draft_sleep_animation;
   fear_animation=draft_fear_animation;
   level_animation=draft_level_animation;
@@ -827,7 +833,9 @@ struct UI {
      ImGui::Checkbox("Teleport ripples",&draft_blink_animation);
      ImGui::Checkbox("Projectiles and spells",&draft_projectile_animation);
      ImGui::Checkbox("Combat feedback",&draft_combat_animation);
-     ImGui::Spacing(); DeluxeTheme::section("Creature indicators");
+     ImGui::Spacing(); DeluxeTheme::section("Dungeon indicators");
+     ImGui::Checkbox("Ground item glow",&draft_item_glow);
+     if(ImGui::IsItemHovered()) ImGui::SetTooltip("Soft glows for known artifacts, runes and curses on visible ground items. Works with CRT effects off.");
      ImGui::Checkbox("Sleeping monsters",&draft_sleep_animation);
      ImGui::Checkbox("Frightened monsters",&draft_fear_animation);
 
@@ -1073,6 +1081,7 @@ struct UI {
   auto draw=ImGui::GetWindowDrawList();
   game_draw_list=draw; game_pos=ImGui::GetWindowPos(); game_size=ImGui::GetWindowSize();
   draw->AddRectFilled(start,ImVec2(start.x+viewport.x,start.y+viewport.y),DeluxeTheme::dungeon_colour(color(0)));
+  if(grid.semantic && item_glow) ItemGlow::draw(draw,c.state["dungeon"],origin,size,cw,ch,double(SDL_GetTicksNS())/1e9);
   for(size_t y=0;y<grid.height;++y) for(size_t x=0;x<grid.width;++x) {
    const auto &cell=grid.cells[y*grid.width+x];
    if(cell.glyph && cell.glyph!=' ') {
@@ -1124,7 +1133,7 @@ struct UI {
     outline(wx,wy,IM_COL32(255,225,125,255),2.f*display_scale);
    };
    const auto &io=ImGui::GetIO();
-   const bool routing=hovered && c.ready() && !c.state.contains("targeting") && !c.state.value("aiming",false) && !c.state.value("direction_prompt",false) && !c.state.value("message_pending",false) && !io.KeyShift && !io.KeyCtrl && !io.KeyAlt;
+   const bool routing=!glow_placement && hovered && c.ready() && !c.state.contains("targeting") && !c.state.value("aiming",false) && !c.state.value("direction_prompt",false) && !c.state.value("message_pending",false) && !io.KeyShift && !io.KeyCtrl && !io.KeyAlt;
    if(routing) c.preview_route(x,y);
    DungeonFeedback::route(c,draw,origin,size,cw,ch,ox,oy,routing,x,y);
    if(c.state.value("blast_radius",0)>0 && !c.state.value("message_pending",false)) {
@@ -1156,11 +1165,21 @@ struct UI {
     const auto &t=c.state["selected_target"];
     outline(t.value("x",0),t.value("y",0),IM_COL32(210,175,85,200),display_scale);
    }
-   const bool tooltip_allowed=hovered && c.ready() && window_active && !c.state.contains("targeting") &&
+   const bool tooltip_allowed=!glow_placement && hovered && c.ready() && window_active && !c.state.contains("targeting") &&
     !c.state.value("aiming",false) && !c.state.value("direction_prompt",false) && !c.state.value("message_pending",false) &&
     !ImGui::IsAnyMouseDown() && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
    if(dungeon_tooltip.dwell(tooltip_allowed,c.state.value("context",""),x,y,ImGui::GetTime())) dungeon_tooltip.draw(c.state,c.catalog);
-   if(hovered && !c.state.value("message_pending",false)) {
+   if(glow_placement && (!c.ready() || c.state.value("phase","")!="playing")) glow_placement=0;
+   if(glow_placement && hovered) {
+    const char *labels[]={"","artifact","runed weapon","cursed weapon"};
+    outline(x,y,IM_COL32(255,215,95,255),2.f*display_scale);
+    ImGui::SetTooltip("Place %s here (%d, %d)\nClick an empty visible floor tile. Right-click or Esc cancels.",labels[glow_placement],x,y);
+    if(ImGui::IsMouseClicked(1)) glow_placement=0;
+    else if(ImGui::IsMouseClicked(0)) {
+     const char *kinds[]={"","artifact","rune","cursed"};
+     c.send("debug.glow_items",{{"kind",kinds[glow_placement]},{"x",x},{"y",y}}); c.busy=true; glow_placement=0; keys.clear();
+    }
+   } else if(hovered && !c.state.value("message_pending",false)) {
     if(!mouse_target) outline(x,y,IM_COL32(140,185,220,190),display_scale);
     if(ImGui::IsMouseClicked(0) && c.native_targeting() && !c.busy && !c.state.value("message_pending",false)) {
      const bool active=c.state.contains("targeting") || c.state.value("aiming",false) || c.state.value("direction_prompt",false);
@@ -1805,6 +1824,11 @@ struct UI {
   ImGui::PopStyleColor(3);
   bool open_damage=false,open_status=false,open_xp=false,open_blast=false,open_breath=false;
   if(ImGui::BeginPopup("Developer tools")) {
+   if(ImGui::BeginMenu("Spawn glow test item",c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.glow_items",0)>0)) {
+    const char *choices[]={"Artifact","Runed weapon","Cursed weapon"};
+    for(int i=0;i<3;++i) if(ImGui::MenuItem(choices[i])) { glow_placement=i+1; keys.clear(); }
+    ImGui::EndMenu();
+   }
    if(ImGui::MenuItem("Fire breath weapon",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.breath",0)>0)) open_breath=true;
    if(ImGui::MenuItem("Cast Blink",nullptr,false,c.ready() && c.state.value("phase","")=="playing" && c.capabilities.value("debug.blink",0)>0)) {
     keys.clear(); c.send("debug.blink"); c.busy=true;
@@ -2081,6 +2105,7 @@ int main(int argc,char **argv) {
   }
   ui.prepare_frame(window); SDL_Event e;
   while(SDL_PollEvent(&e)) {
+   if(ui.glow_placement && e.type==SDL_EVENT_KEY_DOWN) { if(e.key.key==SDLK_ESCAPE) ui.glow_placement=0; ui.keys.clear(); continue; }
    if(detached.event(ui,e)) continue;
    if(e.type==SDL_EVENT_WINDOW_FOCUS_LOST) { ui.window_active=false; ui.keys.clear(); }
    if(e.type==SDL_EVENT_WINDOW_FOCUS_GAINED) ui.window_active=true;
