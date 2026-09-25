@@ -68,7 +68,7 @@ struct SpellPanel {
    ImGui::EndCombo();
   }
   const auto &spells=book->at("spells");
-  list(spells,selected,ImGui::GetTextLineHeightWithSpacing()*9,false,bar,book);
+  list(spells,selected,(ImGui::GetTextLineHeight()+2*ImGui::GetStyle().CellPadding.y)*float(std::clamp(int(spells.size())+1,2,10)),false,bar,book);
   const auto *spell=find(spells,selected);
   bool acted=false;
   if(spell) {

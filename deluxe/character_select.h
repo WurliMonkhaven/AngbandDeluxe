@@ -103,7 +103,7 @@ struct CharacterSelect {
   const json *chosen=nullptr;
   for(const auto &s:saves) if(s.value("id","")==selected) chosen=&s;
   if(!chosen && !saves.empty()) { selected=saves.front().value("id",""); chosen=&saves.front(); }
-  ImGui::BeginChild("Character selection",ImVec2(0,-ImGui::GetTextLineHeightWithSpacing()*2));
+  ImGui::BeginChild("Character selection",ImVec2(0,0));
   if(saves.empty()) {
    emblem(font*11,ImGui::GetColorU32(DeluxeTheme::green())); ImGui::Spacing();
    ImGui::TextDisabled("No saved characters.");
@@ -159,7 +159,7 @@ struct CharacterSelect {
      }
      ImGui::Spacing(); ImGui::TextDisabled("LAST SAVED"); ImGui::TextWrapped("%s",s.value("last_saved","Unknown").c_str());
      ImGui::Spacing(); ImGui::TextDisabled("SAVE FILE"); ImGui::TextWrapped("%s",id.c_str());
-     ImGui::Spacing(); ImGui::Spacing(); ImGui::BeginDisabled(!enabled);
+     ImGui::Spacing(); ImGui::BeginDisabled(!enabled);
      if(ImGui::Button(dead?"Play Again":"Continue",ImVec2(-1,ImGui::GetFrameHeight()*1.5f))) action=1;
      ImGui::Spacing(); if(ImGui::Button("Rename")) action=2;
      ImGui::SameLine(); if(ImGui::Button("Delete")) action=3;

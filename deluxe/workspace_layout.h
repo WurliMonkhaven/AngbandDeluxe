@@ -567,9 +567,10 @@ struct WorkspaceLayout {
    if(can_resize && ImGui::IsItemDeactivated()) dirty=true;
    if(can_resize && ImGui::IsItemHovered()) ImGui::SetMouseCursor(n.axis==1?ImGuiMouseCursor_ResizeEW:ImGuiMouseCursor_ResizeNS);
    if(editing || (can_resize && (ImGui::IsItemHovered() || ImGui::IsItemActive()))) ImGui::GetWindowDrawList()->AddRectFilled(handle,{handle.x+hs.x,handle.y+hs.y},ImGui::GetColorU32(ImGui::IsItemHovered()?ImGuiCol_SeparatorHovered:ImGuiCol_Separator));
-   if(!can_resize && (editing || ImGui::IsItemHovered())) {
+   if(!can_resize && (editing || ImGui::IsItemHovered()) && !ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel)) {
     const ImVec2 c(handle.x+hs.x*.5f,handle.y+hs.y*.5f);
-    auto *d=ImGui::GetWindowDrawList(); const auto ink=ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    // The badge extends beyond the divider; child panels must not paint over it.
+    auto *d=ImGui::GetForegroundDrawList(); const auto ink=ImGui::GetColorU32(ImGuiCol_TextDisabled);
     const float scale=std::max(1.f,ImGui::GetFontSize()/18.f);
     d->AddRectFilled({c.x-12*scale,c.y-14*scale},{c.x+12*scale,c.y+11*scale},ImGui::GetColorU32(ImGuiCol_WindowBg),3*scale);
     d->AddRect({c.x-4.5f*scale,c.y-12*scale},{c.x+4.5f*scale,c.y},ink,3*scale,0,2*scale);

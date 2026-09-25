@@ -802,7 +802,7 @@ struct UI {
       if(i) ImGui::Spacing();
       ImGui::TextDisabled("%s",i==0?"PLAY":i==3?"PRESENTATION":"SOUND"); ImGui::Separator();
      }
-     if(ImGui::Selectable(pages[i],settings_page==i,0,ImVec2(0,ImGui::GetFrameHeight()*1.25f))) settings_page=i;
+     if(ImGui::Selectable(pages[i],settings_page==i,0,ImVec2(0,ImGui::GetFrameHeight()))) settings_page=i;
     }
     const char *save_note="Changes apply when you save.";
     const float note_height=ImGui::CalcTextSize(save_note,nullptr,false,ImGui::GetContentRegionAvail().x).y;
@@ -817,7 +817,7 @@ struct UI {
    ImGui::PushID(settings_page);
    ImGui::BeginChild("Settings contents",ImVec2(0,0));
    DeluxeTheme::section(pages[settings_page]);
-   ImGui::TextWrapped("%s",descriptions[settings_page]); ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+   ImGui::PushTextWrapPos(0); ImGui::TextDisabled("%s",descriptions[settings_page]); ImGui::PopTextWrapPos(); ImGui::Spacing();
    bool editing_bindings=false;
    {
     if(settings_page==9) game_tuning.draw();
@@ -1510,7 +1510,10 @@ struct UI {
   }
   std::stable_sort(values.begin(),values.end(),[](const json *a,const json *b){return a->value("location","")<b->value("location","");});
   if(item_window && values.empty()) ImGui::TextDisabled("%s",category==1?"Nothing equipped.":"Your pack is empty.");
-  if(ImGui::BeginTable("items",category==1?3:2,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,item_window?std::max(ImGui::GetTextLineHeightWithSpacing()*3,ImGui::GetContentRegionAvail().y*.42f):ImGui::GetTextLineHeightWithSpacing()*10))) {
+  const auto visible_count=std::count_if(values.begin(),values.end(),[&](const json *o) { return matches(o->value("label",""),item_filter); });
+  const float row_height=ImGui::GetTextLineHeight()+2*ImGui::GetStyle().CellPadding.y;
+  const float list_height=row_height*float(std::clamp(int(visible_count)+1,2,11));
+  if(ImGui::BeginTable("items",category==1?3:2,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,item_window?std::min(list_height,std::max(row_height*2,ImGui::GetContentRegionAvail().y*.42f)):list_height))) {
    ImGui::TableSetupColumn("Item",ImGuiTableColumnFlags_WidthStretch,1.f);
    if(category==1) ImGui::TableSetupColumn("Slot",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFontSize()*6.f);
    ImGui::TableSetupColumn("Qty",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFontSize()*2.5f);

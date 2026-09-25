@@ -57,15 +57,16 @@ struct CharacterOverview {
   const float label_width=ImGui::CalcTextSize(label).x,value_width=ImGui::CalcTextSize(value.c_str()).x;
   const float gap=*label?ImGui::GetFontSize()*.6f:0.f;
   const bool stacked=*label && label_width+gap+value_width+2*pad>width;
-  const float height=ImGui::GetFontSize()*(stacked?2.f:1.f)+2*pad;
+  const float vertical_pad=ImGui::GetFontSize()*.2f;
+  const float height=ImGui::GetFontSize()*(stacked?2.f:1.f)+2*vertical_pad;
   const ImVec2 b(a.x+width,a.y+height);
   auto *draw=ImGui::GetWindowDrawList();
   draw->AddRectFilledMultiColor(a,b,ImGui::GetColorU32(ImGuiCol_FrameBg),ImGui::GetColorU32(ImGuiCol_ChildBg),ImGui::GetColorU32(ImGuiCol_ChildBg),ImGui::GetColorU32(ImGuiCol_FrameBg));
   draw->AddRect(a,b,ImGui::GetColorU32(ImGuiCol_Border),2);
   DeluxeTheme::corners(draw,a,b,DeluxeTheme::tint(.5f),pad);
   draw->PushClipRect(a,b,true);
-  draw->AddText(ImVec2(a.x+pad,a.y+pad),ImGui::GetColorU32(ImGuiCol_TextDisabled),label);
-  draw->AddText(ImVec2(a.x+pad+(stacked?0:label_width+gap),a.y+pad+(stacked?ImGui::GetFontSize():0)),ImGui::GetColorU32(ImGuiCol_Text),value.c_str());
+  draw->AddText(ImVec2(a.x+pad,a.y+vertical_pad),ImGui::GetColorU32(ImGuiCol_TextDisabled),label);
+  draw->AddText(ImVec2(a.x+pad+(stacked?0:label_width+gap),a.y+vertical_pad+(stacked?ImGui::GetFontSize():0)),ImGui::GetColorU32(ImGuiCol_Text),value.c_str());
   draw->PopClipRect(); ImGui::Dummy(ImVec2(width,height));
   if(ImGui::IsItemHovered()) {
    ImGui::BeginTooltip(); ImGui::PushTextWrapPos(ImGui::GetFontSize()*28.f);
@@ -81,7 +82,7 @@ struct CharacterOverview {
  static float height(const json &p,float width,bool headings=true) {
   const auto &style=ImGui::GetStyle(); const float font=ImGui::GetFontSize();
   const float row_padding=2*style.CellPadding.y;
-  float total=std::max(ImGui::GetFrameHeight(),headings?font*1.6f:ImGui::GetFrameHeight())+row_padding;
+  float total=std::max(ImGui::GetFrameHeight(),headings?DeluxeTheme::section_height():ImGui::GetFrameHeight())+row_padding;
   total+=style.ItemSpacing.y+2*(ImGui::GetFrameHeight()+row_padding);
   if(p.contains("stats") && !p["stats"].empty()) total+=style.ItemSpacing.y+2*font+style.ItemSpacing.y+row_padding;
   const char *labels[]={"Gold","Armour","Speed"};
@@ -90,7 +91,7 @@ struct CharacterOverview {
   const float cell=width/3-2*style.CellPadding.x; float metric_height=0;
   for(int i=0;i<3;++i) {
    const bool stacked=ImGui::CalcTextSize(labels[i]).x+ImGui::CalcTextSize(values[i].c_str()).x+font*1.4f>cell;
-   metric_height=std::max(metric_height,font*(stacked?2.8f:1.8f));
+   metric_height=std::max(metric_height,font*(stacked?2.4f:1.4f));
   }
   total+=style.ItemSpacing.y+metric_height+row_padding;
   if(p.value("extra_moves",0)) total+=ImGui::GetTextLineHeightWithSpacing();
@@ -178,7 +179,7 @@ struct CharacterOverview {
   return open;
  }
  static float tracked_height(bool headings=true) {
-  return (headings?ImGui::GetFontSize()*1.6f+ImGui::GetStyle().ItemSpacing.y:0)+ImGui::GetTextLineHeightWithSpacing()+ImGui::GetFrameHeight();
+  return (headings?DeluxeTheme::section_height()+ImGui::GetStyle().ItemSpacing.y:0)+ImGui::GetTextLineHeightWithSpacing()+ImGui::GetFrameHeight();
  }
  static void tracked(const json &p,bool headings=true) {
   if(headings) DeluxeTheme::section("Tracked creature",false);
@@ -211,12 +212,12 @@ struct CharacterOverview {
   const std::string values[]={std::to_string(p.value("depth",0)),std::to_string(p.value("light",0)),p.value("feeling","—"),display_label(p.value("floor",""))};
   const auto &style=ImGui::GetStyle();
   const float cell=width/columns-2*style.CellPadding.x;
-  float height=headings?ImGui::GetFontSize()*1.6f+style.ItemSpacing.y:0;
+  float height=headings?DeluxeTheme::section_height()+style.ItemSpacing.y:0;
   for(int row=0;row<4;row+=columns) {
    float line=0;
    for(int i=row;i<row+columns;++i) {
     const bool stacked=*labels[i] && ImGui::CalcTextSize(labels[i]).x+ImGui::CalcTextSize(values[i].c_str()).x+ImGui::GetFontSize()*1.4f>cell;
-    line=std::max(line,ImGui::GetFontSize()*(stacked?2.8f:1.8f));
+    line=std::max(line,ImGui::GetFontSize()*(stacked?2.4f:1.4f));
    }
    height+=line+2*style.CellPadding.y;
   }

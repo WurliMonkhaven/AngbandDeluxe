@@ -87,15 +87,15 @@ struct DeluxeTheme {
   current=ThemeSettings{};
   ImGui::StyleColorsDark();
   auto &s=ImGui::GetStyle();
-  s.WindowPadding=ImVec2(10,10); s.FramePadding=ImVec2(7,4);
-  s.ItemSpacing=ImVec2(7,5); s.ItemInnerSpacing=ImVec2(5,4);
-  s.CellPadding=ImVec2(6,4);
+  s.WindowPadding=ImVec2(8,8); s.FramePadding=ImVec2(7,3);
+  s.ItemSpacing=ImVec2(7,4); s.ItemInnerSpacing=ImVec2(5,4);
+  s.CellPadding=ImVec2(6,2);
   s.WindowRounding=5; s.ChildRounding=3; s.FrameRounding=2;
   s.PopupRounding=4; s.TabRounding=2; s.GrabRounding=2;
   s.ScrollbarRounding=2; s.ScrollbarSize=12;
   s.WindowBorderSize=1; s.ChildBorderSize=1; s.FrameBorderSize=1;
   s.TabBorderSize=0; s.SeparatorTextBorderSize=1;
-  s.SeparatorTextPadding=ImVec2(8,5);
+  s.SeparatorTextPadding=ImVec2(8,3);
   auto *c=s.Colors;
   c[ImGuiCol_Text]=ImVec4(.85f,.89f,.86f,1);
   c[ImGuiCol_TextDisabled]=ImVec4(.47f,.56f,.55f,1);
@@ -143,18 +143,19 @@ struct DeluxeTheme {
   c[ImGuiCol_NavCursor]=green();
   c[ImGuiCol_ModalWindowDimBg]=ImVec4(.008f,.016f,.02f,.78f);
  }
+ static float section_height() { return ImGui::GetFontSize()*1.4f; }
  static void section(const char *label,bool wrap_label=true) {
   const float f=ImGui::GetFontSize(),w=std::max(1.f,ImGui::GetContentRegionAvail().x);
   const auto a=ImGui::GetCursorScreenPos();
   const float inset=f*.9f,wrap=std::max(1.f,w-inset-f*.4f);
   const auto text=ImGui::CalcTextSize(label,nullptr,false,wrap_label?wrap:0.f);
-  const float h=text.y+f*.6f;
+  const float h=text.y+section_height()-f;
   auto *d=ImGui::GetWindowDrawList(); const auto ink=ImGui::GetColorU32(green());
   d->PushClipRect(a,ImVec2(a.x+w,a.y+h),true);
   if(current.decorations) d->AddRectFilledMultiColor(a,ImVec2(a.x+w,a.y+h),tint(.12f),tint(0),tint(0),tint(.05f));
   d->AddLine(ImVec2(a.x,a.y+h),ImVec2(a.x+w,a.y+h),ImGui::GetColorU32(ImGuiCol_Separator));
-  d->AddLine(ImVec2(a.x,a.y+f*.3f),ImVec2(a.x,a.y+h-f*.3f),ink,2);
-  d->AddText(ImGui::GetFont(),f,ImVec2(a.x+inset,a.y+f*.3f),ink,label,nullptr,wrap_label?wrap:0.f);
+  d->AddLine(ImVec2(a.x,a.y+f*.2f),ImVec2(a.x,a.y+h-f*.2f),ink,2);
+  d->AddText(ImGui::GetFont(),f,ImVec2(a.x+inset,a.y+f*.2f),ink,label,nullptr,wrap_label?wrap:0.f);
   // Short ruled end-stop, kept away from the title even when it wraps.
   if(current.decorations && text.y<=f && text.x+inset+f*3<w)
    for(int i=0;i<3;++i) d->AddLine(ImVec2(a.x+w-f*(.3f+i*.35f),a.y+h*.35f),ImVec2(a.x+w-f*(.3f+i*.35f),a.y+h*.65f),tint(.6f));

@@ -22,7 +22,7 @@ struct StatusEffects {
  }
  static float height(const json &player,float width,bool headings=true) {
   const auto effects=badges(player); const auto &style=ImGui::GetStyle();
-  const float title=headings?ImGui::GetFontSize()*1.6f+style.ItemSpacing.y:0;
+  const float title=headings?DeluxeTheme::section_height()+style.ItemSpacing.y:0;
   if(effects.empty()) return title+ImGui::GetTextLineHeight();
   width=std::max(1.f,width);
   const float pad=ImGui::GetFontSize()*.4f;
