@@ -206,10 +206,10 @@ struct Connection {
   auto errors=static_cast<SDL_IOStream*>(SDL_GetPointerProperty(SDL_GetProcessProperties(process.get()),SDL_PROP_PROCESS_STDERR_POINTER,nullptr));
   reader=std::make_unique<BackendReader>(SDL_GetProcessOutput(process.get()),errors);
   connected = true;
-  send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",1048576},{"native_inventory",true}});
+  send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",1048576},{"native_inventory",true},{"native_equipment",true}});
   return true;
  }
- bool inventory_requested=false;
+ bool inventory_requested=false, equipment_requested=false;
  void receive(json j) {
   if (j.value("kind","") == "event") {
    auto name = j.value("event","");
@@ -225,6 +225,7 @@ struct Connection {
     auto feedback=std::move(j.at("data")); feedback["received"]=double(SDL_GetTicksNS())/1e9;
     if(combat_events.size()>=64) combat_events.pop_front(); combat_events.push_back(std::move(feedback)); return;
    }
+   if(name=="equipment.open") { equipment_requested=true; return; }
    if(name=="inventory.open") { inventory_requested=true; return; }
    if(name=="activity.changed") { resting=j.at("data").value("resting",false); return; }
    if(name=="sound.play") {
@@ -558,6 +559,7 @@ struct UI {
  ImVec2 game_pos{},game_size{};
  bool quit_dialog = false;
  bool inventory_window_open=false, inventory_window_drawing=false;
+ int inventory_category=0;
  std::string inventory_selected,inventory_action,inventory_action_item;
  char inventory_filter[128]{};
  bool grid_focus = false, focus_requested = false, window_active = true;
@@ -1276,7 +1278,7 @@ struct UI {
    ImGui::EndTabBar();
   }
  }
- void items_category(int category,bool pack_window=false) {
+ void items_category(int category,bool item_window=false) {
   ImGui::SetNextItemWidth(-1); ImGui::InputTextWithHint("##items","Search items",item_filter,sizeof(item_filter));
   if(!c.state.contains("items")) return;
   std::vector<const json*> values;
@@ -1287,8 +1289,8 @@ struct UI {
    values.push_back(&o);
   }
   std::stable_sort(values.begin(),values.end(),[](const json *a,const json *b){return a->value("location","")<b->value("location","");});
-  if(pack_window && values.empty()) ImGui::TextDisabled("Your pack is empty.");
-  if(ImGui::BeginTable("items",category==1?3:2,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,pack_window?std::max(ImGui::GetTextLineHeightWithSpacing()*3,ImGui::GetContentRegionAvail().y*.42f):ImGui::GetTextLineHeightWithSpacing()*10))) {
+  if(item_window && values.empty()) ImGui::TextDisabled("%s",category==1?"Nothing equipped.":"Your pack is empty.");
+  if(ImGui::BeginTable("items",category==1?3:2,ImGuiTableFlags_Resizable|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY,ImVec2(0,item_window?std::max(ImGui::GetTextLineHeightWithSpacing()*3,ImGui::GetContentRegionAvail().y*.42f):ImGui::GetTextLineHeightWithSpacing()*10))) {
    ImGui::TableSetupColumn("Item",ImGuiTableColumnFlags_WidthStretch,1.f);
    if(category==1) ImGui::TableSetupColumn("Slot",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFontSize()*6.f);
    ImGui::TableSetupColumn("Qty",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFontSize()*2.5f);
@@ -1338,7 +1340,7 @@ struct UI {
    }
    ImGui::EndTable();
   }
-  if(!pack_window) for(const auto *item:FloorItems::collect(c.state)) values.push_back(item);
+  if(!item_window) for(const auto *item:FloorItems::collect(c.state)) values.push_back(item);
   for(const auto *item:values) if(item->value("id","")==selected) {
    const auto &o=*item;
    DeluxeTheme::section("Inspection");
@@ -1384,27 +1386,32 @@ struct UI {
  // Actions are dispatched only after closing this modal, so native quantity,
  // inscription and targeting flows can take ownership of input immediately.
  void inventory_window() {
-  if(c.inventory_requested && c.ready()) {
-   c.inventory_requested=false; inventory_window_open=true; keys.clear(); grid_focus=false;
-   inventory_filter[0]=0; ImGui::OpenPopup("Inventory");
+  if((c.inventory_requested || c.equipment_requested) && c.ready()) {
+   inventory_category=c.equipment_requested?1:0;
+   c.equipment_requested=false; c.inventory_requested=false; inventory_window_open=true; keys.clear(); grid_focus=false;
+   inventory_filter[0]=0; ImGui::OpenPopup(inventory_category==1?"Equipment":"Inventory");
   }
   if(!inventory_window_open) return;
   const auto vp=ImGui::GetMainViewport();
   ImGui::SetNextWindowPos({vp->WorkPos.x+vp->WorkSize.x*.5f,vp->WorkPos.y+vp->WorkSize.y*.5f},ImGuiCond_Appearing,{.5f,.5f});
   ImGui::SetNextWindowSize({std::min(vp->WorkSize.x-24,ImGui::GetFontSize()*52),std::min(vp->WorkSize.y-24,ImGui::GetFontSize()*34)},ImGuiCond_Appearing);
   bool keep_open=true;
-  if(ImGui::BeginPopupModal("Inventory",&keep_open,ImGuiWindowFlags_NoSavedSettings)) {
+  if(ImGui::BeginPopupModal(inventory_category==1?"Equipment":"Inventory",&keep_open,ImGuiWindowFlags_NoSavedSettings)) {
    inventory_action.clear(); inventory_action_item.clear();
+   const auto included=[&](const json &o) {
+    const auto location=o.value("location","");
+    return inventory_category==0?location=="Pack":location!="Pack" && location!="Quiver" && location!="Floor" && location!="Store" && location!="Home";
+   };
    bool selected_exists=false;
-   for(const auto &o:c.state.value("items",json::array())) if(o.value("location","")=="Pack" && o.value("id","")==inventory_selected) selected_exists=true;
+   for(const auto &o:c.state.value("items",json::array())) if(included(o) && o.value("id","")==inventory_selected) selected_exists=true;
    if(!selected_exists) {
     inventory_selected.clear();
-    for(const auto &o:c.state.value("items",json::array())) if(o.value("location","")=="Pack") { inventory_selected=o.value("id",""); break; }
+    for(const auto &o:c.state.value("items",json::array())) if(included(o)) { inventory_selected=o.value("id",""); break; }
    }
-   DeluxeTheme::section("Pack");
-   ImGui::BeginChild("Pack browser",{0,-ImGui::GetFrameHeightWithSpacing()});
+   DeluxeTheme::section(inventory_category==1?"Equipped items":"Pack");
+   ImGui::BeginChild("Item browser",{0,-ImGui::GetFrameHeightWithSpacing()});
    std::swap(selected,inventory_selected); std::swap(item_filter,inventory_filter);
-   inventory_window_drawing=true; items_category(0,true); inventory_window_drawing=false;
+   inventory_window_drawing=true; items_category(inventory_category,true); inventory_window_drawing=false;
    std::swap(selected,inventory_selected); std::swap(item_filter,inventory_filter);
    ImGui::EndChild();
    const bool close=ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape) || !keep_open || !inventory_action.empty() || !c.connected;
@@ -1665,7 +1672,7 @@ struct UI {
    c.transitions.restore_colour(scene_now);
    ImGui::ClosePopupsOverWindow(nullptr,false);
    open_character_sheet=false; quickbar.open_customize=false;
-   inventory_window_open=false; c.inventory_requested=false;
+   inventory_window_open=false; c.inventory_requested=false; c.equipment_requested=false;
    knowledge_browser.request_open=false; item_rules_panel.open=item_rules_panel.auto_open=false;
    quit_dialog=false; run_ui_reset=true;
   }

@@ -30,6 +30,7 @@ void do_cmd_message_one(void);
 void do_cmd_messages(void);
 /* Optional native inventory browser. False preserves the text UI. */
 extern bool (*inventory_browse_hook)(void);
+extern bool (*equipment_browse_hook)(void);
 void do_cmd_inven(void);
 void do_cmd_equip(void);
 void do_cmd_quiver(void);

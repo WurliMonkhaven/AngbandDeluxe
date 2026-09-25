@@ -25,7 +25,7 @@ struct EquipmentPortrait {
   ImGui::TextDisabled("%d / %d slots occupied",occupied,int(slots.size()));
   const bool diagram=width>=f*34;
   const auto origin=ImGui::GetCursorScreenPos();
-  const float height=f*23,card_w=width*.29f,card_h=f*3.3f;
+  const float height=f*28,card_w=width*.29f,card_h=f*4.1f;
   auto *draw=ImGui::GetWindowDrawList();
   // One fixed-width canvas keeps the boots, legs and torso aligned. Measuring
   // each row separately subtly shifted short rows sideways in the old figure.
@@ -56,7 +56,7 @@ struct EquipmentPortrait {
    const bool positioned=diagram && anchor;
    ImVec2 at=after; float w=width;
    if(positioned) {
-    at={origin.x+(anchor->right?width-card_w-f*.35f:f*.35f),origin.y+f*.65f+anchor->row*f*3.65f}; w=card_w;
+    at={origin.x+(anchor->right?width-card_w-f*.35f:f*.35f),origin.y+f*.65f+anchor->row*f*4.45f}; w=card_w;
     ImGui::SetCursorScreenPos(at);
    }
    const bool clicked=ImGui::InvisibleButton("Slot",{w,card_h});
@@ -74,15 +74,15 @@ struct EquipmentPortrait {
    draw->AddText({at.x+f*.55f,at.y+f*.35f},item?ink:ImGui::GetColorU32(ImGuiCol_TextDisabled),title.c_str());
    std::string name=item?item->value("label",""):"Empty";
    const float available=w-f*1.1f;
-   if(ImGui::CalcTextSize(name.c_str()).x>available) {
-    while(!name.empty() && ImGui::CalcTextSize((name+"...").c_str()).x>available) {
+   if(ImGui::CalcTextSize(name.c_str(),nullptr,false,available).y>f*2.01f) {
+    while(!name.empty() && ImGui::CalcTextSize((name+"...").c_str(),nullptr,false,available).y>f*2.01f) {
      size_t end=name.size()-1;
      while(end>0 && (static_cast<unsigned char>(name[end])&0xc0)==0x80) --end;
      name.resize(end);
     }
     name+="...";
    }
-   draw->AddText({at.x+f*.55f,at.y+f*1.65f},item?ImGui::GetColorU32(color(item->value("name_color",1))):ImGui::GetColorU32(ImGuiCol_TextDisabled),name.c_str());
+   draw->AddText(ImGui::GetFont(),f,{at.x+f*.55f,at.y+f*1.65f},item?ImGui::GetColorU32(color(item->value("name_color",1))):ImGui::GetColorU32(ImGuiCol_TextDisabled),name.c_str(),nullptr,available);
    if(hover) {
     ImGui::BeginTooltip(); ImGui::PushTextWrapPos(f*30);
     ImGui::TextUnformatted(title.c_str());

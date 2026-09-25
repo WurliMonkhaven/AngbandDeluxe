@@ -35,6 +35,7 @@ class Engine:
         self.projectile_events = []
         self.motion_events = []
         self.inventory_events = 0
+        self.equipment_events = 0
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._errors, daemon=True).start()
 
@@ -63,6 +64,8 @@ class Engine:
         if j.get("kind") == "event":
             if j["event"] == "state.changed":
                 self.state = j["data"]
+            elif j["event"] == "equipment.open":
+                self.equipment_events += 1
             elif j["event"] == "inventory.open":
                 self.inventory_events += 1
             elif j["event"] == "sound.play":
@@ -117,8 +120,8 @@ class Engine:
         return "\n".join("".join(chr(c[0] or 32) for c in row)
                          for row in self.state.get("terminal", []))
 
-    def hello(self, native_inventory=False):
-        result = self.call("hello", {"protocols": [{"major": 0, "minor": 1}], "native_inventory": native_inventory})
+    def hello(self, native_inventory=False, native_equipment=False):
+        result = self.call("hello", {"protocols": [{"major": 0, "minor": 1}], "native_inventory": native_inventory, "native_equipment": native_equipment})
         assert "result" in result, result
 
     def birth(self, name="ProtocolTest", class_index=0):
@@ -2229,6 +2232,24 @@ class BackendTests(unittest.TestCase):
         direct=cast(False); browsed=cast(True)
         self.engine=Engine(Path(self.temp.name)/'cleanup')
         self.assertEqual(direct,browsed)
+
+    def test_native_equipment_browser(self):
+        e = self.engine
+        e.hello(native_equipment=True)
+        e.birth()
+        turn = e.state['turn']
+        e.key(ord('e'))
+        self.assertEqual(e.equipment_events, 1)
+        self.assertIsNone(e.prompt)
+        self.assertEqual(e.state['readiness'], 'ready')
+        self.assertEqual(e.state['turn'], turn)
+        self.assertIn('character_sheet', e.state['player'])
+        old = e.state['revision']
+        self.assertIn('result', e.call('command.execute', {'revision':old, 'command':'core.equipment'}))
+        e.next_state(old)
+        self.assertEqual(e.equipment_events, 2)
+        self.assertEqual(e.state['turn'], turn)
+        self.assertIsNone(e.prompt)
 
     def test_native_inventory_browser(self):
         e = self.engine

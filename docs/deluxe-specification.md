@@ -1120,3 +1120,12 @@ The client opts into native_inventory in hello; interaction.inventory capability
 and inventory.open event implement the listing handoff without an outstanding item
 selection prompt. Other frontends and clients without the opt-in retain the text
 UI. Actual action selection prompts remain eligibility-filtered as before.
+
+Equipment command: Deluxe opts into `native_equipment`; the engine emits
+`equipment.open` instead of entering the terminal equipment list. The client
+opens a dedicated Equipment management window, sharing the Inventory browser
+with a Slot column, item actions, inspection and right-click quickbar assignment.
+The character sheet keeps its visual equipment overview, with two-line item
+names and full names on hover and in inspection. Opening the browser consumes
+no turn, also applies to remapped equipment commands, and leaves legacy clients
+and store interactions unchanged.

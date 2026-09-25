@@ -31,6 +31,7 @@ int main(int argc,char **argv) {
   UI ui{c}; ui.font_library=&fonts; ui.font_settings.load(fixture.value("fonts",json::object())); ui.base_style=ImGui::GetStyle();
   ui.quit_dialog=fixture.value("quit_dialog",false);
   c.inventory_requested=fixture.value("inventory_window",false);
+  c.equipment_requested=fixture.value("equipment_window",false);
   ui.quickbar_enabled=fixture.value("quickbar_enabled",false);
   c.capabilities=fixture.value("capabilities",json::object());
   if(fixture.contains("layout_preset")) ui.layout.preset(fixture["layout_preset"].get<int>());
