@@ -17,13 +17,12 @@ def package(build, output):
     stage = output / name
     stage.mkdir()  # Never overwrite a previous package or someone else's files.
     game = build / "game"
-    for file in ("AnybandUI.exe", "angband-backend.exe"):
+    for file in ("AnybandUI.exe",):
         shutil.copy2(game/file, stage/file)
     for folder in ("audio", "fonts"):
         shutil.copytree(game/folder, stage/folder)
-    for folder in ("gamedata", "customize", "help", "screens", "tiles"):
-        shutil.copytree(ROOT/"lib"/folder, stage/"data"/folder,
-                        ignore=shutil.ignore_patterns("Makefile*", "*.am", "*.in"))
+    (stage/"engines").mkdir()
+    shutil.copy2(ROOT/"engines/README.md",stage/"engines/README.md")
     # App-local release runtimes: a clean PC does not need Visual Studio.
     candidates = sorted(Path("C:/Program Files/Microsoft Visual Studio").glob(
         "*/*/VC/Redist/MSVC/[0-9]*/x64/Microsoft.VC*.CRT"))
@@ -36,10 +35,9 @@ def package(build, output):
     deps = ROOT/"build-anybandui"/"_deps"
     for source, license_name in (("sdl3-src/LICENSE.txt", "SDL3.txt"),
                          ("imgui-src/LICENSE.txt", "Dear-ImGui.txt"),
-                         ("json-src/LICENSE.MIT", "nlohmann-json.txt"),
-                         ("cjson-src/LICENSE", "cJSON.txt")):
+                         ("json-src/LICENSE.MIT", "nlohmann-json.txt")):
         shutil.copy2(deps/source, licenses/license_name)
-    shutil.copy2(ROOT/"docs"/"copying.rst", licenses/"Angband-copying.rst")
+    shutil.copy2(ROOT/"LICENSE", licenses/"AnybandUI-GPL-2.0.txt")
     shutil.copy2(deps/"sdl3-src"/"src"/"video"/"stb_image.h", licenses/"stb_image.h")
     (licenses/"Cousine-copyright.txt").write_text(
         "Cousine-Regular.ttf by Steve Matteson. Digitized data copyright (c) 2010 Google Corporation.\n"
@@ -63,7 +61,7 @@ def package(build, output):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build", type=Path, default=ROOT/"build-anybandui-native")
+    parser.add_argument("--build", type=Path, default=ROOT/"build-ui-native")
     parser.add_argument("--output", type=Path, default=ROOT/"build-anybandui"/"packages")
     args = parser.parse_args()
     package(args.build, args.output)

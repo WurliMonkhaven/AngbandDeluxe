@@ -22,6 +22,7 @@ target_link_libraries(anybandui_imgui PUBLIC SDL3::SDL3)
 add_library(anybandui_crt STATIC crt_renderer.cpp tileset.cpp)
 target_include_directories(anybandui_crt PRIVATE "${sdl3_SOURCE_DIR}/src/video")
 target_compile_features(anybandui_crt PUBLIC cxx_std_17)
+target_include_directories(anybandui_crt PUBLIC "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(anybandui_crt PUBLIC anybandui_imgui nlohmann_json::nlohmann_json)
 add_executable(anybandui-client-tests EXCLUDE_FROM_ALL test_client.cpp)
 target_compile_features(anybandui-client-tests PRIVATE cxx_std_17)
@@ -43,8 +44,7 @@ target_compile_definitions(anybandui-gpu-tests PRIVATE SDL_MAIN_HANDLED)
 target_link_libraries(anybandui-gpu-tests PRIVATE anybandui_crt)
 add_executable(AnybandUI client.cpp)
 target_compile_features(AnybandUI PRIVATE cxx_std_17)
-target_compile_definitions(AnybandUI PRIVATE ANYBANDUI_DATA_DIR="${CMAKE_SOURCE_DIR}/lib"
-    ANYBANDUI_FONT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fonts/Cousine-Regular.ttf")
+target_compile_definitions(AnybandUI PRIVATE ANYBANDUI_FONT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/fonts/Cousine-Regular.ttf")
 target_link_libraries(AnybandUI PRIVATE anybandui_crt)
 # Stage original audio beside the executable; no source-tree path at runtime.
 add_custom_target(anybandui-audio ALL

@@ -1,0 +1,2 @@
+#pragma once
+inline constexpr const char* anybandui_contract_json = R"contract(@ANYBANDUI_CONTRACT_JSON@)contract";

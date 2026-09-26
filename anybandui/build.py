@@ -9,7 +9,7 @@ root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument("--configure", action="store_true")
 parser.add_argument("--config", default="RelWithDebInfo")
-parser.add_argument("--target", nargs="+", default=["OurExecutable", "AnybandUI"])
+parser.add_argument("--target", nargs="+", default=["AnybandUI"])
 parser.add_argument("--ninja", action="store_true")
 args = parser.parse_args()
 cmake = shutil.which("cmake")
@@ -24,7 +24,7 @@ if not cmake:
 env = {(k.upper() if os.name == "nt" else k): v for k, v in os.environ.items()}
 if os.name == "nt" and "PATH" in env:
     env["Path"] = env.pop("PATH")
-build = root / ("build-anybandui-native" if args.ninja else "build-anybandui")
+build = root / ("build-ui-native" if args.ninja else "build-ui")
 extra = ["-G", "Ninja", f"-DCMAKE_BUILD_TYPE={args.config}"] if args.ninja else []
 if args.ninja and os.name == "nt":
     vs = Path(cmake).parents[7]
@@ -36,7 +36,7 @@ if args.ninja and os.name == "nt":
            for k, v in [line.split("=", 1)]}
     ninja = vs / "Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe"
     extra.append(f"-DCMAKE_MAKE_PROGRAM={ninja}")
-    for dep in ("cjson", "sdl3", "imgui", "json"):
+    for dep in ("sdl3", "imgui", "json"):
         source = root / "build-anybandui/_deps" / f"{dep}-src"
         if source.exists():
             extra.append(f"-DFETCHCONTENT_SOURCE_DIR_{dep.upper()}={source}")
@@ -44,7 +44,6 @@ cache = build / "CMakeCache.txt"
 config_changed = args.ninja and cache.exists() and f"CMAKE_BUILD_TYPE:STRING={args.config}\n" not in cache.read_text()
 if args.configure or not cache.exists() or config_changed:
     subprocess.run([cmake, "-S", str(root), "-B", str(build),
-        "-DSUPPORT_ANYBANDUI_FRONTEND=ON", "-DBUILD_ANYBANDUI_CLIENT=ON",
-        "-DSUPPORT_BORG=OFF", "-DSUPPORT_SPOIL_FRONTEND=OFF", *extra], env=env, check=True)
+        *extra], env=env, check=True)
 subprocess.run([cmake, "--build", str(build), "--config", args.config,
                 "--target", *args.target, "--parallel", "8"], env=env, check=True)

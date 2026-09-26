@@ -1,2 +1,0 @@
-TESTPROGS += \
-	z-queue/qp

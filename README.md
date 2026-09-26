@@ -1,33 +1,30 @@
 # AnybandUI
 
-A native, customizable interface for Angband 4.2.6.
+A standalone native frontend for engines implementing the
+[AnybandUI full-v1 protocol](protocol/README.md). This repository contains no
+Angband engine source, game data or bundled engine binary.
 
-## AnybandUI development build
+Build on Windows with Visual Studio C++ tools and Python:
 
-This fork now includes an experimental semantic gameplay backend and a native
-C++ SDL3/SDL_GPU client. The adapter uses existing engine hooks; gameplay
-source files are unchanged. The design is
-documented in the [AnybandUI specification](docs/anybandui-specification.md) and
-[proposed API contract](docs/anybandui-api.md). The current implementation speaks
-development protocol 0.1, not the proposed stable v1 contract.
+```powershell
+python -B anybandui/build.py --ninja
+```
 
-See [building and using AnybandUI](anybandui/README.md) for launch instructions,
-implemented features and remaining work. Windows has been exercised locally;
-macOS and Linux validation is still outstanding.
+Run `build-ui-native/game/AnybandUI.exe`. With no engine installed it opens and
+shows **No supported Anyband binaries found**. Put a supported engine package
+under `build-ui-native/game/engines/` and click **Rescan**. Use the Engine picker
+to choose between installed packages. Font/audio assets are staged automatically.
 
-<p align="center">
-  <img src="screenshots/title.png" width="425"/>
-  <img src="screenshots/game.png" width="425"/>
-</p>
+The reference engine is built separately from the `angband` repo's
+`4.2.6-anybandui` branch. It is not a build dependency of this project. Package
+installation copies compiled files and engine data, never engine source.
 
-Angband is a graphical dungeon adventure game that uses textual characters to
-represent the walls and floors of a dungeon and the inhabitants therein, in the
-vein of games like NetHack and Rogue. If you need help in-game, press `?`.
+```powershell
+python -B anybandui/readiness.py
+python -B anybandui/package_windows.py
+python -B protocol/check_engine.py PATH/engine.anyband.json
+```
 
-- **Installing Angband:** See the [Official Website](https://angband.github.io/angband/) or [compile it yourself](https://angband.readthedocs.io/en/latest/hacking/compiling.html).
-- **How to Play:** [The Angband Manual](https://angband.readthedocs.io/en/latest/)
-- **Getting Help:** [Angband Forums](https://angband.live/forums/)
-
-Enjoy!
-
--- The Angband Dev Team
+The frontend ZIP deliberately ships without an engine. UI settings and engine
+saves are kept outside the installation directory. See [the protocol](protocol/README.md)
+for package layout, version checks and save isolation. GPL-2.0; see LICENSE.

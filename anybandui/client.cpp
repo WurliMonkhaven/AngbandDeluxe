@@ -7,6 +7,8 @@
 #include "imgui_impl_sdlgpu3.h"
 #include "crt_renderer.h"
 #include "runtime_paths.h"
+#include "engine_catalog.h"
+#include <optional>
 #include "font_library.h"
 #include "tileset.h"
 #include "workspace_layout.h"
@@ -147,6 +149,8 @@ struct Connection {
  std::map<std::string,std::string> comparison_requests;
  std::map<std::string,std::string> requests;
  unsigned long next = 0;
+ std::optional<AnybandEngine::Package> expected_engine;
+ Uint64 negotiation_started=0;
  bool connected = false, negotiated = false, busy = false, close_requested = false, closed = false;
  bool pickup_travel=false, resting=false, saving=false;
  std::string loading;
@@ -219,8 +223,8 @@ struct Connection {
   if (!process) { menu_error=SDL_GetError(); notice(menu_error); return false; }
   auto errors=static_cast<SDL_IOStream*>(SDL_GetPointerProperty(SDL_GetProcessProperties(process.get()),SDL_PROP_PROCESS_STDERR_POINTER,nullptr));
   reader=std::make_unique<BackendReader>(SDL_GetProcessOutput(process.get()),errors);
-  connected = true; loading="Starting AnybandUI...";
-  send("hello",{{"protocols",json::array({{{"major",0},{"minor",1}}})},{"max_frame_bytes",4194304},{"native_inventory",true},{"native_equipment",true}});
+  connected = true; negotiation_started=SDL_GetTicksNS(); loading="Starting AnybandUI...";
+  send("hello",{{"protocols",json::array({{{"major",1},{"minor",0}}})},{"max_frame_bytes",4194304},{"native_inventory",true},{"native_equipment",true}});
   return true;
  }
  bool inventory_requested=false, equipment_requested=false;
@@ -363,6 +367,12 @@ struct Connection {
   if(method=="birth.action") menu_error.clear();
   const auto &result = j.at("result");
   if (method == "hello") {
+   const auto contract_error=AnybandEngine::validate_hello(result,expected_engine?&*expected_engine:nullptr);
+   if(!contract_error.empty()) {
+    menu_error=contract_error; loading.clear(); negotiated=connected=false;
+    if(process) SDL_KillProcess(process.get(),true);
+    return;
+   }
    capabilities=result.value("capabilities",json::object());
    negotiated = true;
    if(!replay_save.empty()) { send("session.replay",{{"save",replay_save}}); busy=true; }
@@ -403,14 +413,23 @@ struct Connection {
  }
  void poll() {
   if (!connected) return;
+  if(!negotiated && SDL_GetTicksNS()-negotiation_started>10000000000ull) {
+   menu_error="Engine compatibility handshake timed out."; connected=false; loading.clear();
+   if(process) SDL_KillProcess(process.get(),true);
+   return;
+  }
   int exit_code=0;
   const bool exited=SDL_WaitProcess(process.get(),false,&exit_code);
   auto batch=reader->take();
   diagnostic+=batch.diagnostic;
   if(diagnostic.size()>65536) diagnostic.erase(0,diagnostic.size()-65536);
-  try { for(auto &frame:batch.frames) receive(std::move(frame)); }
+  try { for(auto &frame:batch.frames) {
+   if(!negotiated && frame.value("kind","")=="event") throw std::runtime_error("Engine sent state before compatibility was verified.");
+   receive(std::move(frame));
+   if(!connected) break;
+  } }
   catch(const std::exception &e) { batch.error=e.what(); }
-  if(!batch.error.empty()) { notice("Invalid backend message: "+batch.error); connected=false; saving=false; loading.clear(); return; }
+  if(!batch.error.empty()) { menu_error="Invalid engine message: "+batch.error; notice(menu_error); connected=false; negotiated=false; saving=false; loading.clear(); if(process) SDL_KillProcess(process.get(),true); return; }
   if(!exited) flush_input();
   // EOF must be drained by the reader before interpreting the final game state.
   else if(batch.finished) process_stopped(exit_code);
@@ -533,6 +552,10 @@ static void properties(const json &value) {
 #include "run_history.h"
 struct UI {
  Connection &c;
+ AnybandEngine::Catalog engines;
+ std::string engine_folder,engine_user;
+ int selected_engine=0,engine_switch=-1;
+ bool rescan_engines=false;
  RunHistory run_history;
  RunJournal run_journal;
  CharacterSelect character_select;
@@ -1076,6 +1099,26 @@ struct UI {
   else if(return_from_prompt && c.pending_prompt.empty()) { return_from_prompt=false; focus_game(); }
  }
  void launcher() {
+  if(!engines.packages.empty()) {
+   if(ImGui::BeginCombo("Engine",engines.packages[size_t(selected_engine)].name.c_str())) {
+    for(size_t i=0;i<engines.packages.size();++i) {
+     const auto& engine=engines.packages[i];
+     if(ImGui::Selectable((engine.name+" "+engine.version+"##"+std::to_string(i)).c_str(),int(i)==selected_engine)) engine_switch=int(i);
+    }
+    ImGui::EndCombo();
+   }
+   ImGui::SameLine(); if(ImGui::SmallButton("Rescan engines")) rescan_engines=true;
+  }
+  if(!c.connected && !c.negotiated) {
+   ImGui::Spacing();
+   ImGui::TextUnformatted("No supported Anyband binaries found");
+   if(!c.menu_error.empty()) ImGui::TextWrapped("%s",c.menu_error.c_str());
+   ImGui::TextDisabled("Add a supported engine package to the engines folder.");
+   ImGui::TextWrapped("%s",engine_folder.c_str());
+   if(ImGui::Button("Rescan")) rescan_engines=true;
+   for(const auto& error:engines.errors) ImGui::TextWrapped("%s",error.c_str());
+   return;
+  }
   if(replay_prompt && c.negotiated && !c.busy) { replay_prompt=false; ImGui::OpenPopup("New character"); }
   const int choice=character_select.draw(c.saves,c.negotiated && !c.busy);
   bool rename_clicked=choice==2,delete_clicked=choice==3;
@@ -1090,7 +1133,7 @@ struct UI {
   }
   if(choice==4) { c.menu_error.clear(); ImGui::OpenPopup("New character"); }
   if(choice==5) {
-   run_history.directory=fs::path(settings_path).parent_path()/"run-history";
+   run_history.directory=(engine_user.empty()?fs::path(settings_path).parent_path():fs::path(engine_user))/"run-history";
    run_history.load(); run_history.browsing=true; run_history.current=nullptr;
   }
   if(rename_clicked) ImGui::OpenPopup("Rename save");
@@ -2160,18 +2203,19 @@ struct UI {
 #ifndef ANYBANDUI_CLIENT_TEST
 int main(int argc,char **argv) {
  const char *base=SDL_GetBasePath();
- auto paths=RuntimePaths::discover(base?base:".",ANYBANDUI_DATA_DIR,ANYBANDUI_FONT_FILE);
+ auto paths=RuntimePaths::discover(base?base:".");
  std::string user_override;
  bool check_assets=false;
  for(int i=1;i<argc;++i) {
   const std::string arg=argv[i];
   if(arg=="--check-assets") { check_assets=true; continue; }
-  if((arg!="--backend" && arg!="--data-dir" && arg!="--user-dir") || i+1>=argc) {
-   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"AnybandUI","Expected --backend PATH, --data-dir PATH, or --user-dir PATH.",nullptr); return 2;
+  if((arg!="--backend" && arg!="--data-dir" && arg!="--user-dir" && arg!="--engines-dir") || i+1>=argc) {
+   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"AnybandUI","Expected --backend PATH, --data-dir PATH, --engines-dir PATH, or --user-dir PATH.",nullptr); return 2;
   }
   const std::string value=argv[++i];
   if(arg=="--backend") paths.backend=value;
   else if(arg=="--data-dir") paths.data=value;
+  else if(arg=="--engines-dir") paths.engines=value;
   else user_override=value;
  }
  const auto missing=paths.missing();
@@ -2181,8 +2225,8 @@ int main(int argc,char **argv) {
   return missing.empty()?0:1;
  }
  // Report missing required assets before font loading can assert or the engine exits.
- if(!fs::is_regular_file(paths.font) || !fs::is_regular_file(paths.backend) || !fs::is_regular_file(paths.data/"gamedata"/"constants.txt")) {
-  std::string message="Some game files are missing. Extract the entire archive before launching.\n";
+ if(!fs::is_regular_file(paths.font)) {
+  std::string message="Some AnybandUI assets are missing. Extract the entire archive before launching.\n";
   for(const auto &path:missing) message+="\n"+path;
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"AnybandUI",message.c_str(),nullptr); return 1;
  }
@@ -2214,8 +2258,40 @@ int main(int argc,char **argv) {
  ui.base_style=ImGui::GetStyle();
  char *pref=SDL_GetPrefPath("AnybandUI","AnybandUI");
  std::string user=user_override.empty()?(pref?std::string(pref):std::string("anybandui-user")):user_override; SDL_free(pref);
- const std::string backend=paths.backend.string(),data=paths.data.string();
- ui.tiles.device=gpu; ui.tiles.directory=paths.data/"tiles";
+ std::string backend,data,engine_user;
+ ui.tiles.device=gpu;
+ ui.engine_folder=paths.engines.string();
+ auto discover_engines=[&] {
+  ui.engines=AnybandEngine::discover(paths.engines);
+  if(!paths.backend.empty()) {
+   ui.engines={};
+   try {
+    auto package=AnybandEngine::load(fs::absolute(paths.backend).parent_path()/"engine.anyband.json");
+    if(fs::canonical(paths.backend)!=package.executable) throw std::runtime_error("Explicit backend does not match its manifest.");
+    if(!paths.data.empty()) package.data=fs::canonical(paths.data);
+    ui.engines.packages.push_back(std::move(package));
+   } catch(const std::exception& e) {ui.engines.errors.push_back(e.what());}
+  }
+ };
+ discover_engines();
+ auto select_engine=[&] {
+  if(ui.engines.packages.empty()) return;
+  ui.selected_engine=std::clamp(ui.selected_engine,0,int(ui.engines.packages.size())-1);
+  const auto& package=ui.engines.packages[size_t(ui.selected_engine)];
+  backend=package.executable.string(); data=package.data.string();
+  engine_user=(fs::path(user)/"engines"/package.id/package.save_compatibility).string();
+  fs::create_directories(engine_user);
+  // Copy legacy saves once without replacing either the originals or newer saves.
+  if(package.id=="org.angband.angband" && package.save_compatibility=="angband-4.2.6" && !fs::exists(fs::path(engine_user)/"legacy-saves-imported") && fs::is_directory(fs::path(user)/"save")) {
+   fs::create_directories(fs::path(engine_user)/"save");
+   for(const auto& item:fs::directory_iterator(fs::path(user)/"save")) if(item.is_regular_file())
+    fs::copy_file(item.path(),fs::path(engine_user)/"save"/item.path().filename(),fs::copy_options::skip_existing);
+   std::ofstream(fs::path(engine_user)/"legacy-saves-imported") << "Imported without replacing existing saves.\n";
+  }
+  connection.expected_engine=package; ui.engine_user=engine_user;
+  ui.tiles.shutdown(); ui.tiles.device=gpu; ui.tiles.directory=package.data/"tiles";
+  connection.start(backend,data,engine_user);
+ };
  try { fs::create_directories(user); }
  catch(const fs::filesystem_error &error) {
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"AnybandUI",("Cannot open the save/settings folder: "+std::string(error.what())).c_str(),window); return 1;
@@ -2227,7 +2303,7 @@ int main(int argc,char **argv) {
  ui.audio.configure(ui.audio_settings,true);
  if(ui.fullscreen && !SDL_SetWindowFullscreen(window,true)) { ui.fullscreen=false; connection.notice(std::string("Fullscreen unavailable: ")+SDL_GetError()); }
  std::string ini=(fs::path(user)/"layout.ini").string(); io.IniFilename=ini.c_str();
- connection.start(backend,data,user);
+ select_engine();
  SDL_StartTextInput(window);
  HealthGlitch health_glitch;
  auto poll_backend=[&] {
@@ -2239,7 +2315,7 @@ int main(int argc,char **argv) {
   for(const auto &cue:connection.sound_cues) ui.audio.play(cue);
   connection.sound_cues.clear();
   if(!connection.run_report.is_null() && !ui.run_report_started) {
-   ui.run_history.directory=fs::path(ui.settings_path).parent_path()/"run-history";
+   ui.run_history.directory=fs::path(ui.engine_user)/"run-history";
    ui.run_history.begin(connection.run_report);
    ui.run_report_started=true;
    ui.keys.clear(); ui.grid_focus=false;
@@ -2252,6 +2328,14 @@ int main(int argc,char **argv) {
   // wait produces stale, uneven animation times even when GPU work is fast.
   if(!SDL_WaitForGPUSwapchain(gpu,window)) break;
   poll_backend();
+  if(ui.rescan_engines || ui.engine_switch>=0) {
+   if(connection.process) SDL_KillProcess(connection.process.get(),true);
+   connection.close_process(); connection=Connection{};
+   if(ui.rescan_engines) {discover_engines();ui.rescan_engines=false;ui.selected_engine=0;}
+   if(ui.engine_switch>=0) {ui.selected_engine=ui.engine_switch;ui.engine_switch=-1;}
+   ui.character_select.selected.clear(); ui.pending_replay.clear(); ui.run_report_started=false;
+   ui.birth_panel.initialized=false; ui.keys.clear(); select_engine();
+  }
   if(ui.quit_after_run && !connection.connected) { connection.closed=true; break; }
   if(connection.restart_ready && connection.run_report.is_null()) {
    ui.audio.clear();
@@ -2268,7 +2352,7 @@ int main(int argc,char **argv) {
    ui.item_filter[0]=ui.command_filter[0]=ui.message_filter[0]=0;
    ui.message_search_open=false;
    ui.quit_dialog=false;
-   connection.start(backend,data,user);
+   select_engine();
   }
   ui.prepare_frame(window); SDL_Event e;
   while(SDL_PollEvent(&e)) {

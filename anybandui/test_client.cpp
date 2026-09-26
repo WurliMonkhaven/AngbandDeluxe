@@ -1139,7 +1139,36 @@ int main(int argc,char **argv) {
   }
   Connection replay; replay.connected=true; replay.replay_save="Hero";
   auto hello_id=replay.send("hello");
-  replay.receive({{"id",hello_id},{"result",{{"capabilities",{{"session.replay",1},{"interaction.birth",1}}}}}});
+  const json valid_hello={{"protocol",AnybandEngine::contract()["protocol"]},{"profile","full-v1"},
+   {"max_frame_bytes",4194304},{"engine",{{"id","test.engine"},{"version","1"},{"save_compatibility","test-1"}}},
+   {"capabilities",AnybandEngine::contract()["required_capabilities"]}};
+  replay.receive({{"id",hello_id},{"result",valid_hello}});
+  check(AnybandEngine::validate_hello(valid_hello).empty(),"Full contract must validate");
+  auto missing_cap=valid_hello; missing_cap["capabilities"].erase("presentation.camera");
+  check(!AnybandEngine::validate_hello(missing_cap).empty(),"Missing full-integration features must reject the engine");
+  auto old_protocol=valid_hello; old_protocol["protocol"]={{"major",0},{"minor",1}};
+  check(!AnybandEngine::validate_hello(old_protocol).empty(),"Legacy protocol must not masquerade as compatible");
+  Connection rejected; rejected.connected=true; auto reject_id=rejected.send("hello");
+  rejected.receive({{"id",reject_id},{"result",missing_cap}});
+  check(!rejected.connected && !rejected.negotiated && !rejected.menu_error.empty(),"Failed handshake must prevent character launch");
+  const auto engine_test=fs::path(argv[1]).parent_path()/"engine-discovery-test";
+  fs::create_directories(engine_test);
+  check(AnybandEngine::discover(engine_test).packages.empty(),"No engines must be a normal state");
+  fs::create_directories(engine_test/"sample"/"data");
+  {std::ofstream file(engine_test/"sample"/"engine.bin");file<<"test";}
+  json manifest={{"manifest_version",1},{"profile","full-v1"},{"protocol",AnybandEngine::contract()["protocol"]},
+   {"engine",{{"id","test.engine"},{"name","Test"},{"version","1"},{"save_compatibility","test-1"}}},
+   {"executable","engine.bin"},{"data_directory","data"}};
+  {std::ofstream file(engine_test/"sample"/"engine.anyband.json");file<<manifest;}
+  auto discovered=AnybandEngine::discover(engine_test);
+  check(discovered.packages.size()==1 && discovered.errors.empty(),"Valid package must be discovered");
+  check(AnybandEngine::validate_hello(valid_hello,&discovered.packages[0]).empty(),"Package identity must match handshake");
+  manifest["executable"]="../../outside.exe";
+  {std::ofstream file(engine_test/"sample"/"engine.anyband.json");file<<manifest;}
+  discovered=AnybandEngine::discover(engine_test);
+  check(discovered.packages.empty() && !discovered.errors.empty(),"Escaping manifest path must reject package");
+  fs::remove(engine_test/"sample"/"engine.anyband.json");fs::remove(engine_test/"sample"/"engine.bin");
+  fs::remove(engine_test/"sample"/"data");fs::remove(engine_test/"sample");fs::remove(engine_test);
   bool replay_sent=false;
   for(const auto &request:replay.requests) {
    check(request.second!="saves.list","Direct replay should bypass the character selector");

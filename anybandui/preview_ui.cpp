@@ -22,7 +22,7 @@ int main(int argc,char **argv) {
   SDL_GPUTransferBufferCreateInfo buf{}; buf.usage=SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD; buf.size=w*h*4;
   auto *download=SDL_CreateGPUTransferBuffer(gpu,&buf);
   if(!target || !download) throw std::runtime_error(SDL_GetError());
-  Connection c; c.connected=c.negotiated=true; c.saves=fixture.value("saves",json::array()); c.catalog=fixture.value("catalog",json::object()); c.commands=fixture.value("commands",json::array());
+  Connection c; c.connected=c.negotiated=!fixture.value("no_engine",false); c.saves=fixture.value("saves",json::array()); c.catalog=fixture.value("catalog",json::object()); c.commands=fixture.value("commands",json::array());
   if(fixture.contains("previous_state")) { c.inventory_changes.update(fixture["previous_state"]); c.level_feedback.update(fixture["previous_state"],double(SDL_GetTicksNS())/1e9); }
   c.receive({{"kind","event"},{"event","state.changed"},{"data",fixture.at("state")}});
   if(fixture.contains("level_elapsed")) c.level_feedback.started=double(SDL_GetTicksNS())/1e9-fixture["level_elapsed"].get<double>();
